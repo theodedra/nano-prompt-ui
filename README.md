@@ -1,3 +1,5 @@
+![Nano Prompt UI — popup](screenshot.png)
+
 Nano Prompt UI — Chrome MV3 (On-Device AI, Local-Only)
 
 TL;DR: A Chrome extension that runs entirely on-device using Chrome’s Language Model (Gemini Nano) API. No servers, no network calls. This README covers install steps and enabling the on-device model.
