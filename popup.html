@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Nano Prompt</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <!-- App Bar with title, status chip, and language selector -->
+  <div class="appbar">
+    <div class="title">Nano Prompt</div>
+    <div id="avail" class="chip" aria-live="polite" role="status">idle</div>
+    <select id="lang" class="language-select" aria-label="Select output language">
+      <option value="en">EN</option>
+      <option value="es">ES</option>
+      <option value="ja">JA</option>
+    </select>
+  </div>
+
+  <!-- Main content area -->
+  <div class="wrap">
+    <div class="field">
+      <textarea id="in" placeholder="Type a prompt…" autofocus></textarea>
+    </div>
+
+    <!-- Indeterminate progress bar (shown when busy) -->
+    <div id="prog" class="progress" aria-hidden="true">
+      <div class="bar"></div>
+    </div>
+
+    <!-- Action buttons -->
+    <div class="row">
+      <button id="ask" class="filled">Ask</button>
+      <button id="sum" class="tonal">Summarize tab</button>
+      <button id="new" class="tonal" aria-label="Start a new session">New</button>
+    </div>
+
+    <!-- Chat log card -->
+    <div class="card">
+      <div class="muted log-header">Chat</div>
+      <div id="log" class="log" role="log" aria-live="polite" aria-atomic="false">
+        <!-- messages will be dynamically inserted here -->
+      </div>
+      <div class="copybar">
+        <button id="copy" class="copybtn" disabled>Copy chat</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main script entry point (ES module) -->
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

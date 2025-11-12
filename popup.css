@@ -1,0 +1,378 @@
+/* ===== Nano Prompt UI Styles ===== */
+
+/* ===== CSS Variables (Design Tokens) ===== */
+:root {
+  --bg: #0b0b0d;
+  --on-bg: #e7e7ea;
+  --surface: #121214;
+  --surface-2: #16161a;
+  --surface-3: #1a1a1e;
+  --surface-hover: #1e1e22;
+  --outline: transparent;
+
+  --primary: #2a2a30;
+  --primary-hover: #2e2e34;
+  --on-primary: #f2f2f5;
+
+  --tonal: #1f1f25;
+  --tonal-hover: #232329;
+  --on-tonal: #e7e7ea;
+
+  --elev: 0 6px 24px rgba(0,0,0,.35);
+  --rad: 14px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f4f5f7;
+    --on-bg: #1a1b1e;
+    --surface: #ffffff;
+    --surface-2: #f9f9fb;
+    --surface-3: #f5f6f8;
+    --surface-hover: #f1f2f4;
+    --outline: transparent;
+    --primary: #e8e9ec;
+    --primary-hover: #e4e5e8;
+    --on-primary: #111113;
+    --tonal: #f0f1f3;
+    --tonal-hover: #eceded;
+    --on-tonal: #16171a;
+    --elev: 0 4px 18px rgba(0,0,0,.08);
+  }
+}
+
+/* ===== Base Layout ===== */
+html, body {
+  background: var(--bg);
+  color: var(--on-bg);
+  margin: 0;
+  font: 14px system-ui, Segoe UI, Roboto, Inter, sans-serif;
+  min-width: 380px;
+}
+
+/* ===== SCROLLBAR RULES - ONLY CHANGE FROM ORIGINAL ===== */
+/* Hide scrollbars everywhere by default */
+*::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/* Show scrollbars ONLY for textarea - VISIBLE */
+textarea::-webkit-scrollbar {
+  width: 8px !important;
+  display: block !important;
+}
+
+textarea::-webkit-scrollbar-track {
+  background: var(--surface-2);
+  border-radius: 4px;
+}
+
+textarea::-webkit-scrollbar-thumb {
+  background: #3a3a42;
+  border-radius: 4px;
+}
+
+textarea::-webkit-scrollbar-thumb:hover {
+  background: #4a4a52;
+}
+
+/* Show scrollbars ONLY for chat log - VISIBLE */
+.log::-webkit-scrollbar {
+  width: 8px !important;
+  display: block !important;
+}
+
+.log::-webkit-scrollbar-track {
+  background: var(--surface);
+  border-radius: 4px;
+}
+
+.log::-webkit-scrollbar-thumb {
+  background: #3a3a42;
+  border-radius: 4px;
+}
+
+.log::-webkit-scrollbar-thumb:hover {
+  background: #4a4a52;
+}
+
+/* ===== App Bar ===== */
+.appbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  box-shadow: var(--elev);
+}
+
+.title {
+  font-weight: 700;
+  letter-spacing: .2px;
+}
+
+.chip {
+  margin-left: auto;
+  background: var(--tonal);
+  color: var(--on-tonal);
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.language-select {
+  margin-left: 8px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: var(--surface-3);
+  color: var(--on-bg);
+  border: none;
+  outline: none;
+}
+
+.language-select:hover {
+  background: var(--surface-hover);
+}
+
+/* ===== Main Content ===== */
+.wrap {
+  padding: 12px;
+}
+
+/* ===== Input Field ===== */
+.field {
+  background: var(--surface-2);
+  border: none;
+  border-radius: var(--rad);
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.field:focus-within {
+  background: var(--surface-3);
+  box-shadow: 0 0 0 2px rgba(90,90,98,.25);
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+  background: transparent;
+  color: var(--on-bg);
+  border: 0;
+  border-radius: calc(var(--rad) - 4px);
+  outline: none;
+  resize: none;
+  overflow-y: auto; /* SCROLL WHEN NEEDED */
+  line-height: 1.35;
+}
+
+/* ===== Button Row ===== */
+.row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+/* ===== Buttons - ORIGINAL SIZES ===== */
+button {
+  flex: 1;
+  padding: 10px; /* ORIGINAL SIZE */
+  border-radius: 12px;
+  border: none;
+  background: var(--surface-2);
+  color: var(--on-bg);
+  cursor: pointer;
+  transition: transform .05s ease, opacity .2s, background .15s ease;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.filled {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.tonal {
+  background: var(--tonal);
+  color: var(--on-tonal);
+}
+
+button[disabled] {
+  opacity: .65;
+  cursor: default;
+}
+
+button:hover {
+  background: var(--surface-hover);
+}
+
+.filled:hover {
+  background: var(--primary-hover);
+}
+
+.tonal:hover {
+  background: var(--tonal-hover);
+}
+
+/* ===== Progress Bar ===== */
+.progress {
+  height: 4px;
+  background: transparent;
+  border-radius: 999px;
+  margin: 10px 0;
+  overflow: hidden;
+  display: none;
+}
+
+.progress[data-show="1"] {
+  display: block;
+}
+
+.bar {
+  height: 100%;
+  width: 35%;
+  background: linear-gradient(90deg, #2f2f35, #4b4b55);
+  border-radius: 999px;
+  animation: indet 1.2s infinite;
+}
+
+@keyframes indet {
+  0% { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    animation: none;
+    width: 100%;
+  }
+}
+
+/* ===== Card Layout ===== */
+.card {
+  background: var(--surface-2);
+  border: none;
+  border-radius: var(--rad);
+  padding: 12px;
+  box-shadow: var(--elev);
+  margin-top: 10px;
+}
+
+.muted {
+  opacity: .75;
+}
+
+pre {
+  white-space: pre-wrap;
+  margin: 0;
+}
+
+/* ===== Copy Button Bar ===== */
+.copybar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+.copybtn {
+  background: var(--tonal);
+  color: var(--on-tonal);
+  border: none;
+  border-radius: 999px;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.copybtn[disabled] {
+  opacity: .5;
+  cursor: default;
+}
+
+.copybtn:hover {
+  background: var(--tonal-hover);
+}
+
+/* ===== Chat Log - ORIGINAL SIZE ===== */
+.log {
+  max-height: 260px; /* ORIGINAL HEIGHT */
+  overflow-y: auto; /* SCROLL WHEN NEEDED */
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--surface-3);
+  border: none;
+  border-radius: var(--rad);
+  padding: 8px;
+}
+
+.msg {
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: none;
+  background: var(--surface);
+  white-space: pre-wrap;
+  position: relative;
+}
+
+.msg.user {
+  align-self: flex-end;
+  background: var(--tonal);
+  color: var(--on-tonal);
+}
+
+.msg.ai {
+  align-self: flex-start;
+}
+
+.msg time {
+  display: block;
+  opacity: .55;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+/* Per-bubble copy button */
+.msg .copy1 {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  opacity: 0;
+  transition: opacity .15s ease;
+  font-size: 11px;
+  line-height: 1;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--on-bg);
+  cursor: pointer;
+}
+
+.msg.user .copy1 {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+.msg:hover .copy1 {
+  opacity: 1;
+}
+
+.msg:hover {
+  background: var(--surface-hover);
+}
+
+.msg.user:hover {
+  background: var(--tonal-hover);
+}
+
+.msg .copy1:hover {
+  background: var(--surface-hover);
+}
+
+.msg.user .copy1:hover {
+  background: var(--primary-hover);
+}
