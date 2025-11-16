@@ -1,4 +1,4 @@
-![Nano Prompt UI — popup](Screenshot.png)
+![Nano Prompt UI — popup](Screenshot-v0.2.0.png)
 
 Nano Prompt UI — Chrome MV3 (On-Device AI, Local-Only)
 
