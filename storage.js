@@ -1,64 +1,221 @@
-// storage.js - State persistence and retrieval using chrome.storage
+// storage.js - Robust session persistence, sync metadata, and UI templates
 
-const STORAGE_KEY = 'nanoPromptUI.chat.v2';
+import { nanoid } from './utils.js';
+
+const LOCAL_KEY = 'nanoPromptUI.sessions.v3';
+const SYNC_KEY = 'nanoPromptUI.sessionMeta.v1';
 
 /**
- * In-memory application state for the session.
- * - history: chat messages (array of {role, text, ts})
+ * Default prompt templates surfaced in the UI.
+ */
+export const DEFAULT_TEMPLATES = [
+  { id: 'blank', label: 'Templates…', text: '' },
+  { id: 'translator', label: 'Translate text', text: 'Translate the following text to English and explain any idioms:' },
+  { id: 'proof', label: 'Proofread', text: 'You are a meticulous proofreader. Improve grammar and clarity for this text:' },
+  { id: 'summary', label: 'Summarize', text: 'Summarize the following content in concise bullet points:' },
+  { id: 'qa', label: 'Ask expert', text: 'You are an expert researcher. Answer thoroughly:' }
+];
+
+/**
+ * Global application state that survives module boundaries while the popup is open.
  */
 export const appState = {
-  history: []  // chat history: [{ role: "user" | "ai", text: string, ts: number }, ...]
+  sessions: {},               // { [id]: { id, title, tags, createdAt, updatedAt, messages: [] } }
+  sessionOrder: [],           // Maintains ordering for tabs/sidebar
+  currentSessionId: null,
+  language: 'en',
+  templates: DEFAULT_TEMPLATES.slice(),
+  attachments: [],            // Pending image/audio attachments for the next prompt
+  contextDraft: '',           // Editable context override text
+  downloading: null,          // { status: 'downloading', progress: 0-1 }
+  availability: 'unknown',
+  settings: {
+    temperature: 0.2,
+    topK: 40,
+    systemPrompt: 'You are a helpful, concise assistant.',
+    tone: 'balanced'
+  },
+  model: null
 };
 
-/**
- * Save the current session state (history and selected language) to Chrome local storage.
- */
-export async function saveState(selectedLanguage) {
-  try {
-    await chrome.storage.local.set({
-      [STORAGE_KEY]: {
-        history: appState.history,
-        selectedLanguage
-      }
-    });
-  } catch (e) {
-    console.warn('Failed to save state:', e);
+function createEmptySession(title = 'New chat') {
+  return {
+    id: nanoid(),
+    title,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    tags: [],
+    rating: null,
+    messages: []
+  };
+}
+
+function ensureDefaultSession() {
+  if (!appState.currentSessionId || !appState.sessions[appState.currentSessionId]) {
+    const session = createEmptySession();
+    appState.sessions[session.id] = session;
+    appState.sessionOrder = [session.id];
+    appState.currentSessionId = session.id;
   }
 }
 
-/**
- * Load the saved session state from Chrome local storage.
- * @returns {Promise<{ history: Array, selectedLanguage: string|null }>} The loaded history and language (if any).
- */
+export function getCurrentSession() {
+  ensureDefaultSession();
+  return appState.sessions[appState.currentSessionId];
+}
+
+export function setCurrentSession(sessionId) {
+  if (!appState.sessions[sessionId]) return;
+  appState.currentSessionId = sessionId;
+  const idx = appState.sessionOrder.indexOf(sessionId);
+  if (idx > 0) {
+    appState.sessionOrder.splice(idx, 1);
+    appState.sessionOrder.unshift(sessionId);
+  }
+}
+
+export function createSessionFrom(baseSessionId = null) {
+  const base = baseSessionId ? appState.sessions[baseSessionId] : null;
+  const session = createEmptySession(base ? `${base.title} copy` : 'New chat');
+  if (base) {
+    session.messages = base.messages.slice();
+    session.tags = base.tags.slice();
+  }
+  appState.sessions[session.id] = session;
+  appState.sessionOrder.unshift(session.id);
+  appState.currentSessionId = session.id;
+  return session;
+}
+
+export function deleteSession(sessionId) {
+  if (!appState.sessions[sessionId]) return;
+  delete appState.sessions[sessionId];
+  appState.sessionOrder = appState.sessionOrder.filter(id => id !== sessionId);
+  if (appState.currentSessionId === sessionId) {
+    appState.currentSessionId = appState.sessionOrder[0] || null;
+  }
+  ensureDefaultSession();
+}
+
+export function upsertMessage(sessionId, message, replaceIndex = null) {
+  const session = appState.sessions[sessionId];
+  if (!session) return;
+  if (replaceIndex === null) {
+    session.messages.push(message);
+  } else {
+    session.messages[replaceIndex] = message;
+  }
+  session.updatedAt = Date.now();
+}
+
+export function updateMessage(sessionId, messageIndex, patch) {
+  const session = appState.sessions[sessionId];
+  if (!session || !session.messages[messageIndex]) return;
+  session.messages[messageIndex] = { ...session.messages[messageIndex], ...patch };
+  session.updatedAt = Date.now();
+}
+
+export async function saveState() {
+  ensureDefaultSession();
+  const payload = {
+    sessions: appState.sessions,
+    sessionOrder: appState.sessionOrder,
+    currentSessionId: appState.currentSessionId,
+    language: appState.language,
+    templates: appState.templates,
+    settings: appState.settings,
+    contextDraft: appState.contextDraft
+  };
+  try {
+    await chrome.storage.local.set({ [LOCAL_KEY]: payload });
+  } catch (e) {
+    console.warn('Failed to persist local state', e);
+  }
+  try {
+    const meta = appState.sessionOrder.map(id => {
+      const s = appState.sessions[id];
+      return s ? { id, title: s.title, updatedAt: s.updatedAt } : null;
+    }).filter(Boolean);
+    await chrome.storage.sync.set({ [SYNC_KEY]: meta.slice(0, 20) });
+  } catch (e) {
+    console.warn('Failed to sync metadata', e);
+  }
+}
+
 export async function loadState() {
   try {
-    const data = (await chrome.storage.local.get(STORAGE_KEY))[STORAGE_KEY];
-    let loadedHistory = [];
-    let loadedLang = null;
-    if (data) {
-      if (Array.isArray(data.history)) {
-        loadedHistory = data.history;
-      }
-      if (data.selectedLanguage) {
-        loadedLang = data.selectedLanguage;
-      }
+    const stored = (await chrome.storage.local.get(LOCAL_KEY))[LOCAL_KEY];
+    if (stored) {
+      Object.assign(appState, {
+        sessions: stored.sessions || {},
+        sessionOrder: stored.sessionOrder || [],
+        currentSessionId: stored.currentSessionId || null,
+        language: stored.language || 'en',
+        templates: stored.templates?.length ? stored.templates : DEFAULT_TEMPLATES.slice(),
+        settings: { ...appState.settings, ...(stored.settings || {}) },
+        contextDraft: stored.contextDraft || ''
+      });
     }
-    // Restore in-memory state
-    appState.history = loadedHistory;
-    return { history: loadedHistory, selectedLanguage: loadedLang };
   } catch (e) {
-    console.warn('Failed to load state:', e);
-    return { history: [], selectedLanguage: null };
+    console.warn('Failed to load state', e);
+  }
+  ensureDefaultSession();
+  return {
+    sessions: appState.sessions,
+    order: appState.sessionOrder,
+    current: appState.currentSessionId,
+    language: appState.language,
+    templates: appState.templates,
+    settings: appState.settings,
+    contextDraft: appState.contextDraft
+  };
+}
+
+export function setLanguage(langCode) {
+  appState.language = langCode;
+}
+
+export function updateContextDraft(text) {
+  appState.contextDraft = text;
+}
+
+export function addAttachment(entry) {
+  appState.attachments.push(entry);
+}
+
+export function clearAttachments() {
+  appState.attachments = [];
+}
+
+export function getAttachments() {
+  return appState.attachments;
+}
+
+export function updateSettings(patch) {
+  appState.settings = { ...appState.settings, ...patch };
+}
+
+export function renameSession(sessionId, title) {
+  if (!appState.sessions[sessionId]) return;
+  appState.sessions[sessionId].title = title;
+  appState.sessions[sessionId].updatedAt = Date.now();
+}
+
+export function tagSession(sessionId, tags = []) {
+  if (!appState.sessions[sessionId]) return;
+  appState.sessions[sessionId].tags = tags;
+}
+
+export function setSessionRating(sessionId, messageIndex, rating) {
+  const session = appState.sessions[sessionId];
+  if (!session) return;
+  if (session.messages[messageIndex]) {
+    session.messages[messageIndex].rating = rating;
   }
 }
 
-/**
- * Clear the saved session state (e.g., on new session).
- */
-export async function clearState() {
-  try {
-    await chrome.storage.local.remove(STORAGE_KEY);
-  } catch (e) {
-    console.warn('Failed to clear state:', e);
-  }
+export function summarizeSession(sessionId) {
+  const session = appState.sessions[sessionId];
+  if (!session) return '';
+  return session.messages.map(m => `${m.role === 'user' ? 'User' : 'Nano'}: ${m.text}`).join('\n\n');
 }

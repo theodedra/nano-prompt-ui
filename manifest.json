@@ -1,15 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Nano Prompt UI",
-  "version": "0.1.6",
+  "version": "0.2.0",
   "description": "Popup UI for Chrome's on-device Prompt API (Gemini Nano).",
   "permissions": [
     "storage",
     "scripting",
     "activeTab",
-    "clipboardWrite"
-  ],
-  "optional_permissions": [
+    "tabs",
+    "clipboardWrite",
     "geolocation"
   ],
   "action": {

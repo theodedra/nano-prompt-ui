@@ -1,120 +1,259 @@
-// ui.js - User Interface updates and rendering
+import { $, formatTime, formatDate, markdownToHtml } from './utils.js';
+import {
+  appState,
+  getCurrentSession,
+  setCurrentSession,
+  summarizeSession
+} from './storage.js';
 
-import { $, formatTime } from './utils.js';
+let els = {};
+let sessionFilter = '';
 
-/* DOM Elements */
-let availChip, inputField, progBar, logContainer;
-let askBtn, sumBtn, newBtn, copyBtn;
-
-/**
- * Initialize UI element references. Must be called after DOM is loaded.
- */
 export function initUI() {
-  availChip   = $('#avail');
-  inputField  = $('#in');
-  progBar     = $('#prog');
-  logContainer = $('#log');
-  askBtn      = $('#ask');
-  sumBtn      = $('#sum');
-  newBtn      = $('#new');
-  copyBtn     = $('#copy');
+  els = {
+    avail: $('#model-status'),
+    language: $('#lang'),
+    log: $('#log'),
+    copy: $('#copy'),
+    copyMd: $('#copy-md'),
+    saveMd: $('#save-md'),
+    sessionList: $('#session-list'),
+    sessionMeta: $('#session-meta'),
+    contextPanel: $('#context-panel'),
+    contextText: $('#context-text'),
+    hardware: $('#hardware'),
+    attachmentList: $('#attachment-list'),
+    stop: $('#stop'),
+    mic: $('#mic'),
+    input: $('#in'),
+    templates: $('#templates'),
+    modal: $('#settings-modal')
+  };
 }
 
-/**
- * Enable or disable UI controls based on busy state.
- * Disables prompt buttons (Ask, Summarize) and New Session while the model is running.
- * Shows or hides the progress bar.
- * @param {boolean} isBusy - True to indicate the model is busy (in-progress).
- */
-export function setBusy(isBusy) {
-  if (progBar) {
-    // Use a data attribute to toggle visibility via CSS
-    progBar.setAttribute('data-show', isBusy ? '1' : '0');
-  }
-  if (askBtn) askBtn.disabled = isBusy;
-  if (sumBtn) sumBtn.disabled = isBusy;
-  if (newBtn) newBtn.disabled = isBusy;
-}
-
-/**
- * Update the status chip text (e.g., "idle", "checking…", "available", "fallback", "error").
- * @param {string} text - The status text to display.
- */
-export function setStatusText(text) {
-  if (availChip) {
-    availChip.textContent = text;
-  }
-}
-
-/**
- * Get the currently selected output language code from the dropdown.
- * @returns {string} Language code (e.g., 'en', 'es', 'ja').
- */
 export function getOutputLanguage() {
-  const select = document.getElementById('lang');
-  return select ? select.value : 'en';
+  return els.language?.value || 'en';
 }
 
-/**
- * Set the language selection dropdown to a given value.
- * @param {string} langCode - The language code to select.
- */
-export function setLanguage(langCode) {
-  const select = document.getElementById('lang');
-  if (select && langCode) {
-    select.value = langCode;
+export function setLanguage(lang) {
+  if (els.language) {
+    els.language.value = lang;
   }
 }
 
-/**
- * Render the chat log messages to the UI.
- * This will append new messages if fromIndex is provided, or render the entire history if a full refresh.
- * Each message includes a timestamp and a copy button.
- * @param {Array} messages - Array of message objects to render.
- * @param {number} [fromIndex=0] - Index from which to start rendering (for incremental updates).
- */
-export function renderLog(messages, fromIndex = 0) {
-  if (!logContainer || !copyBtn) return;
-  if (messages.length === 0) {
-    // If history is empty, show placeholder text
-    logContainer.innerHTML = `<div class="msg ai">(nothing yet)</div>`;
-    copyBtn.disabled = true;
+export function setBusy(isBusy) {
+  $('#ask').disabled = isBusy;
+  $('#sum').disabled = isBusy;
+  if (els.stop) {
+    els.stop.disabled = !isBusy;
+  }
+}
+
+export function setStatusText(text) {
+  if (els.avail) {
+    els.avail.textContent = text;
+  }
+}
+
+export function setHardwareStatus(text) {
+  if (els.hardware) {
+    els.hardware.textContent = text;
+  }
+}
+
+export function toggleContextPanel(show) {
+  if (!els.contextPanel) return;
+  els.contextPanel.hidden = !show;
+  $('#toggle-context')?.setAttribute('aria-expanded', show ? 'true' : 'false');
+}
+
+export function setContextText(text) {
+  if (els.contextText) {
+    els.contextText.value = text || '';
+  }
+}
+
+export function getContextText() {
+  return els.contextText?.value?.trim() || '';
+}
+
+export function renderSessions(filter = '') {
+  sessionFilter = filter.toLowerCase();
+  if (!els.sessionList) return;
+  els.sessionList.innerHTML = '';
+  appState.sessionOrder.forEach(id => {
+    const session = appState.sessions[id];
+    if (!session) return;
+    const haystack = `${session.title} ${(session.tags || []).join(' ')}`.toLowerCase();
+    if (sessionFilter && !haystack.includes(sessionFilter)) return;
+    const item = document.createElement('button');
+    item.className = 'session-item';
+    item.setAttribute('role', 'tab');
+    item.setAttribute('data-id', id);
+    item.setAttribute('aria-selected', id === appState.currentSessionId ? 'true' : 'false');
+    item.innerHTML = `<strong>${session.title || 'Untitled'}</strong><small>${formatDate(session.updatedAt)}</small>`;
+    els.sessionList.appendChild(item);
+  });
+}
+
+export function renderLog() {
+  const session = getCurrentSession();
+  if (!session || !els.log) return;
+  const messages = session.messages;
+  if (!messages.length) {
+    els.log.innerHTML = '<div class="msg ai">(nothing yet)</div>';
+    setExportAvailability(false);
+    if (els.sessionMeta) {
+      els.sessionMeta.textContent = 'No messages yet';
+    }
     return;
   }
-  // If rendering from the beginning, clear existing log
-  if (fromIndex === 0) {
-    logContainer.innerHTML = "";
-  }
-  // Append each message from fromIndex onward
-  for (let i = fromIndex; i < messages.length; i++) {
-    const m = messages[i];
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `msg ${m.role}`;
-    // Prepend a label ("You:" or "Nano:") for clarity
-    const label = document.createElement('span');
+  els.log.innerHTML = '';
+  messages.forEach((m, idx) => {
+    const div = document.createElement('div');
+    div.className = `msg ${m.role}`;
+    const label = document.createElement('div');
     label.className = 'sender-label';
-    label.textContent = (m.role === 'user' ? 'You: ' : 'Nano: ');
-    msgDiv.appendChild(label);
-    // Message text content
-    const textNode = document.createTextNode(m.text);
-    msgDiv.appendChild(textNode);
-    // Timestamp
-    const timeEl = document.createElement('time');
-    timeEl.textContent = formatTime(m.ts);
-    msgDiv.appendChild(timeEl);
-    // Per-message copy button
-    const copyOneBtn = document.createElement('button');
-    copyOneBtn.className = 'copy1';
-    copyOneBtn.textContent = 'Copy';
-    copyOneBtn.title = 'Copy this message';
-    copyOneBtn.setAttribute('data-idx', String(i));
-    copyOneBtn.setAttribute('aria-label', 'Copy message');  // accessibility label
-    msgDiv.appendChild(copyOneBtn);
-
-    logContainer.appendChild(msgDiv);
+    label.textContent = m.role === 'user' ? 'You' : 'Nano';
+    div.appendChild(label);
+    const body = document.createElement('div');
+    body.className = 'body';
+    body.innerHTML = markdownToHtml(m.text || '');
+    div.appendChild(body);
+    if (m.attachments?.length) {
+      const att = document.createElement('div');
+      att.className = 'attachment-list';
+      m.attachments.forEach(file => {
+        const chip = document.createElement('span');
+        chip.className = 'attachment-chip';
+        chip.textContent = file.name;
+        att.appendChild(chip);
+      });
+      div.appendChild(att);
+    }
+    const time = document.createElement('time');
+    time.textContent = formatTime(m.ts);
+    div.appendChild(time);
+    const actions = document.createElement('div');
+    actions.className = 'copy1';
+    const copyBtn = document.createElement('button');
+    copyBtn.textContent = 'Copy';
+    copyBtn.dataset.idx = idx;
+    copyBtn.className = 'bubble-copy';
+    actions.appendChild(copyBtn);
+    if (m.role === 'ai') {
+      const speak = document.createElement('button');
+      speak.textContent = '🔊';
+      speak.dataset.idx = idx;
+      speak.className = 'speak';
+      actions.appendChild(speak);
+      const feedback = document.createElement('div');
+      feedback.className = 'feedback';
+      const up = document.createElement('button');
+      up.textContent = '👍';
+      up.dataset.idx = idx;
+      up.dataset.rating = 'up';
+      if (m.rating === 'up') up.classList.add('active');
+      const down = document.createElement('button');
+      down.textContent = '👎';
+      down.dataset.idx = idx;
+      down.dataset.rating = 'down';
+      if (m.rating === 'down') down.classList.add('active');
+      feedback.appendChild(up);
+      feedback.appendChild(down);
+      div.appendChild(feedback);
+    }
+    div.appendChild(actions);
+    els.log.appendChild(div);
+  });
+  els.log.scrollTop = els.log.scrollHeight;
+  setExportAvailability(true);
+  if (els.sessionMeta) {
+    els.sessionMeta.textContent = `${messages.length} messages · updated ${formatDate(session.updatedAt)}`;
   }
-  // Auto-scroll to the bottom of the log to show the latest message
-  logContainer.scrollTop = logContainer.scrollHeight;
-  // Enable the "Copy chat" button now that we have messages
-  copyBtn.disabled = false;
+}
+
+function setExportAvailability(enabled) {
+  [els.copy, els.copyMd, els.saveMd].forEach(btn => { if (btn) btn.disabled = !enabled; });
+}
+
+export function renderAttachments(attachments) {
+  if (!els.attachmentList) return;
+  els.attachmentList.innerHTML = '';
+  attachments.forEach((att, idx) => {
+    const chip = document.createElement('button');
+    chip.className = 'attachment-chip';
+    chip.textContent = att.name;
+    chip.dataset.idx = idx;
+    els.attachmentList.appendChild(chip);
+  });
+}
+
+export function updateTemplates(templates) {
+  if (!els.templates) return;
+  els.templates.innerHTML = '';
+  templates.forEach(t => {
+    const option = document.createElement('option');
+    option.value = t.id;
+    option.textContent = t.label;
+    option.dataset.text = t.text;
+    els.templates.appendChild(option);
+  });
+  els.templates.value = 'blank';
+}
+
+export function setMicState(active) {
+  if (els.mic) {
+    els.mic.setAttribute('aria-pressed', active ? 'true' : 'false');
+    els.mic.textContent = active ? '⏹' : '🎙';
+  }
+}
+
+export function openModal() {
+  if (!els.modal) return;
+  els.modal.removeAttribute('hidden');
+  document.body?.classList.add('modal-open');
+  document.getElementById('temperature')?.focus();
+}
+
+export function closeModal() {
+  if (!els.modal) return;
+  els.modal.setAttribute('hidden', 'true');
+  document.body?.classList.remove('modal-open');
+}
+
+export function isModalOpen() {
+  return !!els.modal && !els.modal.hasAttribute('hidden');
+}
+
+export function getInputValue() {
+  return els.input?.value || '';
+}
+
+export function setInputValue(value) {
+  if (els.input) {
+    els.input.value = value;
+  }
+}
+
+export function setStopEnabled(canStop) {
+  if (els.stop) {
+    els.stop.disabled = !canStop;
+  }
+}
+
+export function getSessionMarkdown(sessionId) {
+  const session = appState.sessions[sessionId];
+  if (!session) return '';
+  return session.messages.map(m => `### ${m.role === 'user' ? 'User' : 'Nano'}\n${m.text}`).join('\n\n');
+}
+
+export function getPlaintext(sessionId) {
+  return summarizeSession(sessionId);
+}
+
+export function highlightSession(sessionId) {
+  setCurrentSession(sessionId);
+  renderSessions(sessionFilter);
+  renderLog();
 }

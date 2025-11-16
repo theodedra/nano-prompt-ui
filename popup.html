@@ -6,48 +6,101 @@
   <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
-  <!-- App Bar with title, status chip, and language selector -->
   <div class="appbar">
     <div class="title">Nano Prompt</div>
-    <div id="avail" class="chip" aria-live="polite" role="status">idle</div>
-    <select id="lang" class="language-select" aria-label="Select output language">
-      <option value="en">EN</option>
-      <option value="es">ES</option>
-      <option value="ja">JA</option>
-    </select>
+    <div class="chip" id="model-status" aria-live="polite">checking…</div>
+    <button id="toggle-context" class="icon" title="Show context" aria-expanded="false">⧉</button>
+    <button id="open-settings" class="icon" title="Settings">⚙</button>
   </div>
 
-  <!-- Main content area -->
   <div class="wrap">
-    <div class="field">
-      <textarea id="in" placeholder="Type a prompt…" autofocus></textarea>
-    </div>
+    <div class="layout">
+      <aside class="sessions" aria-label="Chat sessions">
+        <div class="sessions-head">
+          <span>Sessions</span>
+          <button id="new-session" class="mini" title="New session">＋</button>
+        </div>
+        <input id="session-search" type="search" placeholder="Search" aria-label="Search sessions" />
+        <div id="session-list" class="session-list" role="tablist"></div>
+        <div class="session-actions">
+          <button id="clone-session" class="mini" title="Clone session">Clone</button>
+          <button id="delete-session" class="mini" title="Delete session">Delete</button>
+          <button id="rename-session" class="mini" title="Rename session">Rename</button>
+        </div>
+      </aside>
 
-    <!-- Indeterminate progress bar (shown when busy) -->
-    <div id="prog" class="progress" aria-hidden="true">
-      <div class="bar"></div>
-    </div>
+      <main class="content" role="main">
+        <div class="input-card">
+          <div class="field autosize">
+            <textarea id="in" placeholder="Ask anything… (Shift+Enter for newline)" aria-label="Prompt input"></textarea>
+            <div class="input-toolbar">
+              <select id="templates" aria-label="Prompt templates"></select>
+              <div class="attach">
+                <input type="file" id="file-input" accept="image/*" multiple hidden />
+                <button id="attach" class="icon" title="Attach image">📎</button>
+                <div id="attachment-list" class="attachment-list"></div>
+              </div>
+              <button id="mic" class="icon" title="Start voice input" aria-pressed="false">🎙</button>
+            </div>
+          </div>
+          <div class="context-panel" id="context-panel" hidden>
+            <div class="context-header">
+              <span>Page context</span>
+            </div>
+            <textarea id="context-text" aria-label="Editable page context"></textarea>
+          </div>
+          <div class="row">
+            <select id="lang" class="language-select" aria-label="Select output language">
+              <option value="en">EN</option>
+              <option value="es">ES</option>
+              <option value="ja">JA</option>
+            </select>
+            <button id="ask" class="filled">Ask</button>
+            <button id="sum" class="tonal">Summarize tab</button>
+            <button id="stop" class="tonal" disabled>Stop</button>
+          </div>
+        </div>
 
-    <!-- Action buttons -->
-    <div class="row">
-      <button id="ask" class="filled">Ask</button>
-      <button id="sum" class="tonal">Summarize tab</button>
-      <button id="new" class="tonal" aria-label="Start a new session">New</button>
+        <div class="card chat">
+          <div class="log-header">
+            <div>
+              <div class="muted">Chat</div>
+              <div class="subtitle" id="session-meta"></div>
+            </div>
+            <button id="speak-last" class="icon" title="Play last answer">🔊</button>
+          </div>
+          <div id="log" class="log" role="log" aria-live="polite" aria-atomic="false"></div>
+          <div class="copybar">
+            <button id="copy" class="copybtn" disabled>Copy chat</button>
+            <button id="copy-md" class="copybtn" disabled>Copy markdown</button>
+            <button id="save-md" class="copybtn" disabled>Save .md</button>
+          </div>
+        </div>
+      </main>
     </div>
+    <div id="hardware" class="hardware muted">Gemini Nano: unknown</div>
+  </div>
 
-    <!-- Chat log card -->
-    <div class="card">
-      <div class="muted log-header">Chat</div>
-      <div id="log" class="log" role="log" aria-live="polite" aria-atomic="false">
-        <!-- messages will be dynamically inserted here -->
-      </div>
-      <div class="copybar">
-        <button id="copy" class="copybtn" disabled>Copy chat</button>
-      </div>
+  <div id="settings-modal" class="modal" hidden role="dialog" aria-modal="true">
+    <div class="modal-backdrop" data-dismiss="modal" aria-hidden="true"></div>
+    <div class="modal-card" role="document">
+      <header>
+        <h2>Model settings</h2>
+        <button id="close-settings" class="icon" aria-label="Close settings">✕</button>
+      </header>
+      <label>Temperature
+        <input type="range" id="temperature" min="0" max="1" step="0.1" />
+      </label>
+      <label>topK
+        <input type="number" id="topk" min="1" max="64" />
+      </label>
+      <label>System prompt
+        <textarea id="system-prompt"></textarea>
+      </label>
+      <button id="save-settings" class="filled">Save</button>
     </div>
   </div>
 
-  <!-- Main script entry point (ES module) -->
   <script type="module" src="popup.js"></script>
 </body>
 </html>
