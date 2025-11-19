@@ -1,13 +1,8 @@
-// storage.js - Robust session persistence, sync metadata, and UI templates
-
 import { nanoid } from './utils.js';
 
 const LOCAL_KEY = 'nanoPromptUI.sessions.v3';
 const SYNC_KEY = 'nanoPromptUI.sessionMeta.v1';
 
-/**
- * Default prompt templates surfaced in the UI.
- */
 export const DEFAULT_TEMPLATES = [
   { id: 'blank', label: 'Templates…', text: '' },
   { id: 'translator', label: 'Translate text', text: 'Translate the following text to English and explain any idioms:' },
@@ -16,18 +11,15 @@ export const DEFAULT_TEMPLATES = [
   { id: 'qa', label: 'Ask expert', text: 'You are an expert researcher. Answer thoroughly:' }
 ];
 
-/**
- * Global application state that survives module boundaries while the popup is open.
- */
 export const appState = {
-  sessions: {},               // { [id]: { id, title, tags, createdAt, updatedAt, messages: [] } }
-  sessionOrder: [],           // Maintains ordering for tabs/sidebar
+  sessions: {},
+  sessionOrder: [],
   currentSessionId: null,
-  language: 'en',
+  // Language removed - strictly English now
   templates: DEFAULT_TEMPLATES.slice(),
-  attachments: [],            // Pending image/audio attachments for the next prompt
-  contextDraft: '',           // Editable context override text
-  downloading: null,          // { status: 'downloading', progress: 0-1 }
+  attachments: [],
+  contextDraft: '',
+  downloading: null,
   availability: 'unknown',
   settings: {
     temperature: 0.2,
@@ -121,7 +113,7 @@ export async function saveState() {
     sessions: appState.sessions,
     sessionOrder: appState.sessionOrder,
     currentSessionId: appState.currentSessionId,
-    language: appState.language,
+    // language: appState.language, // Removed
     templates: appState.templates,
     settings: appState.settings,
     contextDraft: appState.contextDraft
@@ -150,7 +142,7 @@ export async function loadState() {
         sessions: stored.sessions || {},
         sessionOrder: stored.sessionOrder || [],
         currentSessionId: stored.currentSessionId || null,
-        language: stored.language || 'en',
+        // language: 'en', // Defaulting to en implicitly
         templates: stored.templates?.length ? stored.templates : DEFAULT_TEMPLATES.slice(),
         settings: { ...appState.settings, ...(stored.settings || {}) },
         contextDraft: stored.contextDraft || ''
@@ -164,15 +156,10 @@ export async function loadState() {
     sessions: appState.sessions,
     order: appState.sessionOrder,
     current: appState.currentSessionId,
-    language: appState.language,
     templates: appState.templates,
     settings: appState.settings,
     contextDraft: appState.contextDraft
   };
-}
-
-export function setLanguage(langCode) {
-  appState.language = langCode;
 }
 
 export function updateContextDraft(text) {

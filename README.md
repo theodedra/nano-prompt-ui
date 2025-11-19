@@ -1,179 +1,160 @@
-![Nano Prompt UI — popup](Screenshot.png)
+\# Nano Prompt UI — Chrome MV3 (On-Device AI, Local-Only)
 
-Nano Prompt UI — Chrome MV3 (On-Device AI, Local-Only)
 
-TL;DR: A Chrome extension that runs entirely on-device using Chrome’s Language Model (Gemini Nano) API. No servers, no network calls. This README covers install steps and enabling the on-device model.
 
+!\[Nano Prompt UI](screenshot.png)
 
 
-1. Files \& Layout (single-folder)
-   /nano-prompt-ui/
-   context.js
-   handlers.js
-   manifest.json
-   model.js
-   popup.css
-   popup.html
-   popup.js
-   storage.js
-   ui.js
-   utils.js
-2. Install (Developer Mode, Unpacked)
 
-Download or clone this repo so all files above are in the same folder (with manifest.json).
+\*\*TL;DR:\*\* A privacy-first Chrome extension that runs entirely on-device using Chrome’s built-in \*\*Gemini Nano\*\* language model. No servers, no API keys, and no network calls—your data never leaves your browser.
 
-Open chrome://extensions.
 
-Toggle Developer mode (top-right).
 
-Click Load unpacked and select the folder (or drag the folder onto the page).
+\## ✨ Features
 
-You can’t drag a .zip directly into chrome://extensions. Unzip first and load the folder.
 
 
+\* \*\*100% Local \& Private:\*\* Runs on the `window.ai` (Prompt API) built into Chrome.
 
-3. Enable On-Device AI (Gemini Nano) in Chrome
+\* \*\*Smart Context Integration:\*\*
 
-Open chrome://flags and enable:
+&nbsp;   \* \*\*Summarize Tab:\*\* One-click summarization of the active web page.
 
-Prompt API for Gemini Nano → chrome://flags/#prompt-api-for-gemini-nano
+&nbsp;   \* \*\*Restricted Page Safety:\*\* Automatically detects browser system pages to prevent hallucinations.
 
-Optimization Guide On Device Model → chrome://flags/#optimization-guide-on-device-model
+&nbsp;   \* \*\*Smart Context:\*\* Automatically drops page context for short, casual chats (e.g., "Hi") to keep responses fast and relevant.
 
-(If the API still doesn’t appear on older builds) Experimental Web Platform features → chrome://flags/#enable-experimental-web-platform-features
+\* \*\*Session Management:\*\*
 
-Click Relaunch when prompted.
+&nbsp;   \* Create multiple chat sessions.
 
-Notes
+&nbsp;   \* Rename and delete sessions via the header dropdown.
 
-Use a recent Chrome (desktop). If flags aren’t present on Stable, try Beta/Dev/Canary.
+&nbsp;   \* Persistent history (saved locally).
 
-Platform support can vary (Windows/macOS are usually first; Linux may lag).
+\* \*\*Modern UI/UX:\*\*
 
-Managed devices may restrict these features by policy.
+&nbsp;   \* Sleek Dark Mode interface.
 
+&nbsp;   \* \*\*Reverse Chronological Chat:\*\* Newest messages appear at the top for easier access.
 
+&nbsp;   \* \*\*Voice Dictation:\*\* Built-in speech-to-text input.
 
-4. Ensure the model downloads
+\* \*\*Advanced Configuration:\*\*
 
-Open chrome://components.
+&nbsp;   \* \*\*Creativity (Temperature):\*\* Adjust how imaginative or precise the AI is.
 
-Find Optimization Guide On Device Model.
+&nbsp;   \* \*\*Vocabulary (TopK):\*\* Control the variety of words used.
 
-Click Check for update.
+&nbsp;   \* \*\*System Prompt:\*\* Customize the AI's persona (e.g., "You are a helpful coding assistant").
 
-Wait for a non-zero version and Status: Up-to-date.
+\* \*\*Export Options:\*\*
 
-If it’s missing or stuck at 0.0:
+&nbsp;   \* Copy full chat to clipboard.
 
-Re-check flags and relaunch Chrome.
+&nbsp;   \* Save chat history as a Markdown (`.md`) file.
 
-Leave Chrome open—download can be large.
 
-Confirm network access/firewall.
 
-Try a newer Chrome channel.
+\## 🛠️ Installation (Developer Mode)
 
-On managed devices, check chrome://policy.
 
 
+1\.  \*\*Download/Clone\*\* this repository.
 
-5. Quick sanity check (DevTools)
+2\.  Open `chrome://extensions` in your browser.
 
-Open any https:// page → DevTools Console:
+3\.  Toggle \*\*Developer mode\*\* (top-right corner).
 
-'languageModel' in self.ai
+4\.  Click \*\*Load unpacked\*\* and select the folder containing these files.
 
 
 
-If true, try:
+> \*\*Note:\*\* You cannot drag a `.zip` file directly. Unzip it first.
 
-const s = await self.ai.languageModel.create();
-(await s.prompt('Say hello in five words.')).trim();
 
 
+\## ⚙️ Enable On-Device AI (Gemini Nano)
 
-A short string back = on-device model is working.
 
 
+To use this extension, you must enable Chrome's experimental AI features:
 
-6. Using the Extension
 
-Open the popup from the toolbar.
 
-Ask: type and press Enter.
+1\.  Open `chrome://flags` and enable the following:
 
-Summarize Tab: reads visible text on the current tab and returns 5 concise bullets.
+&nbsp;   \* \*\*Prompt API for Gemini Nano:\*\* `chrome://flags/#prompt-api-for-gemini-nano`
 
-Language: choose EN/ES/JA.
+&nbsp;   \* \*\*Optimization Guide On Device Model:\*\* `chrome://flags/#optimization-guide-on-device-model`
 
-Location (optional): if permitted, a simple “Location:” string can be attached to prompts.
+&nbsp;   \* \*(If needed)\* \*\*Experimental Web Platform features:\*\* `chrome://flags/#enable-experimental-web-platform-features`
 
-The extension runs locally via self.ai.languageModel and makes no network calls.
+2\.  \*\*Relaunch Chrome.\*\*
 
 
 
-7. Permissions
+\### Ensure the Model Download
 
-storage — local settings/history
+1\.  Go to `chrome://components`.
 
-scripting, activeTab — read page text for summarization
+2\.  Find \*\*Optimization Guide On Device Model\*\*.
 
-clipboardWrite — copy responses
+3\.  Click \*\*Check for update\*\*.
 
-(Optional) geolocation — only if you opt in
+4\.  Wait until you see a version number (e.g., `2024.5.21.1`) and Status: \*\*Up-to-date\*\*.
 
+&nbsp;   \* \*If it says "0.0.0.0", the model is still downloading. Leave Chrome open for a while.\*
 
 
-8. Troubleshooting
 
-“Model unavailable”
+\## 🚀 Usage
 
-Ensure flags are enabled \& Chrome was relaunched.
 
-Check Optimization Guide On Device Model in chrome://components has a version.
 
-In DevTools:
+1\.  \*\*Chat:\*\* Open the popup and start typing. The newest messages appear at the top.
 
-'languageModel' in self.ai
+2\.  \*\*Sessions:\*\* Click the \*\*"Current Session"\*\* dropdown in the header to switch chats, rename, or delete them. Click \*\*`+`\*\* to start a new chat.
 
+3\.  \*\*Summarize:\*\* Click \*\*"Summarize tab"\*\* to feed the current page text into the AI.
 
+4\.  \*\*Settings:\*\* Click the \*\*Gear icon (⚙)\*\* to adjust Creativity (Temperature) and Vocabulary (TopK).
 
-If false, update Chrome or try Beta/Dev/Canary.
+5\.  \*\*Dictation:\*\* Click the \*\*Mic icon (🎙️)\*\* to speak your prompt.
 
-“No readable text found on this tab.”
 
-Some pages (canvas/webgl/Chrome-internal like chrome://) aren’t readable. Try a standard https:// page.
 
-Popup shows “fallback”
+\## 🔧 Troubleshooting
 
-If a popup session can’t open, it tries an in-page session. This requires a normal web page and may still fail if the page blocks script execution.
 
-Enterprise/school devices
 
-Policies may block the model or API. See chrome://policy.
+\* \*\*"Model Unavailable" / "Standby":\*\*
 
-Linux
+&nbsp;   \* Ensure flags are enabled and you have relaunched Chrome.
 
-Support may lag; use an up-to-date Chrome and verify the component download.
+&nbsp;   \* Check `chrome://components` to ensure the model has finished downloading.
 
+\* \*\*"Microphone access denied":\*\*
 
+&nbsp;   \* Chrome extensions cannot show permission popups easily. If clicked, the extension will open a new tab to ask for permission once.
 
-9. Roadmap / Notes
+\* \*\*Permissions:\*\*
 
-* Chat UX: persistent multi-turn conversations with tabbed sessions; Markdown/code rendering; voice in/out; quick export \& prompt templates with simple feedback.
-* Smarter context: readable article/main-content extraction + metadata, plus a context viewer with editable overrides before sending.
-* Nano integration: streaming replies, (early) image/audio input, availability/download progress \& graceful fallbacks, with performance guards for low-end devices.
-* Reliability \& control: cancel/stop, retry with trimmed context, keyboard shortcuts \& auto-growing input; session persistence, optional sync, and searchable/tagged history.
-  
+&nbsp;   \* This extension requests `<all\_urls>` host permissions. This is strictly required to read the text content of active tabs for the "Summarize" feature.
 
-10. License
 
-The Unlicense — see LICENSE.
 
+\## 📜 License
 
 
-11. Credits
 
-Built by Vimal "Vibe Coded" with ai.
+The Unlicense — see `LICENSE.txt`.
+
+
+
+\## 👏 Credits
+
+
+
+Built by \*\*Vimal "Vibe Coded"\*\* with AI.
 

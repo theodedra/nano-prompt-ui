@@ -1,14 +1,14 @@
 const ASSISTANT_RULES = `You run inside a Chrome extension popup.
 You already have the active tab context provided.
 Do not mention browsing limitations.
-Respect the user's language choice.
+Always answer in English.
 Keep answers concise but helpful.`;
 
 let cachedContext = { text: '', ts: 0, tabId: null };
 
 export function classifyIntent(text) {
   const t = text.toLowerCase();
-  if (/summari|page|article|tab|website|context/.test(t)) return 'page';
+  if (/summari|page|article|tab|website|context|window/.test(t)) return 'page';
   if (/time|date|today|now/.test(t)) return 'time';
   if (/where|location|lat|long/.test(t)) return 'location';
   return 'none';
@@ -16,12 +16,21 @@ export function classifyIntent(text) {
 
 async function runContentScript(tab) {
   try {
+    // FIX: Handle restricted browser pages (chrome://, edge://, about:)
+    // Instead of returning empty text (which causes hallucinations), we return a specific system message.
     if (!tab || !/^https?:/i.test(tab.url || '')) {
-      return { title: tab?.title || '', url: tab?.url || '', text: '', meta: {} };
+      const url = tab?.url || 'system page';
+      const title = tab?.title || 'System Page';
+      return { 
+        title, 
+        url, 
+        text: `[System Page] The user is currently viewing a browser system page (${url}). \nBrowser security prevents extensions from reading content here. \nIf the user asks to summarize, inform them that system pages cannot be accessed.`, 
+        meta: {} 
+      };
     }
+
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      world: 'MAIN',
       func: () => {
         const pick = (selector) => document.querySelector(selector);
         const bodyText = document.body?.innerText || '';
@@ -47,7 +56,12 @@ async function runContentScript(tab) {
     return result;
   } catch (e) {
     console.warn('Context extraction failed', e);
-    return { title: tab?.title || '', url: tab?.url || '', text: '', meta: {} };
+    return { 
+      title: tab?.title || '', 
+      url: tab?.url || '', 
+      text: '[Error] Failed to read page content. The page might be restricted or loading.', 
+      meta: {} 
+    };
   }
 }
 

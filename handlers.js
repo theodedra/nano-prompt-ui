@@ -2,7 +2,6 @@ import {
   appState,
   loadState,
   saveState,
-  setLanguage,
   createSessionFrom,
   deleteSession,
   setCurrentSession,
@@ -23,7 +22,8 @@ import {
   speakText,
   refreshAvailability
 } from './model.js';
-import { fetchContext } from './context.js';
+import { fetchContext, classifyIntent } from './context.js';
+import { resizeImage } from './utils.js';
 
 let recognition;
 let recognizing = false;
@@ -73,12 +73,19 @@ function ensureTabContextSync() {
 
 export async function bootstrap() {
   await loadState();
-  UI.setLanguage(appState.language);
   UI.updateTemplates(appState.templates);
   UI.renderSessions();
   UI.setContextText(appState.contextDraft);
   UI.renderAttachments(getAttachments());
   UI.renderLog();
+  
+  // PERMISSION SETUP LOGIC
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('mic_setup') === 'true') {
+    setTimeout(() => handleMicClick(), 500);
+    return; 
+  }
+  
   ensureTabContextSync();
   await refreshContextDraft(true);
 }
@@ -90,9 +97,17 @@ export async function handleAskClick() {
   UI.setInputValue('');
   clearAttachments();
   UI.renderAttachments(getAttachments());
+  
+  let contextOverride = UI.getContextText();
+  const intent = classifyIntent(text);
+  
+  if (text.length < 30 && intent === 'none') {
+    contextOverride = '';
+  }
+
   await runPrompt({
     text,
-    contextOverride: UI.getContextText(),
+    contextOverride,
     attachments
   });
 }
@@ -107,6 +122,7 @@ export async function handleNewSessionClick() {
   await saveState();
   UI.renderSessions();
   UI.renderLog();
+  UI.closeSessionMenu();
 }
 
 export async function handleCloneSession() {
@@ -118,32 +134,85 @@ export async function handleCloneSession() {
 }
 
 export async function handleDeleteSession() {
-  if (Object.keys(appState.sessions).length <= 1) return;
-  deleteSession(appState.currentSessionId);
-  await saveState();
-  UI.renderSessions();
-  UI.renderLog();
+  // Deprecated generic handler, logic moved to handleSessionMenuClick
 }
 
-export async function handleRenameSession() {
-  const current = getCurrentSession();
-  const title = prompt('Rename session', current.title || '');
+export async function handleRenameSession(sessionId) {
+  const targetId = sessionId || appState.currentSessionId;
+  const session = appState.sessions[targetId];
+  if (!session) return;
+  
+  const title = prompt('Rename session', session.title || '');
   if (!title) return;
-  renameSession(current.id, title.trim());
+  renameSession(targetId, title.trim());
   await saveState();
   UI.renderSessions();
+}
+
+// UPDATED: Central handler for the session list dropdown with inline confirm
+export async function handleSessionMenuClick(event) {
+  const btn = event.target.closest('button');
+  const row = event.target.closest('.session-row');
+  
+  // Handle Action Buttons (Edit/Delete)
+  if (btn && btn.classList.contains('action-btn')) {
+    event.stopPropagation(); // Don't select the session
+    const id = btn.dataset.id;
+    
+    if (btn.classList.contains('delete')) {
+      // Check if we are in "Confirm" state
+      if (btn.classList.contains('confirming')) {
+        // CONFIRMED: Perform deletion
+        deleteSession(id);
+        await saveState();
+        UI.renderSessions();
+        UI.renderLog();
+      } else {
+        // FIRST CLICK: Enter "Confirm" state
+        
+        // 1. Reset any other buttons that might be waiting for confirmation
+        document.querySelectorAll('.action-btn.delete.confirming').forEach(b => {
+          b.classList.remove('confirming');
+          b.textContent = '✕';
+          b.title = 'Delete';
+        });
+
+        // 2. Set this button to confirm mode
+        btn.classList.add('confirming');
+        btn.textContent = '✓'; 
+        btn.title = 'Confirm Delete';
+
+        // 3. Auto-reset after 3 seconds if not clicked
+        setTimeout(() => {
+          if (btn && document.body.contains(btn) && btn.classList.contains('confirming')) {
+            btn.classList.remove('confirming');
+            btn.textContent = '✕';
+            btn.title = 'Delete';
+          }
+        }, 3000);
+      }
+    } else if (btn.classList.contains('edit')) {
+      handleRenameSession(id);
+    }
+    return;
+  }
+
+  // Handle Switching Sessions
+  if (row) {
+    const id = row.dataset.id;
+    if (id) {
+      setCurrentSession(id);
+      UI.highlightSession(id);
+      await saveState();
+      UI.closeSessionMenu();
+    }
+  }
 }
 
 export async function handleCopyChatClick() {
   const text = UI.getPlaintext(appState.currentSessionId);
   if (!text) return;
   await navigator.clipboard.writeText(text);
-}
-
-export async function handleCopyMarkdown() {
-  const md = UI.getSessionMarkdown(appState.currentSessionId);
-  if (!md) return;
-  await navigator.clipboard.writeText(md);
 }
 
 export function handleSaveMarkdown() {
@@ -156,12 +225,6 @@ export function handleSaveMarkdown() {
   a.download = `${getCurrentSession().title || 'chat'}.md`;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-export async function handleLanguageChange(event) {
-  setLanguage(event.target.value);
-  await saveState();
-  await refreshAvailability();
 }
 
 export function handleInputKeyDown(event) {
@@ -193,7 +256,7 @@ export function handleDocumentKeyDown(event) {
 }
 
 export function handleModalClick(event) {
-  if (event.target?.dataset?.dismiss === 'modal') {
+  if (event.target?.dataset?.dismiss === 'modal' || event.target?.classList.contains('modal-backdrop')) {
     UI.closeModal();
   }
 }
@@ -218,27 +281,21 @@ export async function handleLogClick(event) {
   }
 }
 
-export async function handleSessionListClick(event) {
-  const id = event.target.closest('.session-item')?.dataset.id;
-  if (!id) return;
-  setCurrentSession(id);
-  UI.highlightSession(id);
-  await saveState();
-}
-
 export function handleSessionSearch(event) {
   UI.renderSessions(event.target.value);
 }
 
 export function handleTemplateSelect(event) {
-  const selected = event.target.options[event.target.selectedIndex];
-  const text = selected?.dataset?.text;
+  const target = event.target.closest('.dropdown-item');
+  if (!target) return;
+  
+  const text = target.dataset.text;
   if (typeof text === 'string') {
     const existing = UI.getInputValue();
     const joiner = existing.trim() ? '\n' : '';
     UI.setInputValue(existing + joiner + text + '\n');
-    event.target.value = 'blank';
   }
+  UI.closeTemplateMenu();
 }
 
 export function handleAttachClick() {
@@ -247,13 +304,20 @@ export function handleAttachClick() {
 
 export function handleFileInputChange(event) {
   const files = Array.from(event.target.files || []);
-  files.slice(0, 3).forEach(file => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      addAttachment({ name: file.name, type: file.type, data: reader.result });
+  files.slice(0, 3).forEach(async file => {
+    try {
+      const resizedData = await resizeImage(file, 1024); 
+      addAttachment({ name: file.name, type: 'image/jpeg', data: resizedData });
       UI.renderAttachments(getAttachments());
-    };
-    reader.readAsDataURL(file);
+    } catch (e) {
+      console.warn('Failed to resize image', e);
+      const reader = new FileReader();
+      reader.onload = () => {
+        addAttachment({ name: file.name, type: file.type, data: reader.result });
+        UI.renderAttachments(getAttachments());
+      };
+      reader.readAsDataURL(file);
+    }
   });
   event.target.value = '';
 }
@@ -266,35 +330,64 @@ export function handleAttachmentListClick(event) {
 }
 
 export function handleMicClick() {
-  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) return;
+  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+    alert('Speech recognition is not supported in this browser.');
+    return;
+  }
+
   if (recognizing) {
     recognition.stop();
     return;
   }
+
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   recognition = new SpeechRecognition();
   recognition.lang = 'en-US';
   recognition.interimResults = true;
+  recognition.continuous = true; 
+
+  const startText = UI.getInputValue();
+
   recognition.onstart = () => {
     recognizing = true;
     UI.setMicState(true);
   };
+
   recognition.onend = () => {
     recognizing = false;
     UI.setMicState(false);
   };
-  recognition.onresult = (event) => {
-    const transcript = Array.from(event.results)
-      .map(result => result[0].transcript)
-      .join(' ');
-    UI.setInputValue(transcript);
+
+  recognition.onerror = (event) => {
+    console.warn('Speech recognition failed', event.error);
+    
+    if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+      const doSetup = confirm(
+        'Microphone permission is blocked in the popup.\n\n' +
+        'Open a setup tab to grant permission once?'
+      );
+      if (doSetup) {
+        chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?mic_setup=true') });
+      }
+    }
+    
+    recognizing = false;
+    UI.setMicState(false);
   };
+
+  recognition.onresult = (event) => {
+    let transcript = '';
+    for (let i = 0; i < event.results.length; ++i) {
+      transcript += event.results[i][0].transcript;
+    }
+    const spacer = (startText && !startText.match(/\s$/)) ? ' ' : '';
+    UI.setInputValue(startText + spacer + transcript);
+  };
+
   try {
     recognition.start();
   } catch (e) {
-    console.warn('Speech recognition failed', e);
-    recognizing = false;
-    UI.setMicState(false);
+    console.error(e);
   }
 }
 
@@ -311,11 +404,8 @@ export function handleStopClick() {
 }
 
 export async function handleToggleContext() {
-  const hidden = document.getElementById('context-panel').hidden;
-  UI.toggleContextPanel(hidden);
-  if (hidden) {
-    await refreshContextDraft(true);
-  }
+  UI.openContextModal();
+  await refreshContextDraft(true);
 }
 
 export function handleContextInput(event) {
@@ -324,7 +414,7 @@ export function handleContextInput(event) {
 }
 
 export function handleOpenSettings() {
-  UI.openModal();
+  UI.openSettingsModal();
   document.getElementById('temperature').value = appState.settings.temperature;
   document.getElementById('topk').value = appState.settings.topK;
   document.getElementById('system-prompt').value = appState.settings.systemPrompt;
