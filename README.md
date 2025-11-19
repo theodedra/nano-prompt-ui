@@ -19,7 +19,7 @@ Unlike standard popups that close when you click away, **Nano Prompt UI lives in
     * **Smart Truncation:** Intelligently chunks long articles to fit the model's context window.
     * **Context Optimization:** Automatically detects casual chats (e.g., "Hi") and skips loading page context to save battery and reduce latency.
 * **Robust Session Management:**
-    * **Auto-Saving:** Chats are saved locally and sync metadata across devices.
+    * **Auto-Saving:** Chats are saved locally.
     * **Session Control:** Rename, delete, or switch between multiple chat threads via the dropdown menu.
     * **Markdown Support:** Export full chat history to `.md` files.
 * **Rich Input & Media:**
@@ -71,5 +71,6 @@ To use this extension, you must enable Chrome's experimental AI features:
 The Unlicense — see `LICENSE.txt`.
 
 ## 👏 Credits
+
 
 Built by **Vimal "Vibe Coded"** with AI.
