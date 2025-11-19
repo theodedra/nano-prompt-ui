@@ -15,7 +15,6 @@ export const appState = {
   sessions: {},
   sessionOrder: [],
   currentSessionId: null,
-  // Language removed - strictly English now
   templates: DEFAULT_TEMPLATES.slice(),
   attachments: [],
   contextDraft: '',
@@ -36,8 +35,6 @@ function createEmptySession(title = 'New chat') {
     title,
     createdAt: Date.now(),
     updatedAt: Date.now(),
-    tags: [],
-    rating: null,
     messages: []
   };
 }
@@ -71,7 +68,6 @@ export function createSessionFrom(baseSessionId = null) {
   const session = createEmptySession(base ? `${base.title} copy` : 'New chat');
   if (base) {
     session.messages = base.messages.slice();
-    session.tags = base.tags.slice();
   }
   appState.sessions[session.id] = session;
   appState.sessionOrder.unshift(session.id);
@@ -113,7 +109,6 @@ export async function saveState() {
     sessions: appState.sessions,
     sessionOrder: appState.sessionOrder,
     currentSessionId: appState.currentSessionId,
-    // language: appState.language, // Removed
     templates: appState.templates,
     settings: appState.settings,
     contextDraft: appState.contextDraft
@@ -142,7 +137,6 @@ export async function loadState() {
         sessions: stored.sessions || {},
         sessionOrder: stored.sessionOrder || [],
         currentSessionId: stored.currentSessionId || null,
-        // language: 'en', // Defaulting to en implicitly
         templates: stored.templates?.length ? stored.templates : DEFAULT_TEMPLATES.slice(),
         settings: { ...appState.settings, ...(stored.settings || {}) },
         contextDraft: stored.contextDraft || ''
@@ -186,19 +180,6 @@ export function renameSession(sessionId, title) {
   if (!appState.sessions[sessionId]) return;
   appState.sessions[sessionId].title = title;
   appState.sessions[sessionId].updatedAt = Date.now();
-}
-
-export function tagSession(sessionId, tags = []) {
-  if (!appState.sessions[sessionId]) return;
-  appState.sessions[sessionId].tags = tags;
-}
-
-export function setSessionRating(sessionId, messageIndex, rating) {
-  const session = appState.sessions[sessionId];
-  if (!session) return;
-  if (session.messages[messageIndex]) {
-    session.messages[messageIndex].rating = rating;
-  }
 }
 
 export function summarizeSession(sessionId) {

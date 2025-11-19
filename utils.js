@@ -1,19 +1,9 @@
-// utils.js - General utility functions (e.g., DOM selection, formatting)
+// utils.js - General utility functions
 
-/**
- * Select a DOM element by CSS selector.
- * @param {string} selector 
- * @returns {Element|null}
- */
 export function $(selector) {
   return document.querySelector(selector);
 }
 
-/**
- * Format a timestamp (ms) into a human-readable time (HH:MM).
- * @param {number} ts - Timestamp in milliseconds.
- * @returns {string} Time string or empty string if invalid.
- */
 export function formatTime(ts) {
   try {
     const d = new Date(ts);
@@ -33,46 +23,7 @@ export function formatDate(ts) {
 }
 
 /**
- * Normalize a response text by converting Markdown-style lists into bullet points.
- * Removes bold and inline code formatting and ensures consistent bullet styling.
- * @param {string} md - The raw text (possibly with Markdown).
- * @returns {string} Cleaned text with bullet points.
- */
-export function normalizeToBullets(md) {
-  if (!md) return "";
-  let s = String(md).replace(/\r/g, "");
-  const BULLET_CHAR = String.fromCharCode(0x2022);
-  const BULLET = `${BULLET_CHAR} `;
-  const DUPLICATE_BULLETS = new RegExp(`^\\s*${BULLET_CHAR}\\s*${BULLET_CHAR}\\s*`, 'gm');
-
-  // Remove markdown bold and inline code formatting for clarity
-  s = s.replace(/\*\*(.*?)\*\*/g, "$1")
-       .replace(/`{1,3}([^`]*)`{1,3}/g, "$1");
-
-  // If single-line with multiple "*" indicators (e.g., "Intro: * a * b * c"), convert to bullets
-  if (!/\n/.test(s) && (s.match(/\s\*\s+/g) || []).length >= 2) {
-    const parts = s.split(/\s\*\s+/);
-    const head = parts.shift().replace(/\s*:\s*$/, "").trim();
-    const items = parts.map(t => BULLET + t.replace(/^[*-]\s*/, "").trim());
-    s = (head ? head + "\n" : "") + items.join("\n");
-  }
-
-  // Transform list markers (-, *, 1.) at line start into bullet symbols
-  s = s.replace(/^[ \t]*[-*]\s+/gm, BULLET)
-       .replace(/^[ \t]*\d+\.\s+/gm, BULLET);
-
-  // Clean up duplicate bullets, excessive spaces or blank lines
-  s = s.replace(DUPLICATE_BULLETS, BULLET)
-       .replace(/[ \t]+/g, " ")
-       .replace(/\n{3,}/g, "\n\n")
-       .trim();
-
-  return s;
-}
-
-/**
  * Basic markdown to HTML converter that keeps styling minimal and safe.
- * Only supports headings, emphasis, code, links, lists, and paragraphs.
  */
 export function markdownToHtml(md) {
   if (!md) return '';
@@ -112,12 +63,6 @@ export function nanoid(size = 10) {
   return id;
 }
 
-/**
- * Resizes an image file to a maximum width/height and returns a compressed Data URL.
- * @param {File} file 
- * @param {number} maxWidth 
- * @returns {Promise<string>}
- */
 export function resizeImage(file, maxWidth = 800) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -137,8 +82,6 @@ export function resizeImage(file, maxWidth = 800) {
         canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0, width, height);
-        
-        // Export as JPEG with 0.7 quality to save space
         resolve(canvas.toDataURL('image/jpeg', 0.7));
       };
       img.onerror = reject;

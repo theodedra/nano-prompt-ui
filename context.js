@@ -1,5 +1,5 @@
-const ASSISTANT_RULES = `You run inside a Chrome extension popup.
-You already have the active tab context provided.
+const ASSISTANT_RULES = `You run inside a Chrome extension side panel.
+You have access to the active tab's text content.
 Do not mention browsing limitations.
 Always answer in English.
 Keep answers concise but helpful.`;
@@ -16,15 +16,13 @@ export function classifyIntent(text) {
 
 async function runContentScript(tab) {
   try {
-    // FIX: Handle restricted browser pages (chrome://, edge://, about:)
-    // Instead of returning empty text (which causes hallucinations), we return a specific system message.
+    // Check if we are on a valid web page
     if (!tab || !/^https?:/i.test(tab.url || '')) {
       const url = tab?.url || 'system page';
-      const title = tab?.title || 'System Page';
       return { 
-        title, 
+        title: tab?.title || 'System Page', 
         url, 
-        text: `[System Page] The user is currently viewing a browser system page (${url}). \nBrowser security prevents extensions from reading content here. \nIf the user asks to summarize, inform them that system pages cannot be accessed.`, 
+        text: `[System Page] The user is viewing a browser system page (${url}). Security prevents reading this content.`, 
         meta: {} 
       };
     }
@@ -38,54 +36,62 @@ async function runContentScript(tab) {
         const main = pick('main')?.innerText || '';
         const selection = getSelection()?.toString() || '';
         const headings = Array.from(document.querySelectorAll('h1, h2')).slice(0, 6).map(h => h.innerText.trim()).filter(Boolean);
-        const meta = {
-          description: document.querySelector('meta[name="description"]')?.content || '',
-          ogTitle: document.querySelector('meta[property="og:title"]')?.content || ''
-        };
-        const articleText = article || main || bodyText;
+        
+        // Priority: Selection -> Article -> Main -> Body
+        const bestText = selection || article || main || bodyText;
+
         return {
           title: document.title,
           url: location.href,
-          text: selection || articleText,
+          text: bestText,
           headings,
           selection,
-          meta
+          meta: { description: document.querySelector('meta[name="description"]')?.content || '' }
         };
       }
     });
     return result;
   } catch (e) {
     console.warn('Context extraction failed', e);
-    return { 
-      title: tab?.title || '', 
-      url: tab?.url || '', 
-      text: '[Error] Failed to read page content. The page might be restricted or loading.', 
-      meta: {} 
-    };
+    return { title: '', url: '', text: '', meta: {} };
   }
 }
 
-export async function fetchContext(force = false) {
-  let activeTab = null;
-  try {
-    [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  } catch (e) {
-    console.warn('Failed to query tabs', e);
+// Truncate text to avoid token limits
+function smartTruncate(text, limit) {
+  if (text.length <= limit) return text;
+  const truncated = text.slice(0, limit);
+  const lastPeriod = truncated.lastIndexOf('.');
+  if (lastPeriod > limit * 0.8) { 
+    return truncated.slice(0, lastPeriod + 1) + '\n\n[...Content truncated...]';
   }
+  return truncated + '\n\n[...Content truncated...]';
+}
+
+export async function fetchContext(force = false) {
+  // Standard stable tab query
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const activeTabId = activeTab?.id ?? null;
-  const isFresh = Date.now() - cachedContext.ts < 30_000;
+  const isFresh = Date.now() - cachedContext.ts < 15_000; // 15s cache
+  
+  // Use cache unless forced or tab changed
   if (!force && cachedContext.text && isFresh && cachedContext.tabId === activeTabId) {
     return cachedContext;
   }
+  
   const info = await runContentScript(activeTab);
   const pieces = [];
-  if (info.title) pieces.push(`Title: ${info.title}`);
-  if (info.url) pieces.push(`URL: ${info.url}`);
-  if (info.meta?.description) pieces.push(`Description: ${info.meta.description}`);
-  if (info.headings?.length) pieces.push('Headings:\n- ' + info.headings.join('\n- '));
-  if (info.text) {
-    pieces.push('PAGE:\n' + info.text.slice(0, 6000));
+  
+  if (info.text && !info.text.startsWith('[System Page]')) {
+    if (info.title) pieces.push(`Title: ${info.title}`);
+    if (info.url) pieces.push(`URL: ${info.url}`);
   }
+  
+  if (info.text) {
+    const cleanText = smartTruncate(info.text, 7000); 
+    pieces.push(cleanText);
+  }
+  
   const text = pieces.join('\n\n');
   cachedContext = { text, ts: Date.now(), tabId: activeTabId };
   return cachedContext;
@@ -98,29 +104,23 @@ export function getCachedContext() {
 export async function buildPromptWithContext(userText, contextOverride = '', attachments = []) {
   const intent = classifyIntent(userText);
   let contextText = contextOverride;
-  if (!contextText && intent === 'page') {
-    const ctx = await fetchContext();
-    contextText = ctx.text;
-  }
+
   const parts = [ASSISTANT_RULES];
-  if (contextText) {
+  
+  // Only add context if it exists and isn't empty
+  if (contextText && contextText.trim().length > 0) {
     parts.push('Context:\n' + contextText.trim());
   }
+  
   if (attachments.length) {
-    const desc = attachments.map((att, i) => `Attachment ${i + 1}: ${att.name} (${att.type || 'image'})`).join('\n');
-    parts.push('Attachments:\n' + desc);
+    const desc = attachments.map((att, i) => `[Attachment ${i + 1}: ${att.name}]`).join('\n');
+    parts.push('Attachments (Filenames only):\n' + desc);
   }
+  
   if (intent === 'time') {
     parts.push(`Time: ${new Date().toLocaleString()}`);
   }
-  if (intent === 'location') {
-    try {
-      const coords = await new Promise((resolve, reject) => navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 3000 }));
-      parts.push(`Location: ${coords.coords.latitude.toFixed(3)}, ${coords.coords.longitude.toFixed(3)}`);
-    } catch {
-      parts.push('Location: unavailable');
-    }
-  }
+  
   parts.push('User question:\n' + userText);
   return parts.filter(Boolean).join('\n\n');
 }

@@ -13,6 +13,10 @@ let sessionFilter = '';
 let lastStatus = 'Checking...'; 
 let isSystemBusy = false;
 
+// SVG CONSTANTS
+const ICON_MIC = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
+const ICON_STOP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect></svg>`;
+
 export function initUI() {
   els = {
     avail: $('#model-status'),
@@ -51,7 +55,7 @@ export function setBusy(isBusy) {
   if (els.avail) {
     if (isBusy) {
       els.avail.textContent = 'Thinking...';
-      els.avail.classList.add('pulse'); // Optional: add a css pulse if desired later
+      els.avail.classList.add('pulse'); 
     } else {
       els.avail.textContent = lastStatus;
       els.avail.classList.remove('pulse');
@@ -60,10 +64,7 @@ export function setBusy(isBusy) {
 }
 
 export function setStatusText(text) {
-  // Save this as the "resting" status
   lastStatus = text;
-  
-  // Only update the UI immediately if we aren't currently busy generating
   if (!isSystemBusy && els.avail) {
     els.avail.textContent = text;
   }
@@ -83,6 +84,12 @@ export function setContextText(text) {
 
 export function getContextText() {
   return els.contextText?.value?.trim() || '';
+}
+
+function scrollToBottom() {
+  if (els.log) {
+    els.log.scrollTop = els.log.scrollHeight;
+  }
 }
 
 export function renderSessions(filter = '') {
@@ -105,7 +112,8 @@ export function renderSessions(filter = '') {
 
     const info = document.createElement('div');
     info.className = 'session-info';
-    info.innerHTML = `<div class="session-title">${session.title || 'Untitled'}</div><div class="session-date">${formatDate(session.updatedAt)}</div>`;
+    // CHANGED: Removed date div, just showing title
+    info.innerHTML = `<div class="session-title">${session.title || 'Untitled'}</div>`;
     row.appendChild(info);
 
     const actions = document.createElement('div');
@@ -152,12 +160,14 @@ export function renderLog() {
   const session = getCurrentSession();
   if (!session || !els.log) return;
   const messages = session.messages;
+  
+  els.log.innerHTML = '';
+  
   if (!messages.length) {
-    els.log.innerHTML = '<div class="msg ai">(nothing yet)</div>';
+    els.log.innerHTML = '<div class="msg ai"><div class="body"><p>Ready to chat.</p></div></div>';
     setExportAvailability(false);
     return;
   }
-  els.log.innerHTML = '';
   
   messages.forEach((m, idx) => {
     const div = document.createElement('div');
@@ -196,6 +206,7 @@ export function renderLog() {
 
     const actions = document.createElement('div');
     actions.className = 'copy1';
+    
     const copyBtn = document.createElement('button');
     copyBtn.textContent = 'Copy';
     copyBtn.dataset.idx = idx;
@@ -208,37 +219,23 @@ export function renderLog() {
       speak.dataset.idx = idx;
       speak.className = 'speak';
       actions.appendChild(speak);
-      const feedback = document.createElement('div');
-      feedback.className = 'feedback';
-      const up = document.createElement('button');
-      up.textContent = '👍';
-      up.dataset.idx = idx;
-      up.dataset.rating = 'up';
-      if (m.rating === 'up') up.classList.add('active');
-      const down = document.createElement('button');
-      down.textContent = '👎';
-      down.dataset.idx = idx;
-      down.dataset.rating = 'down';
-      if (m.rating === 'down') down.classList.add('active');
-      feedback.appendChild(up);
-      feedback.appendChild(down);
-      div.appendChild(feedback);
     }
+    
     div.appendChild(actions);
     
-    els.log.prepend(div); 
+    els.log.appendChild(div); 
   });
   
-  els.log.scrollTop = 0;
+  scrollToBottom();
   setExportAvailability(true);
 }
 
 export function updateLastMessageBubble(markdownText) {
   if (!els.log) return;
-  const lastMsgBody = els.log.querySelector('.msg:first-child .body');
+  const lastMsgBody = els.log.querySelector('.msg:last-child .body');
   if (lastMsgBody) {
     lastMsgBody.innerHTML = markdownToHtml(markdownText);
-    els.log.scrollTop = 0;
+    scrollToBottom();
   } else {
     renderLog();
   }
@@ -294,7 +291,8 @@ export function closeTemplateMenu() {
 export function setMicState(active) {
   if (els.mic) {
     els.mic.setAttribute('aria-pressed', active ? 'true' : 'false');
-    els.mic.textContent = active ? '⏹' : '🎙';
+    els.mic.innerHTML = active ? ICON_STOP : ICON_MIC;
+    
     if (active) els.mic.classList.add('recording');
     else els.mic.classList.remove('recording');
   }

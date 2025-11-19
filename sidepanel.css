@@ -1,0 +1,326 @@
+:root {
+  /* Unified Palette */
+  --bg: #0b0b0d;           
+  --surface: #151518;      
+  --surface-2: #1c1c21;    
+  --surface-3: #24242a;    
+  --surface-hover: #2a2a30;
+  --on-bg: #ededf0;        
+  --on-bg-dim: #8a8a90;    
+  --accent: #58a6ff;       
+  --rad: 12px;             
+}
+
+/* GLOBAL RESET */
+*, *::before, *::after { box-sizing: border-box; }
+*:focus { outline: none !important; }
+
+html, body {
+  background: var(--bg); color: var(--on-bg);
+  margin: 0; width: 100%; height: 100%; overflow: hidden;
+  font: 14px "Inter", sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Scrollbars */
+*::-webkit-scrollbar { width: 4px; height: 4px; }
+*::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* --- HEADER --- */
+.appbar {
+  flex: 0 0 54px; 
+  display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+  background: var(--bg); 
+  z-index: 20;
+}
+.title { font-weight: 600; letter-spacing: -0.3px; font-size: 15px; }
+.chip {
+  margin-left: auto; padding: 2px 8px; border-radius: 6px;
+  background: var(--surface-2); color: var(--on-bg-dim); font-size: 11px;
+}
+
+/* --- WRAPPER --- */
+.wrap { 
+  flex: 1; 
+  display: flex; flex-direction: column; 
+  min-height: 0; 
+  width: 100%;
+  overflow: hidden;
+}
+
+/* --- CONTENT & CHAT --- */
+.content { 
+  flex: 1; 
+  display: flex; flex-direction: column; 
+  min-height: 0; 
+}
+
+.card.chat {
+  flex: 1; 
+  display: flex; flex-direction: column; 
+  background: var(--bg); min-height: 0;
+}
+
+.log-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 16px; background: var(--bg); flex-shrink: 0;
+}
+
+.log {
+  flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px;
+}
+
+/* --- MESSAGES --- */
+.msg {
+  padding: 10px 16px; border-radius: 16px; max-width: 96%; 
+  width: fit-content; line-height: 1.5; word-break: break-word;
+  position: relative;
+}
+.msg.user {
+  align-self: flex-end; background: var(--surface-3); color: var(--on-bg);
+  border-bottom-right-radius: 2px;
+}
+.msg.ai {
+  align-self: flex-start; background: var(--surface); color: var(--on-bg);
+  border-bottom-left-radius: 2px;
+}
+.sender-label, .msg-header { display: none; }
+
+/* --- MESSAGE ACTIONS --- */
+.msg .copy1 {
+  position: absolute; top: -10px; right: 0;
+  display: flex; gap: 4px;
+  opacity: 0; transition: opacity 0.2s ease;
+  background: var(--surface-2); padding: 2px; border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  z-index: 10;
+}
+.msg:hover .copy1 { opacity: 1; } 
+
+.copy1 button, .speak {
+  padding: 4px 8px !important; 
+  font-size: 11px !important;
+  height: auto !important;
+  min-width: 0 !important;
+  background: transparent;
+  
+  /* COLOR FIX: Made buttons bright white */
+  color: var(--on-bg); 
+}
+.copy1 button:hover { background: var(--surface-3); }
+
+/* --- INPUT AREA --- */
+.input-card {
+  flex: 0 0 auto; 
+  padding: 16px; padding-bottom: 16px;
+  background: var(--bg); 
+}
+.field {
+  background: var(--surface-2); border-radius: 16px; padding: 10px 14px;
+  transition: background-color 0.2s;
+}
+.field:focus-within { background: var(--surface); }
+
+textarea {
+  width: 100%; border: none; background: transparent; color: var(--on-bg);
+  resize: none; height: 48px; font: inherit;
+}
+
+.input-toolbar { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.row { display: flex; gap: 10px; margin-top: 12px; }
+.row button { flex: 1; }
+
+/* --- BUTTONS --- */
+button {
+  border: none; border-radius: 10px; padding: 10px 16px;
+  background: var(--surface-2); color: var(--on-bg); cursor: pointer;
+  font-weight: 500; 
+  transition: background-color 0.2s, opacity 0.2s;
+}
+button:hover { background-color: var(--surface-3); }
+
+.filled { background: var(--on-bg); color: var(--bg); }
+.filled:hover { opacity: 0.9; background: #fff; }
+.tonal { background: var(--surface-2); color: var(--on-bg-dim); }
+.tonal:hover { background: var(--surface-3); color: var(--on-bg); }
+button[disabled] { opacity: 0.4; cursor: default; }
+
+/* --- DROPDOWNS --- */
+.dropdown { position: relative; }
+
+/* COLOR FIX: Updated SVG stroke to %23ededf0 (Bright White) */
+.dropdown-trigger, .session-trigger {
+  background-color: transparent; 
+  padding: 6px 24px 6px 8px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23ededf0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat; 
+  background-position: right 8px center; 
+  background-size: 14px;
+  
+  /* COLOR FIX: Made text bright */
+  color: var(--on-bg); 
+  border-radius: 6px;
+}
+
+.dropdown-trigger {
+  background-color: transparent; 
+  padding: 6px 28px 6px 8px; 
+  font-size: 13px; 
+}
+.dropdown-trigger:hover { background-color: var(--surface-2); }
+
+.session-trigger {
+  width: 160px; 
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  text-align: left;
+}
+.session-trigger:hover {
+  background-color: var(--surface-2); 
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23ededf0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat; 
+  background-position: right 8px center; 
+  background-size: 14px;
+}
+
+.dropdown-menu {
+  position: absolute; background: var(--surface-2); 
+  border: none; 
+  border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); 
+  padding: 6px; display: flex; flex-direction: column; gap: 4px; z-index: 200;
+  min-width: 240px; 
+}
+.dropdown-menu { top: 100%; margin-top: 4px; }
+.input-card .dropdown-menu { top: auto; bottom: 100%; margin-bottom: 8px; }
+.dropdown-menu[hidden] { display: none; }
+
+.dropdown-item {
+  padding: 8px 12px; border-radius: 8px; font-size: 13px; 
+  text-align: left; background: transparent; color: var(--on-bg); border: none;
+}
+.dropdown-item:hover { background-color: var(--surface-3); }
+
+/* --- SESSION LIST --- */
+.session-row {
+  display: flex; align-items: center; justify-content: space-between; 
+  padding: 8px 12px; border-radius: 8px; cursor: pointer; gap: 12px;
+}
+.session-row:hover { background-color: var(--surface-3); }
+.session-row.active { background-color: var(--surface); }
+
+.session-info { 
+  flex: 1; overflow: hidden; display: flex; flex-direction: column; min-width: 0; 
+}
+.session-title { 
+  font-size: 13px; font-weight: 500; color: var(--on-bg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; 
+}
+.session-date { 
+  font-size: 11px; color: var(--on-bg-dim); margin-top: 2px;
+}
+
+.session-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.action-btn {
+  background: transparent; border: none; 
+  /* COLOR FIX: Made action icons bright */
+  color: var(--on-bg); 
+  padding: 6px; border-radius: 6px; cursor: pointer; font-size: 12px;
+  opacity: 0.6; transition: all 0.2s;
+}
+.action-btn:hover { opacity: 1; background-color: var(--bg); }
+.action-btn.delete:hover { color: #ff6b6b; background-color: rgba(255, 107, 107, 0.1); }
+.action-btn.delete.confirming { color: #fff; background-color: #ff6b6b; opacity: 1; }
+
+/* --- ICONS --- */
+/* COLOR FIX: Set all main icons to bright text color */
+.icon {
+  padding: 6px; background: transparent; 
+  color: var(--on-bg); 
+  border-radius: 8px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.icon:hover { background-color: var(--surface-2); }
+.icon svg { width: 20px; height: 20px; stroke-width: 2; }
+
+.mini-icon { width: 32px; height: 32px; padding: 0; } 
+.mini-icon svg { width: 18px; height: 18px; }
+.icon.recording { color: #ff6b6b; background-color: rgba(255, 107, 107, 0.1); }
+
+/* --- MODALS --- */
+.modal[hidden] { display: none !important; }
+
+.modal {
+  position: fixed; inset: 0; z-index: 2000; 
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none; 
+}
+
+.modal-backdrop { 
+  position: absolute; inset: 0; background-color: rgba(0, 0, 0, 0.8); 
+  z-index: 1; pointer-events: auto; cursor: pointer;
+}
+
+.modal-card {
+  position: relative; z-index: 100;
+  background: var(--surface); padding: 24px; 
+  border-radius: 16px; 
+  border: none;
+  width: 320px; 
+  display: flex; flex-direction: column; gap: 16px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.8); 
+  pointer-events: auto; 
+}
+
+.modal-card header { 
+  display: flex; justify-content: space-between; align-items: center;
+}
+.modal-card h2 {
+  margin: 0; font-size: 16px; font-weight: 600; color: var(--on-bg);
+}
+
+/* Settings Inputs */
+label { font-size: 12px; color: var(--on-bg-dim); font-weight: 500; display: flex; flex-direction: column; gap: 8px; }
+
+input[type="number"] {
+  background-color: var(--bg); border: none; 
+  color: var(--on-bg); padding: 8px; border-radius: 8px;
+  font-family: inherit; width: 60px;
+}
+input[type="number"]:focus { background-color: var(--surface-3); }
+input[type="range"] { accent-color: var(--on-bg); }
+
+/* Page Context Box */
+#context-modal .modal-card { width: 90%; height: 70vh; }
+
+#context-modal textarea {
+  flex: 1; width: 100%;
+  background-color: var(--bg); 
+  border: none; 
+  padding: 12px; border-radius: 8px;
+  font-family: monospace; font-size: 13px; color: var(--on-bg-dim);
+  resize: none;
+}
+
+#context-modal textarea:focus { 
+  color: var(--on-bg); 
+  background-color: var(--surface-2); 
+  outline: none;
+}
+
+/* Utilities */
+.attachment-list { 
+  display: flex; flex-wrap: wrap; gap: 8px; 
+  margin-bottom: 8px; padding: 0 4px;
+}
+.attachment-list:empty { display: none; }
+
+.attachment-chip { 
+  background-color: var(--surface-3); border-radius: 6px; padding: 4px 10px; 
+  font-size: 12px; color: var(--on-bg); border: none; 
+  max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer; 
+}
+.attachment-chip:hover { background-color: var(--surface-hover); color: #ff6b6b; }
+
+.header-actions, .session-controls { display: flex; align-items: center; gap: 6px; }

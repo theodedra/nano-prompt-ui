@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Nano Prompt UI",
-  "version": "0.2.1",
-  "description": "Popup UI for Chrome's on-device Prompt API (Gemini Nano).",
+  "version": "0.3.0",
+  "description": "Side Panel UI for Chrome's on-device Prompt API (Gemini Nano).",
   "permissions": [
+    "sidePanel",
     "storage",
     "unlimitedStorage",
     "scripting",
@@ -15,7 +16,13 @@
   "host_permissions": [
     "<all_urls>"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
-    "default_popup": "popup.html"
+    "default_title": "Open Nano Prompt"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
   }
 }

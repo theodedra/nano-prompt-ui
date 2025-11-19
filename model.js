@@ -14,7 +14,6 @@ const LM = (typeof LanguageModel !== 'undefined')
     ? self.ai.languageModel
     : undefined;
 
-// 1. Config for Checking Availability (Strictly capabilities only)
 function getCapabilities() {
   return {
     expectedInputs: [{ type: 'text', languages: ['en'] }],
@@ -22,7 +21,6 @@ function getCapabilities() {
   };
 }
 
-// 2. Config for Creating Session (Includes params + system prompt)
 function getSessionConfig() {
   return {
     ...getCapabilities(),
@@ -45,7 +43,6 @@ function getHistorySnippet(session) {
 async function ensureModelSession() {
   if (!LM) return null;
 
-  // 1. Check Availability
   try {
     const status = await LM.availability(getCapabilities());
     appState.availability = status?.availability || 'unknown';
@@ -68,7 +65,6 @@ async function ensureModelSession() {
     console.warn('Availability check failed:', e);
   }
 
-  // 2. Create Session if needed
   if (!appState.model) {
     try {
       appState.model = await LM.create(getSessionConfig());
@@ -124,7 +120,6 @@ export async function refreshAvailability() {
     const status = await LM.availability(getCapabilities());
     appState.availability = status?.availability;
     
-    // Mapping status to friendly UI text
     if (status?.availability === 'available' || status?.availability === 'readily') {
       UI.setStatusText('Ready');
       UI.setHardwareStatus('Gemini Nano: Ready');
@@ -138,7 +133,6 @@ export async function refreshAvailability() {
       UI.setStatusText('Not Supported');
       UI.setHardwareStatus('Gemini Nano: Not Supported');
     } else {
-      // Default fallback instead of "unknown"
       UI.setStatusText('Standby');
       UI.setHardwareStatus('Gemini Nano: Standby');
     }
@@ -240,7 +234,6 @@ export async function runPrompt({ text, contextOverride, attachments }) {
       aborted = true;
       updateMessage(session.id, aiMessageIndex, { text: '(stopped)' });
     } else {
-      // Final Fallback
       console.log('Triggering page fallback due to:', err.message);
       try {
         const fallback = await runPromptInPage(finalPrompt);
@@ -262,7 +255,6 @@ export async function runPrompt({ text, contextOverride, attachments }) {
   await saveState();
 }
 
-// UPDATED: Changed prompt instruction to request 7 detailed points
 export async function summarizeActiveTab(contextOverride) {
   const instruction = 'Summarize the current tab in seven detailed bullet points. Ensure each point is comprehensive.';
   await runPrompt({ text: instruction, contextOverride, attachments: [] });
@@ -274,8 +266,4 @@ export function speakText(text) {
   utterance.lang = 'en-US'; 
   window.speechSynthesis.cancel();
   window.speechSynthesis.speak(utterance);
-}
-
-export async function fetchPageContext() {
-  return { text: '', ts: Date.now() };
 }

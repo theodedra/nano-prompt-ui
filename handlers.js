@@ -11,7 +11,6 @@ import {
   getAttachments,
   updateContextDraft,
   updateSettings,
-  setSessionRating,
   renameSession
 } from './storage.js';
 import * as UI from './ui.js';
@@ -28,46 +27,28 @@ import { resizeImage } from './utils.js';
 let recognition;
 let recognizing = false;
 let tabListenersAttached = false;
-let tabActivatedListener;
-let tabUpdatedListener;
 
 async function refreshContextDraft(force = false) {
   try {
     const ctx = await fetchContext(force);
     const text = ctx?.text || '';
-    const previous = appState.contextDraft;
     updateContextDraft(text);
     UI.setContextText(text);
-    if (text !== previous) {
-      await saveState();
-    }
+    return text;
   } catch (e) {
-    console.warn('Failed to refresh context', e);
+    return '';
   }
 }
 
 function ensureTabContextSync() {
   if (tabListenersAttached) return;
-  if (!chrome?.tabs?.onActivated || !chrome?.tabs?.onUpdated) return;
-  tabActivatedListener = () => {
-    refreshContextDraft(true);
-  };
-  tabUpdatedListener = (tabId, changeInfo, tab) => {
-    if (tab?.active && changeInfo.status === 'complete') {
-      refreshContextDraft(true);
-    }
-  };
-  chrome.tabs.onActivated.addListener(tabActivatedListener);
-  chrome.tabs.onUpdated.addListener(tabUpdatedListener);
-  window.addEventListener('unload', () => {
-    if (tabActivatedListener) {
-      chrome.tabs.onActivated.removeListener(tabActivatedListener);
-    }
-    if (tabUpdatedListener) {
-      chrome.tabs.onUpdated.removeListener(tabUpdatedListener);
-    }
-    tabListenersAttached = false;
-  }, { once: true });
+  if (!chrome?.tabs?.onActivated) return;
+  
+  const update = () => refreshContextDraft(true);
+  chrome.tabs.onActivated.addListener(update);
+  chrome.tabs.onUpdated.addListener((id, info, tab) => {
+    if (tab?.active && info.status === 'complete') update();
+  });
   tabListenersAttached = true;
 }
 
@@ -79,7 +60,6 @@ export async function bootstrap() {
   UI.renderAttachments(getAttachments());
   UI.renderLog();
   
-  // PERMISSION SETUP LOGIC
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('mic_setup') === 'true') {
     setTimeout(() => handleMicClick(), 500);
@@ -92,7 +72,7 @@ export async function bootstrap() {
 
 export async function handleAskClick() {
   const value = UI.getInputValue().trim();
-  const text = value || 'Say hello in five words.';
+  const text = value || 'Hello';
   const attachments = getAttachments().slice();
   UI.setInputValue('');
   clearAttachments();
@@ -100,9 +80,23 @@ export async function handleAskClick() {
   
   let contextOverride = UI.getContextText();
   const intent = classifyIntent(text);
-  
-  if (text.length < 30 && intent === 'none') {
+
+  // --- SMART CONTEXT LOGIC ---
+
+  // 1. CASUAL CHAT: If user says "yo", "hi", "time?", WIPE context.
+  // This ensures we never send page data or system errors for simple chats.
+  if (text.length < 60 && intent === 'none') {
     contextOverride = '';
+  }
+  // 2. INTENTIONAL CHAT: If context looks stale (System Page), force a refresh 
+  // to check if the user has moved to a real tab (like LinkedIn).
+  else if (contextOverride.includes('[System Page]')) {
+     contextOverride = await refreshContextDraft(true);
+     
+     // If it is STILL a system page after refresh, and user didn't ask for summary, wipe it.
+     if (contextOverride.includes('[System Page]') && intent !== 'page') {
+       contextOverride = '';
+     }
   }
 
   await runPrompt({
@@ -113,7 +107,10 @@ export async function handleAskClick() {
 }
 
 export async function handleSummarizeClick() {
-  await summarizeActiveTab(UI.getContextText());
+  UI.setStatusText('Reading tab...');
+  // Force fresh read to ensure we summarize the CURRENT tab, not the old one.
+  const freshText = await refreshContextDraft(true); 
+  await summarizeActiveTab(freshText);
 }
 
 export async function handleNewSessionClick() {
@@ -125,87 +122,53 @@ export async function handleNewSessionClick() {
   UI.closeSessionMenu();
 }
 
-export async function handleCloneSession() {
-  const session = createSessionFrom(appState.currentSessionId);
-  setCurrentSession(session.id);
-  await saveState();
-  UI.renderSessions();
-  UI.renderLog();
-}
-
-export async function handleDeleteSession() {
-  // Deprecated generic handler, logic moved to handleSessionMenuClick
-}
-
-export async function handleRenameSession(sessionId) {
-  const targetId = sessionId || appState.currentSessionId;
-  const session = appState.sessions[targetId];
-  if (!session) return;
-  
-  const title = prompt('Rename session', session.title || '');
-  if (!title) return;
-  renameSession(targetId, title.trim());
-  await saveState();
-  UI.renderSessions();
-}
-
-// UPDATED: Central handler for the session list dropdown with inline confirm
 export async function handleSessionMenuClick(event) {
   const btn = event.target.closest('button');
   const row = event.target.closest('.session-row');
   
-  // Handle Action Buttons (Edit/Delete)
   if (btn && btn.classList.contains('action-btn')) {
-    event.stopPropagation(); // Don't select the session
+    event.stopPropagation();
     const id = btn.dataset.id;
     
     if (btn.classList.contains('delete')) {
-      // Check if we are in "Confirm" state
       if (btn.classList.contains('confirming')) {
-        // CONFIRMED: Perform deletion
         deleteSession(id);
         await saveState();
         UI.renderSessions();
         UI.renderLog();
       } else {
-        // FIRST CLICK: Enter "Confirm" state
-        
-        // 1. Reset any other buttons that might be waiting for confirmation
         document.querySelectorAll('.action-btn.delete.confirming').forEach(b => {
           b.classList.remove('confirming');
           b.textContent = '✕';
           b.title = 'Delete';
         });
-
-        // 2. Set this button to confirm mode
         btn.classList.add('confirming');
         btn.textContent = '✓'; 
-        btn.title = 'Confirm Delete';
-
-        // 3. Auto-reset after 3 seconds if not clicked
         setTimeout(() => {
-          if (btn && document.body.contains(btn) && btn.classList.contains('confirming')) {
-            btn.classList.remove('confirming');
-            btn.textContent = '✕';
-            btn.title = 'Delete';
-          }
+            if(btn.classList.contains('confirming')) {
+               btn.classList.remove('confirming');
+               btn.textContent = '✕';
+            }
         }, 3000);
       }
     } else if (btn.classList.contains('edit')) {
-      handleRenameSession(id);
+        const session = appState.sessions[id];
+        const newTitle = prompt('Rename chat', session.title);
+        if(newTitle) {
+            renameSession(id, newTitle);
+            await saveState();
+            UI.renderSessions();
+        }
     }
     return;
   }
 
-  // Handle Switching Sessions
   if (row) {
     const id = row.dataset.id;
-    if (id) {
-      setCurrentSession(id);
-      UI.highlightSession(id);
-      await saveState();
-      UI.closeSessionMenu();
-    }
+    setCurrentSession(id);
+    UI.highlightSession(id);
+    await saveState();
+    UI.closeSessionMenu();
   }
 }
 
@@ -222,79 +185,50 @@ export function handleSaveMarkdown() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${getCurrentSession().title || 'chat'}.md`;
+  a.download = 'chat-export.md';
   a.click();
-  URL.revokeObjectURL(url);
 }
 
 export function handleInputKeyDown(event) {
-  if (event.key === 'Enter' && event.ctrlKey) {
-    event.preventDefault();
-    handleSummarizeClick();
-    return;
-  }
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
     handleAskClick();
-    return;
-  }
-  if (event.key === 'Escape') {
-    if (UI.isModalOpen()) {
-      event.preventDefault();
-      UI.closeModal();
-    } else {
-      window.close();
-    }
   }
 }
 
 export function handleDocumentKeyDown(event) {
-  if (event.key !== 'Escape') return;
-  if (!UI.isModalOpen()) return;
-  event.preventDefault();
-  UI.closeModal();
+  if (event.key === 'Escape') {
+    if (UI.isModalOpen()) UI.closeModal();
+  }
 }
 
 export function handleModalClick(event) {
-  if (event.target?.dataset?.dismiss === 'modal' || event.target?.classList.contains('modal-backdrop')) {
+  const btn = event.target.closest('[data-dismiss="modal"]');
+  const backdrop = event.target.classList.contains('modal-backdrop');
+  if (btn || backdrop) {
     UI.closeModal();
   }
 }
 
 export async function handleLogClick(event) {
-  const idx = event.target.dataset.idx;
-  if (!Number.isFinite(Number(idx))) return;
-  if (event.target.classList.contains('bubble-copy')) {
-    const msg = getCurrentSession().messages[Number(idx)];
-    if (msg) {
-      await navigator.clipboard.writeText(msg.text || '');
-    }
-  } else if (event.target.classList.contains('speak')) {
-    const msg = getCurrentSession().messages[Number(idx)];
-    if (msg?.text) {
-      speakText(msg.text);
-    }
-  } else if (event.target.dataset.rating) {
-    setSessionRating(appState.currentSessionId, Number(idx), event.target.dataset.rating);
-    UI.renderLog();
-    saveState();
-  }
-}
+  const btn = event.target.closest('button');
+  if (!btn) return;
 
-export function handleSessionSearch(event) {
-  UI.renderSessions(event.target.value);
+  const idx = btn.dataset.idx;
+  if (btn.classList.contains('bubble-copy')) {
+      const msg = getCurrentSession().messages[idx];
+      if(msg) navigator.clipboard.writeText(msg.text);
+  } else if (btn.classList.contains('speak')) {
+      const msg = getCurrentSession().messages[idx];
+      if(msg) speakText(msg.text);
+  }
 }
 
 export function handleTemplateSelect(event) {
   const target = event.target.closest('.dropdown-item');
   if (!target) return;
-  
   const text = target.dataset.text;
-  if (typeof text === 'string') {
-    const existing = UI.getInputValue();
-    const joiner = existing.trim() ? '\n' : '';
-    UI.setInputValue(existing + joiner + text + '\n');
-  }
+  UI.setInputValue(UI.getInputValue() + text);
   UI.closeTemplateMenu();
 }
 
@@ -305,98 +239,43 @@ export function handleAttachClick() {
 export function handleFileInputChange(event) {
   const files = Array.from(event.target.files || []);
   files.slice(0, 3).forEach(async file => {
-    try {
-      const resizedData = await resizeImage(file, 1024); 
-      addAttachment({ name: file.name, type: 'image/jpeg', data: resizedData });
+      const data = await resizeImage(file, 1024);
+      addAttachment({ name: file.name, type: file.type, data });
       UI.renderAttachments(getAttachments());
-    } catch (e) {
-      console.warn('Failed to resize image', e);
-      const reader = new FileReader();
-      reader.onload = () => {
-        addAttachment({ name: file.name, type: file.type, data: reader.result });
-        UI.renderAttachments(getAttachments());
-      };
-      reader.readAsDataURL(file);
-    }
   });
   event.target.value = '';
 }
 
 export function handleAttachmentListClick(event) {
-  if (!event.target.dataset.idx) return;
-  const idx = Number(event.target.dataset.idx);
-  getAttachments().splice(idx, 1);
-  UI.renderAttachments(getAttachments());
+  const target = event.target.closest('.attachment-chip');
+  if (target) {
+      clearAttachments(); 
+      UI.renderAttachments(getAttachments());
+  }
 }
 
 export function handleMicClick() {
-  if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-    alert('Speech recognition is not supported in this browser.');
-    return;
-  }
-
-  if (recognizing) {
-    recognition.stop();
-    return;
-  }
-
-  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  recognition = new SpeechRecognition();
-  recognition.lang = 'en-US';
-  recognition.interimResults = true;
-  recognition.continuous = true; 
-
-  const startText = UI.getInputValue();
-
-  recognition.onstart = () => {
-    recognizing = true;
-    UI.setMicState(true);
-  };
-
-  recognition.onend = () => {
-    recognizing = false;
-    UI.setMicState(false);
-  };
-
-  recognition.onerror = (event) => {
-    console.warn('Speech recognition failed', event.error);
+    if (!('webkitSpeechRecognition' in window)) return alert('No Speech API');
+    if (recognizing) { recognition.stop(); return; }
     
-    if (event.error === 'not-allowed' || event.error === 'permission-denied') {
-      const doSetup = confirm(
-        'Microphone permission is blocked in the popup.\n\n' +
-        'Open a setup tab to grant permission once?'
-      );
-      if (doSetup) {
-        chrome.tabs.create({ url: chrome.runtime.getURL('popup.html?mic_setup=true') });
-      }
-    }
+    recognition = new webkitSpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
     
-    recognizing = false;
-    UI.setMicState(false);
-  };
-
-  recognition.onresult = (event) => {
-    let transcript = '';
-    for (let i = 0; i < event.results.length; ++i) {
-      transcript += event.results[i][0].transcript;
-    }
-    const spacer = (startText && !startText.match(/\s$/)) ? ' ' : '';
-    UI.setInputValue(startText + spacer + transcript);
-  };
-
-  try {
+    recognition.onstart = () => { recognizing = true; UI.setMicState(true); };
+    recognition.onend = () => { recognizing = false; UI.setMicState(false); };
+    recognition.onresult = (e) => {
+        let t = '';
+        for (let i = 0; i < e.results.length; ++i) t += e.results[i][0].transcript;
+        UI.setInputValue(t);
+    };
     recognition.start();
-  } catch (e) {
-    console.error(e);
-  }
 }
 
 export function handleSpeakLast() {
-  const msgs = getCurrentSession().messages;
-  const last = [...msgs].reverse().find(m => m.role === 'ai');
-  if (last?.text) {
-    speakText(last.text);
-  }
+    const msgs = getCurrentSession().messages;
+    const last = [...msgs].reverse().find(m => m.role === 'ai');
+    if (last) speakText(last.text);
 }
 
 export function handleStopClick() {
@@ -425,12 +304,12 @@ export function handleCloseSettings() {
 }
 
 export async function handleSaveSettings() {
-  updateSettings({
-    temperature: Number(document.getElementById('temperature').value),
-    topK: Number(document.getElementById('topk').value),
-    systemPrompt: document.getElementById('system-prompt').value
-  });
-  await saveState();
-  UI.closeModal();
-  await refreshAvailability();
+    const temp = document.getElementById('temperature').value;
+    const topk = document.getElementById('topk').value;
+    const sys = document.getElementById('system-prompt').value;
+    
+    updateSettings({ temperature: Number(temp), topK: Number(topk), systemPrompt: sys });
+    await saveState();
+    UI.closeModal();
+    await refreshAvailability();
 }
