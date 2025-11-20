@@ -1,6 +1,6 @@
 # Nano Prompt UI — Chrome MV3 (Side Panel Edition)
 
-![Nano Prompt UI](Screenshot.png)
+![Nano Prompt UI](screenshot.png)
 
 **TL;DR:** A privacy-first Chrome extension that runs entirely on-device using Chrome’s built-in **Gemini Nano** language model. Now updated to a **Side Panel** experience for persistent, uninterrupted AI assistance alongside your browsing.
 
@@ -19,7 +19,7 @@ Unlike standard popups that close when you click away, **Nano Prompt UI lives in
     * **Smart Truncation:** Intelligently chunks long articles to fit the model's context window.
     * **Context Optimization:** Automatically detects casual chats (e.g., "Hi") and skips loading page context to save battery and reduce latency.
 * **Robust Session Management:**
-    * **Auto-Saving:** Chats are saved locally.
+    * **Auto-Saving:** Chats are saved locally and sync metadata across devices.
     * **Session Control:** Rename, delete, or switch between multiple chat threads via the dropdown menu.
     * **Markdown Support:** Export full chat history to `.md` files.
 * **Rich Input & Media:**
@@ -71,6 +71,5 @@ To use this extension, you must enable Chrome's experimental AI features:
 The Unlicense — see `LICENSE.txt`.
 
 ## 👏 Credits
-
 
 Built by **Vimal "Vibe Coded"** with AI.

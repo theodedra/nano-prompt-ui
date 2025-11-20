@@ -1,3 +1,5 @@
+import { sanitizeText } from './utils.js';
+
 const ASSISTANT_RULES = `You run inside a Chrome extension side panel.
 You have access to the active tab's text content.
 Do not mention browsing limitations.
@@ -16,13 +18,13 @@ export function classifyIntent(text) {
 
 async function runContentScript(tab) {
   try {
-    // Check if we are on a valid web page
-    if (!tab || !/^https?:/i.test(tab.url || '')) {
-      const url = tab?.url || 'system page';
+    // SECURITY FIX: Re-added check. If not a standard web page, return explicit text.
+    // This prevents the AI from hallucinating when it sees "empty" context.
+    if (!tab || !tab.url || !/^https?:/i.test(tab.url)) {
       return { 
-        title: tab?.title || 'System Page', 
-        url, 
-        text: `[System Page] The user is viewing a browser system page (${url}). Security prevents reading this content.`, 
+        title: 'System Page', 
+        url: tab?.url || 'system', 
+        text: '[System Page: Content reading is disabled for security on this page.]', 
         meta: {} 
       };
     }
@@ -53,7 +55,13 @@ async function runContentScript(tab) {
     return result;
   } catch (e) {
     console.warn('Context extraction failed', e);
-    return { title: '', url: '', text: '', meta: {} };
+    // FALLBACK FIX: Return an error string instead of empty text.
+    return { 
+      title: 'Error', 
+      url: '', 
+      text: '[Error: Unable to access page content. The browser may be restricting access.]', 
+      meta: {} 
+    };
   }
 }
 
@@ -69,12 +77,10 @@ function smartTruncate(text, limit) {
 }
 
 export async function fetchContext(force = false) {
-  // Standard stable tab query
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const activeTabId = activeTab?.id ?? null;
-  const isFresh = Date.now() - cachedContext.ts < 15_000; // 15s cache
+  const isFresh = Date.now() - cachedContext.ts < 15_000; 
   
-  // Use cache unless forced or tab changed
   if (!force && cachedContext.text && isFresh && cachedContext.tabId === activeTabId) {
     return cachedContext;
   }
@@ -82,13 +88,11 @@ export async function fetchContext(force = false) {
   const info = await runContentScript(activeTab);
   const pieces = [];
   
-  if (info.text && !info.text.startsWith('[System Page]')) {
-    if (info.title) pieces.push(`Title: ${info.title}`);
-    if (info.url) pieces.push(`URL: ${info.url}`);
-  }
+  if (info.title) pieces.push(`Title: ${sanitizeText(info.title)}`);
+  if (info.url) pieces.push(`URL: ${info.url}`);
   
   if (info.text) {
-    const cleanText = smartTruncate(info.text, 7000); 
+    const cleanText = smartTruncate(sanitizeText(info.text), 7000);
     pieces.push(cleanText);
   }
   
@@ -107,7 +111,6 @@ export async function buildPromptWithContext(userText, contextOverride = '', att
 
   const parts = [ASSISTANT_RULES];
   
-  // Only add context if it exists and isn't empty
   if (contextText && contextText.trim().length > 0) {
     parts.push('Context:\n' + contextText.trim());
   }

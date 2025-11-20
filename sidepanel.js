@@ -12,54 +12,50 @@ document.addEventListener('DOMContentLoaded', async () => {
   await Handlers.bootstrap();
   await refreshAvailability();
 
-  bind('#ask', 'click', Handlers.handleAskClick);
-  bind('#sum', 'click', Handlers.handleSummarizeClick);
-  bind('#copy', 'click', Handlers.handleCopyChatClick);
-  bind('#save-md', 'click', Handlers.handleSaveMarkdown);
-  bind('#log', 'click', Handlers.handleLogClick);
-  
-  // TEMPLATES DROPDOWN
-  bind('#templates-trigger', 'click', (e) => {
-    e.stopPropagation();
-    UI.toggleTemplateMenu();
-  });
-  bind('#templates-menu', 'click', Handlers.handleTemplateSelect);
-  
-  // SESSION DROPDOWN & CONTROLS
-  bind('#session-trigger', 'click', (e) => {
-    e.stopPropagation();
-    UI.toggleSessionMenu();
-  });
-  bind('#session-menu', 'click', Handlers.handleSessionMenuClick);
-  bind('#new-session', 'click', Handlers.handleNewSessionClick);
+  // --- EVENT BINDINGS ---
+  const bindings = [
+    { sel: '#ask', ev: 'click', fn: Handlers.handleAskClick },
+    { sel: '#sum', ev: 'click', fn: Handlers.handleSummarizeClick },
+    { sel: '#copy', ev: 'click', fn: Handlers.handleCopyChatClick },
+    { sel: '#save-md', ev: 'click', fn: Handlers.handleSaveMarkdown },
+    { sel: '#log', ev: 'click', fn: Handlers.handleLogClick },
+    
+    // Dropdown Triggers (Generic)
+    { sel: '#templates-trigger', ev: 'click', fn: (e) => { e.stopPropagation(); UI.toggleMenu('templates'); } },
+    { sel: '#templates-menu', ev: 'click', fn: Handlers.handleTemplateSelect },
+    { sel: '#session-trigger', ev: 'click', fn: (e) => { e.stopPropagation(); UI.toggleMenu('session'); } },
+    { sel: '#session-menu', ev: 'click', fn: Handlers.handleSessionMenuClick },
+    { sel: '#new-session', ev: 'click', fn: Handlers.handleNewSessionClick },
 
-  // Global click listener to close dropdowns
+    // Media & Inputs
+    { sel: '#attach', ev: 'click', fn: Handlers.handleAttachClick },
+    { sel: '#file-input', ev: 'change', fn: Handlers.handleFileInputChange },
+    { sel: '#attachment-list', ev: 'click', fn: Handlers.handleAttachmentListClick },
+    { sel: '#mic', ev: 'click', fn: Handlers.handleMicClick },
+    { sel: '#speak-last', ev: 'click', fn: Handlers.handleSpeakLast },
+    { sel: '#stop', ev: 'click', fn: Handlers.handleStopClick },
+    
+    // Context
+    { sel: '#toggle-context', ev: 'click', fn: Handlers.handleToggleContext },
+    { sel: '#context-text', ev: 'input', fn: Handlers.handleContextInput },
+    { sel: '#context-modal', ev: 'click', fn: Handlers.handleModalClick },
+
+    // Settings
+    { sel: '#open-settings', ev: 'click', fn: Handlers.handleOpenSettings },
+    { sel: '#close-settings', ev: 'click', fn: Handlers.handleCloseSettings },
+    { sel: '#save-settings', ev: 'click', fn: Handlers.handleSaveSettings },
+    { sel: '#settings-modal', ev: 'click', fn: Handlers.handleModalClick }
+  ];
+
+  // --- APPLY BINDINGS ---
+  bindings.forEach(b => bind(b.sel, b.ev, b.fn));
+  
+  // --- GLOBAL LISTENERS ---
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('#templates-dropdown')) {
-      UI.closeTemplateMenu();
-    }
-    // Removed the missing #lang-dropdown check causing the crash
-    if (!e.target.closest('#session-dropdown')) {
-      UI.closeSessionMenu();
-    }
+    if (!e.target.closest('#templates-dropdown')) UI.closeMenu('templates');
+    if (!e.target.closest('#session-dropdown')) UI.closeMenu('session');
   });
 
-  bind('#attach', 'click', Handlers.handleAttachClick);
-  bind('#file-input', 'change', Handlers.handleFileInputChange);
-  bind('#attachment-list', 'click', Handlers.handleAttachmentListClick);
-  bind('#mic', 'click', Handlers.handleMicClick);
-  bind('#speak-last', 'click', Handlers.handleSpeakLast);
-  bind('#stop', 'click', Handlers.handleStopClick);
-  
-  bind('#toggle-context', 'click', Handlers.handleToggleContext);
-  bind('#context-text', 'input', Handlers.handleContextInput);
-  bind('#context-modal', 'click', Handlers.handleModalClick);
-
-  bind('#open-settings', 'click', Handlers.handleOpenSettings);
-  bind('#close-settings', 'click', Handlers.handleCloseSettings);
-  bind('#save-settings', 'click', Handlers.handleSaveSettings);
-  bind('#settings-modal', 'click', Handlers.handleModalClick);
-  
   document.getElementById('in')?.addEventListener('keydown', Handlers.handleInputKeyDown);
   document.addEventListener('keydown', Handlers.handleDocumentKeyDown, true);
 });

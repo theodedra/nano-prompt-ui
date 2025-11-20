@@ -10,6 +10,7 @@ import {
   clearAttachments,
   getAttachments,
   updateContextDraft,
+  saveContextDraft,
   updateSettings,
   renameSession
 } from './storage.js';
@@ -22,17 +23,21 @@ import {
   refreshAvailability
 } from './model.js';
 import { fetchContext, classifyIntent } from './context.js';
-import { resizeImage } from './utils.js';
+import { resizeImage, debounce } from './utils.js';
 
 let recognition;
 let recognizing = false;
 let tabListenersAttached = false;
+
+// STATE: Track which session is pending deletion
+let confirmingDeleteId = null;
 
 async function refreshContextDraft(force = false) {
   try {
     const ctx = await fetchContext(force);
     const text = ctx?.text || '';
     updateContextDraft(text);
+    saveContextDraft(text);
     UI.setContextText(text);
     return text;
   } catch (e) {
@@ -44,7 +49,7 @@ function ensureTabContextSync() {
   if (tabListenersAttached) return;
   if (!chrome?.tabs?.onActivated) return;
   
-  const update = () => refreshContextDraft(true);
+  const update = () => refreshContextDraft(false);
   chrome.tabs.onActivated.addListener(update);
   chrome.tabs.onUpdated.addListener((id, info, tab) => {
     if (tab?.active && info.status === 'complete') update();
@@ -55,7 +60,7 @@ function ensureTabContextSync() {
 export async function bootstrap() {
   await loadState();
   UI.updateTemplates(appState.templates);
-  UI.renderSessions();
+  UI.renderSessions(); 
   UI.setContextText(appState.contextDraft);
   UI.renderAttachments(getAttachments());
   UI.renderLog();
@@ -67,7 +72,9 @@ export async function bootstrap() {
   }
   
   ensureTabContextSync();
-  await refreshContextDraft(true);
+  if (!appState.contextDraft) {
+    await refreshContextDraft(true);
+  }
 }
 
 export async function handleAskClick() {
@@ -81,19 +88,11 @@ export async function handleAskClick() {
   let contextOverride = UI.getContextText();
   const intent = classifyIntent(text);
 
-  // --- SMART CONTEXT LOGIC ---
-
-  // 1. CASUAL CHAT: If user says "yo", "hi", "time?", WIPE context.
-  // This ensures we never send page data or system errors for simple chats.
   if (text.length < 60 && intent === 'none') {
     contextOverride = '';
   }
-  // 2. INTENTIONAL CHAT: If context looks stale (System Page), force a refresh 
-  // to check if the user has moved to a real tab (like LinkedIn).
   else if (contextOverride.includes('[System Page]')) {
      contextOverride = await refreshContextDraft(true);
-     
-     // If it is STILL a system page after refresh, and user didn't ask for summary, wipe it.
      if (contextOverride.includes('[System Page]') && intent !== 'page') {
        contextOverride = '';
      }
@@ -108,7 +107,6 @@ export async function handleAskClick() {
 
 export async function handleSummarizeClick() {
   UI.setStatusText('Reading tab...');
-  // Force fresh read to ensure we summarize the CURRENT tab, not the old one.
   const freshText = await refreshContextDraft(true); 
   await summarizeActiveTab(freshText);
 }
@@ -119,7 +117,47 @@ export async function handleNewSessionClick() {
   await saveState();
   UI.renderSessions();
   UI.renderLog();
-  UI.closeSessionMenu();
+  UI.closeMenu('session');
+}
+
+// OPTIMIZED DELETE: Fixed argument mismatch here
+async function deleteSessionHandler(btn, id) {
+  if (id === confirmingDeleteId) {
+    deleteSession(id);
+    confirmingDeleteId = null;
+    await saveState();
+    UI.renderSessions();
+    UI.renderLog();
+  } else {
+    confirmingDeleteId = id;
+    // FIX: Removed the empty string argument that was breaking the UI
+    UI.renderSessions(confirmingDeleteId); 
+    
+    setTimeout(() => {
+        if (confirmingDeleteId === id) {
+           confirmingDeleteId = null;
+           UI.renderSessions();
+        }
+    }, 3000);
+  }
+}
+
+async function renameSessionHandler(id) {
+  const session = appState.sessions[id];
+  const newTitle = prompt('Rename chat', session.title);
+  if(newTitle) {
+      renameSession(id, newTitle);
+      await saveState();
+      UI.renderSessions();
+  }
+}
+
+async function switchSessionHandler(row) {
+  const id = row.dataset.id;
+  setCurrentSession(id);
+  UI.highlightSession(id);
+  await saveState();
+  UI.closeMenu('session');
 }
 
 export async function handleSessionMenuClick(event) {
@@ -131,44 +169,15 @@ export async function handleSessionMenuClick(event) {
     const id = btn.dataset.id;
     
     if (btn.classList.contains('delete')) {
-      if (btn.classList.contains('confirming')) {
-        deleteSession(id);
-        await saveState();
-        UI.renderSessions();
-        UI.renderLog();
-      } else {
-        document.querySelectorAll('.action-btn.delete.confirming').forEach(b => {
-          b.classList.remove('confirming');
-          b.textContent = '✕';
-          b.title = 'Delete';
-        });
-        btn.classList.add('confirming');
-        btn.textContent = '✓'; 
-        setTimeout(() => {
-            if(btn.classList.contains('confirming')) {
-               btn.classList.remove('confirming');
-               btn.textContent = '✕';
-            }
-        }, 3000);
-      }
+      await deleteSessionHandler(btn, id);
     } else if (btn.classList.contains('edit')) {
-        const session = appState.sessions[id];
-        const newTitle = prompt('Rename chat', session.title);
-        if(newTitle) {
-            renameSession(id, newTitle);
-            await saveState();
-            UI.renderSessions();
-        }
+      await renameSessionHandler(id);
     }
     return;
   }
 
   if (row) {
-    const id = row.dataset.id;
-    setCurrentSession(id);
-    UI.highlightSession(id);
-    await saveState();
-    UI.closeSessionMenu();
+    await switchSessionHandler(row);
   }
 }
 
@@ -229,7 +238,7 @@ export function handleTemplateSelect(event) {
   if (!target) return;
   const text = target.dataset.text;
   UI.setInputValue(UI.getInputValue() + text);
-  UI.closeTemplateMenu();
+  UI.closeMenu('templates');
 }
 
 export function handleAttachClick() {
@@ -255,10 +264,12 @@ export function handleAttachmentListClick(event) {
 }
 
 export function handleMicClick() {
-    if (!('webkitSpeechRecognition' in window)) return alert('No Speech API');
+    const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Speech) return alert('Speech recognition not supported in this browser.');
+    
     if (recognizing) { recognition.stop(); return; }
     
-    recognition = new webkitSpeechRecognition();
+    recognition = new Speech();
     recognition.continuous = true;
     recognition.interimResults = true;
     
@@ -284,13 +295,14 @@ export function handleStopClick() {
 
 export async function handleToggleContext() {
   UI.openContextModal();
-  await refreshContextDraft(true);
+  await refreshContextDraft(false); 
 }
 
-export function handleContextInput(event) {
-  updateContextDraft(event.target.value);
-  saveState();
-}
+export const handleContextInput = debounce((event) => {
+  const text = event.target.value;
+  updateContextDraft(text);
+  saveContextDraft(text);
+}, 500);
 
 export function handleOpenSettings() {
   UI.openSettingsModal();

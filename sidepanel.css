@@ -13,7 +13,13 @@
 
 /* GLOBAL RESET */
 *, *::before, *::after { box-sizing: border-box; }
-*:focus { outline: none !important; }
+
+/* FOCUS REMOVAL: User requested no borders/outlines on inputs */
+:focus, :focus-visible { 
+  outline: none !important; 
+  border: none !important;
+  box-shadow: none !important;
+}
 
 html, body {
   background: var(--bg); color: var(--on-bg);
@@ -38,7 +44,7 @@ html, body {
 .title { font-weight: 600; letter-spacing: -0.3px; font-size: 15px; }
 .chip {
   margin-left: auto; padding: 2px 8px; border-radius: 6px;
-  background: var(--surface-2); color: var(--on-bg-dim); font-size: 11px;
+  background-color: var(--surface-2); color: var(--on-bg-dim); font-size: 11px;
 }
 
 /* --- WRAPPER --- */
@@ -79,11 +85,11 @@ html, body {
   position: relative;
 }
 .msg.user {
-  align-self: flex-end; background: var(--surface-3); color: var(--on-bg);
+  align-self: flex-end; background-color: var(--surface-3); color: var(--on-bg);
   border-bottom-right-radius: 2px;
 }
 .msg.ai {
-  align-self: flex-start; background: var(--surface); color: var(--on-bg);
+  align-self: flex-start; background-color: var(--surface); color: var(--on-bg);
   border-bottom-left-radius: 2px;
 }
 .sender-label, .msg-header { display: none; }
@@ -93,23 +99,21 @@ html, body {
   position: absolute; top: -10px; right: 0;
   display: flex; gap: 4px;
   opacity: 0; transition: opacity 0.2s ease;
-  background: var(--surface-2); padding: 2px; border-radius: 6px;
+  background-color: var(--surface-2); padding: 2px; border-radius: 6px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.3);
   z-index: 10;
 }
 .msg:hover .copy1 { opacity: 1; } 
 
 .copy1 button, .speak {
-  padding: 4px 8px !important; 
-  font-size: 11px !important;
-  height: auto !important;
-  min-width: 0 !important;
-  background: transparent;
-  
-  /* COLOR FIX: Made buttons bright white */
+  padding: 4px 8px; 
+  font-size: 11px;
+  height: auto;
+  min-width: 0;
+  background-color: transparent;
   color: var(--on-bg); 
 }
-.copy1 button:hover { background: var(--surface-3); }
+.copy1 button:hover { background-color: var(--surface-3); }
 
 /* --- INPUT AREA --- */
 .input-card {
@@ -118,14 +122,15 @@ html, body {
   background: var(--bg); 
 }
 .field {
-  background: var(--surface-2); border-radius: 16px; padding: 10px 14px;
+  background-color: var(--surface-2); border-radius: 16px; padding: 10px 14px;
   transition: background-color 0.2s;
 }
-.field:focus-within { background: var(--surface); }
+.field:focus-within { background-color: var(--surface); }
 
 textarea {
   width: 100%; border: none; background: transparent; color: var(--on-bg);
   resize: none; height: 48px; font: inherit;
+  outline: none; /* Extra safety to ensure no border */
 }
 
 .input-toolbar { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
@@ -135,22 +140,21 @@ textarea {
 /* --- BUTTONS --- */
 button {
   border: none; border-radius: 10px; padding: 10px 16px;
-  background: var(--surface-2); color: var(--on-bg); cursor: pointer;
+  background-color: var(--surface-2); color: var(--on-bg); cursor: pointer;
   font-weight: 500; 
-  transition: background-color 0.2s, opacity 0.2s;
 }
 button:hover { background-color: var(--surface-3); }
 
-.filled { background: var(--on-bg); color: var(--bg); }
-.filled:hover { opacity: 0.9; background: #fff; }
-.tonal { background: var(--surface-2); color: var(--on-bg-dim); }
-.tonal:hover { background: var(--surface-3); color: var(--on-bg); }
+.filled { background-color: var(--surface-3); color: #ffffff; }
+.filled:hover { background-color: var(--surface-hover); }
+
+.tonal { background-color: var(--surface-2); color: var(--on-bg-dim); }
+.tonal:hover { background-color: var(--surface-3); color: var(--on-bg); }
 button[disabled] { opacity: 0.4; cursor: default; }
 
 /* --- DROPDOWNS --- */
 .dropdown { position: relative; }
 
-/* COLOR FIX: Updated SVG stroke to %23ededf0 (Bright White) */
 .dropdown-trigger, .session-trigger {
   background-color: transparent; 
   padding: 6px 24px 6px 8px;
@@ -158,14 +162,11 @@ button[disabled] { opacity: 0.4; cursor: default; }
   background-repeat: no-repeat; 
   background-position: right 8px center; 
   background-size: 14px;
-  
-  /* COLOR FIX: Made text bright */
   color: var(--on-bg); 
   border-radius: 6px;
 }
 
 .dropdown-trigger {
-  background-color: transparent; 
   padding: 6px 28px 6px 8px; 
   font-size: 13px; 
 }
@@ -176,28 +177,32 @@ button[disabled] { opacity: 0.4; cursor: default; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   text-align: left;
 }
-.session-trigger:hover {
-  background-color: var(--surface-2); 
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23ededf0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat: no-repeat; 
-  background-position: right 8px center; 
-  background-size: 14px;
+.session-trigger:hover { background-color: var(--surface-2); }
+
+/* LIST RESET */
+ul.dropdown-menu, ul.attachment-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
 }
 
 .dropdown-menu {
-  position: absolute; background: var(--surface-2); 
+  position: absolute; background-color: var(--surface-2); 
   border: none; 
   border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.6); 
   padding: 6px; display: flex; flex-direction: column; gap: 4px; z-index: 200;
-  min-width: 240px; 
+  min-width: 240px;
+  max-width: 260px;
+  margin-top: 4px;
 }
-.dropdown-menu { top: 100%; margin-top: 4px; }
 .input-card .dropdown-menu { top: auto; bottom: 100%; margin-bottom: 8px; }
 .dropdown-menu[hidden] { display: none; }
 
 .dropdown-item {
   padding: 8px 12px; border-radius: 8px; font-size: 13px; 
-  text-align: left; background: transparent; color: var(--on-bg); border: none;
+  text-align: left; background-color: transparent; color: var(--on-bg); border: none;
+  width: 100%;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .dropdown-item:hover { background-color: var(--surface-3); }
 
@@ -221,21 +226,21 @@ button[disabled] { opacity: 0.4; cursor: default; }
 }
 
 .session-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
 .action-btn {
-  background: transparent; border: none; 
-  /* COLOR FIX: Made action icons bright */
+  background-color: transparent; border: none; 
   color: var(--on-bg); 
   padding: 6px; border-radius: 6px; cursor: pointer; font-size: 12px;
-  opacity: 0.6; transition: all 0.2s;
+  opacity: 0.6; 
+  transition: opacity 0.2s, background-color 0.2s;
 }
 .action-btn:hover { opacity: 1; background-color: var(--bg); }
 .action-btn.delete:hover { color: #ff6b6b; background-color: rgba(255, 107, 107, 0.1); }
 .action-btn.delete.confirming { color: #fff; background-color: #ff6b6b; opacity: 1; }
 
 /* --- ICONS --- */
-/* COLOR FIX: Set all main icons to bright text color */
 .icon {
-  padding: 6px; background: transparent; 
+  padding: 6px; background-color: transparent; 
   color: var(--on-bg); 
   border-radius: 8px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -263,7 +268,7 @@ button[disabled] { opacity: 0.4; cursor: default; }
 
 .modal-card {
   position: relative; z-index: 100;
-  background: var(--surface); padding: 24px; 
+  background-color: var(--surface); padding: 24px; 
   border-radius: 16px; 
   border: none;
   width: 320px; 

@@ -3,17 +3,16 @@ import {
   appState,
   getCurrentSession,
   setCurrentSession,
-  summarizeSession
+  summarizeSession,
+  BLANK_TEMPLATE_ID
 } from './storage.js';
 
 let els = {};
-let sessionFilter = '';
+// CLEANUP: Removed unused 'sessionFilter' variable
 
-// Track the resting status (e.g. "Ready") so we can restore it after "Thinking..."
 let lastStatus = 'Checking...'; 
 let isSystemBusy = false;
 
-// SVG CONSTANTS
 const ICON_MIC = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
 const ICON_STOP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect></svg>`;
 
@@ -21,10 +20,8 @@ export function initUI() {
   els = {
     avail: $('#model-status'),
     log: $('#log'),
-    // Header Actions
     copy: $('#copy'),
     saveMd: $('#save-md'),
-    
     sessionMeta: $('#session-meta'),
     contextPanel: $('#context-panel'),
     contextText: $('#context-text'),
@@ -44,14 +41,10 @@ export function initUI() {
 
 export function setBusy(isBusy) {
   isSystemBusy = isBusy;
-  
   $('#ask').disabled = isBusy;
   $('#sum').disabled = isBusy;
-  if (els.stop) {
-    els.stop.disabled = !isBusy;
-  }
+  if (els.stop) els.stop.disabled = !isBusy;
 
-  // VISUAL FEEDBACK: Change status chip when working
   if (els.avail) {
     if (isBusy) {
       els.avail.textContent = 'Thinking...';
@@ -71,15 +64,11 @@ export function setStatusText(text) {
 }
 
 export function setHardwareStatus(text) {
-  if (els.hardware) {
-    els.hardware.textContent = text;
-  }
+  if (els.hardware) els.hardware.textContent = text;
 }
 
 export function setContextText(text) {
-  if (els.contextText) {
-    els.contextText.value = text || '';
-  }
+  if (els.contextText) els.contextText.value = text || '';
 }
 
 export function getContextText() {
@@ -87,12 +76,11 @@ export function getContextText() {
 }
 
 function scrollToBottom() {
-  if (els.log) {
-    els.log.scrollTop = els.log.scrollHeight;
-  }
+  if (els.log) els.log.scrollTop = els.log.scrollHeight;
 }
 
-export function renderSessions(filter = '') {
+// CLEANUP: Removed unused 'filter' argument
+export function renderSessions(confirmingId = null) {
   if (!els.sessionMenu) return;
   els.sessionMenu.innerHTML = '';
   
@@ -101,18 +89,19 @@ export function renderSessions(filter = '') {
     els.sessionTrigger.textContent = current.title || 'Untitled Session';
   }
 
+  const fragment = document.createDocumentFragment();
+
   appState.sessionOrder.forEach(id => {
     const session = appState.sessions[id];
     if (!session) return;
     
-    const row = document.createElement('div');
+    const row = document.createElement('li');
     row.className = 'session-row';
     if (id === appState.currentSessionId) row.classList.add('active');
     row.dataset.id = id;
 
     const info = document.createElement('div');
     info.className = 'session-info';
-    // CHANGED: Removed date div, just showing title
     info.innerHTML = `<div class="session-title">${session.title || 'Untitled'}</div>`;
     row.appendChild(info);
 
@@ -128,32 +117,78 @@ export function renderSessions(filter = '') {
 
     const delBtn = document.createElement('button');
     delBtn.className = 'action-btn delete';
-    delBtn.textContent = '✕';
-    delBtn.title = 'Delete';
     delBtn.dataset.id = id;
+
+    if (id === confirmingId) {
+      delBtn.classList.add('confirming');
+      delBtn.textContent = '✓';
+      delBtn.title = 'Confirm Delete';
+    } else {
+      delBtn.textContent = '✕';
+      delBtn.title = 'Delete';
+    }
     actions.appendChild(delBtn);
 
     row.appendChild(actions);
-    els.sessionMenu.appendChild(row);
+    fragment.appendChild(row);
   });
+
+  els.sessionMenu.appendChild(fragment);
 }
 
-export function toggleSessionMenu() {
-  if (els.sessionMenu) {
-    const isHidden = els.sessionMenu.hidden;
-    els.sessionMenu.hidden = !isHidden;
-    els.sessionTrigger?.setAttribute('aria-expanded', !isHidden);
-    if (!isHidden === true) {
-      closeTemplateMenu();
-    }
+export function toggleMenu(menuName) {
+  let menu, trigger;
+  if (menuName === 'session') {
+    menu = els.sessionMenu;
+    trigger = els.sessionTrigger;
+    closeMenu('templates'); 
+  } else if (menuName === 'templates') {
+    menu = els.templatesMenu;
+    trigger = els.templatesTrigger;
+    closeMenu('session'); 
+  }
+
+  if (menu) {
+    const isHidden = menu.hidden;
+    menu.hidden = !isHidden;
+    trigger?.setAttribute('aria-expanded', !isHidden);
   }
 }
 
-export function closeSessionMenu() {
-  if (els.sessionMenu) {
-    els.sessionMenu.hidden = true;
-    els.sessionTrigger?.setAttribute('aria-expanded', 'false');
+export function closeMenu(menuName) {
+  let menu, trigger;
+  if (menuName === 'session') {
+    menu = els.sessionMenu;
+    trigger = els.sessionTrigger;
+  } else if (menuName === 'templates') {
+    menu = els.templatesMenu;
+    trigger = els.templatesTrigger;
   }
+  
+  if (menu) {
+    menu.hidden = true;
+    trigger?.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function createMessageActions(msg, idx) {
+  const actions = document.createElement('div');
+  actions.className = 'copy1';
+  
+  const copyBtn = document.createElement('button');
+  copyBtn.textContent = 'Copy';
+  copyBtn.dataset.idx = idx;
+  copyBtn.className = 'bubble-copy';
+  actions.appendChild(copyBtn);
+
+  if (msg.role === 'ai') {
+    const speak = document.createElement('button');
+    speak.textContent = '🔊';
+    speak.dataset.idx = idx;
+    speak.className = 'speak';
+    actions.appendChild(speak);
+  }
+  return actions;
 }
 
 export function renderLog() {
@@ -169,6 +204,8 @@ export function renderLog() {
     return;
   }
   
+  const fragment = document.createDocumentFragment();
+
   messages.forEach((m, idx) => {
     const div = document.createElement('div');
     div.className = `msg ${m.role}`;
@@ -184,7 +221,6 @@ export function renderLog() {
     const time = document.createElement('time');
     time.textContent = formatTime(m.ts);
     header.appendChild(time);
-
     div.appendChild(header);
 
     const body = document.createElement('div');
@@ -193,10 +229,10 @@ export function renderLog() {
     div.appendChild(body);
 
     if (m.attachments?.length) {
-      const att = document.createElement('div');
+      const att = document.createElement('ul');
       att.className = 'attachment-list';
       m.attachments.forEach(file => {
-        const chip = document.createElement('span');
+        const chip = document.createElement('li');
         chip.className = 'attachment-chip';
         chip.textContent = file.name;
         att.appendChild(chip);
@@ -204,28 +240,11 @@ export function renderLog() {
       div.appendChild(att);
     }
 
-    const actions = document.createElement('div');
-    actions.className = 'copy1';
-    
-    const copyBtn = document.createElement('button');
-    copyBtn.textContent = 'Copy';
-    copyBtn.dataset.idx = idx;
-    copyBtn.className = 'bubble-copy';
-    actions.appendChild(copyBtn);
-
-    if (m.role === 'ai') {
-      const speak = document.createElement('button');
-      speak.textContent = '🔊';
-      speak.dataset.idx = idx;
-      speak.className = 'speak';
-      actions.appendChild(speak);
-    }
-    
-    div.appendChild(actions);
-    
-    els.log.appendChild(div); 
+    div.appendChild(createMessageActions(m, idx));
+    fragment.appendChild(div);
   });
   
+  els.log.appendChild(fragment);
   scrollToBottom();
   setExportAvailability(true);
 }
@@ -248,51 +267,46 @@ function setExportAvailability(enabled) {
 export function renderAttachments(attachments) {
   if (!els.attachmentList) return;
   els.attachmentList.innerHTML = '';
+  
+  const fragment = document.createDocumentFragment();
+  
   attachments.forEach((att, idx) => {
+    const item = document.createElement('li');
     const chip = document.createElement('button');
     chip.className = 'attachment-chip';
     chip.textContent = att.name;
     chip.dataset.idx = idx;
-    els.attachmentList.appendChild(chip);
+    item.appendChild(chip);
+    fragment.appendChild(item);
   });
+  
+  els.attachmentList.appendChild(fragment);
 }
 
 export function updateTemplates(templates) {
   if (!els.templatesMenu) return;
   els.templatesMenu.innerHTML = '';
+  
+  const fragment = document.createDocumentFragment();
+  
   templates.forEach(t => {
-    if (t.id === 'blank') return; 
+    if (t.id === BLANK_TEMPLATE_ID) return; 
+    const item = document.createElement('li');
     const btn = document.createElement('button');
     btn.className = 'dropdown-item';
     btn.textContent = t.label;
     btn.dataset.text = t.text;
-    els.templatesMenu.appendChild(btn);
+    item.appendChild(btn);
+    fragment.appendChild(item);
   });
-}
-
-export function toggleTemplateMenu() {
-  if (els.templatesMenu) {
-    const isHidden = els.templatesMenu.hidden;
-    els.templatesMenu.hidden = !isHidden;
-    els.templatesTrigger?.setAttribute('aria-expanded', !isHidden);
-    if (!isHidden === true) {
-      closeSessionMenu();
-    } 
-  }
-}
-
-export function closeTemplateMenu() {
-  if (els.templatesMenu) {
-    els.templatesMenu.hidden = true;
-    els.templatesTrigger?.setAttribute('aria-expanded', 'false');
-  }
+  
+  els.templatesMenu.appendChild(fragment);
 }
 
 export function setMicState(active) {
   if (els.mic) {
     els.mic.setAttribute('aria-pressed', active ? 'true' : 'false');
     els.mic.innerHTML = active ? ICON_STOP : ICON_MIC;
-    
     if (active) els.mic.classList.add('recording');
     else els.mic.classList.remove('recording');
   }
@@ -331,15 +345,11 @@ export function getInputValue() {
 }
 
 export function setInputValue(value) {
-  if (els.input) {
-    els.input.value = value;
-  }
+  if (els.input) els.input.value = value;
 }
 
 export function setStopEnabled(canStop) {
-  if (els.stop) {
-    els.stop.disabled = !canStop;
-  }
+  if (els.stop) els.stop.disabled = !canStop;
 }
 
 export function getSessionMarkdown(sessionId) {
@@ -354,6 +364,7 @@ export function getPlaintext(sessionId) {
 
 export function highlightSession(sessionId) {
   setCurrentSession(sessionId);
-  renderSessions(sessionFilter);
+  // CLEANUP: Removed argument
+  renderSessions(); 
   renderLog();
 }

@@ -2,9 +2,14 @@ import { nanoid } from './utils.js';
 
 const LOCAL_KEY = 'nanoPromptUI.sessions.v3';
 const SYNC_KEY = 'nanoPromptUI.sessionMeta.v1';
+// NEW: Key for session-only storage (RAM based)
+const DRAFT_KEY = 'nanoPromptUI.draft';
+
+// REFACTOR: Export constant to avoid magic strings in UI
+export const BLANK_TEMPLATE_ID = 'blank';
 
 export const DEFAULT_TEMPLATES = [
-  { id: 'blank', label: 'Templates…', text: '' },
+  { id: BLANK_TEMPLATE_ID, label: 'Templates…', text: '' },
   { id: 'translator', label: 'Translate text', text: 'Translate the following text to English and explain any idioms:' },
   { id: 'proof', label: 'Proofread', text: 'You are a meticulous proofreader. Improve grammar and clarity for this text:' },
   { id: 'summary', label: 'Summarize', text: 'Summarize the following content in concise bullet points:' },
@@ -17,7 +22,7 @@ export const appState = {
   currentSessionId: null,
   templates: DEFAULT_TEMPLATES.slice(),
   attachments: [],
-  contextDraft: '',
+  contextDraft: '', // Now backed by storage.session
   downloading: null,
   availability: 'unknown',
   settings: {
@@ -105,13 +110,15 @@ export function updateMessage(sessionId, messageIndex, patch) {
 
 export async function saveState() {
   ensureDefaultSession();
+  // OPTIMIZATION: contextDraft is removed from local storage payload
+  // to prevent disk thrashing. It lives in session storage now.
   const payload = {
     sessions: appState.sessions,
     sessionOrder: appState.sessionOrder,
     currentSessionId: appState.currentSessionId,
     templates: appState.templates,
-    settings: appState.settings,
-    contextDraft: appState.contextDraft
+    settings: appState.settings
+    // contextDraft is intentionally excluded
   };
   try {
     await chrome.storage.local.set({ [LOCAL_KEY]: payload });
@@ -129,9 +136,26 @@ export async function saveState() {
   }
 }
 
+// NEW: Dedicated function for saving high-frequency draft text
+export async function saveContextDraft(text) {
+  try {
+    await chrome.storage.session.set({ [DRAFT_KEY]: text });
+  } catch (e) {
+    console.warn('Failed to save session draft', e);
+  }
+}
+
 export async function loadState() {
   try {
-    const stored = (await chrome.storage.local.get(LOCAL_KEY))[LOCAL_KEY];
+    // OPTIMIZATION: Load Disk (Local) and RAM (Session) in parallel
+    const [localData, sessionData] = await Promise.all([
+      chrome.storage.local.get(LOCAL_KEY),
+      chrome.storage.session.get(DRAFT_KEY)
+    ]);
+
+    const stored = localData[LOCAL_KEY];
+    const draft = sessionData[DRAFT_KEY];
+
     if (stored) {
       Object.assign(appState, {
         sessions: stored.sessions || {},
@@ -139,8 +163,10 @@ export async function loadState() {
         currentSessionId: stored.currentSessionId || null,
         templates: stored.templates?.length ? stored.templates : DEFAULT_TEMPLATES.slice(),
         settings: { ...appState.settings, ...(stored.settings || {}) },
-        contextDraft: stored.contextDraft || ''
+        contextDraft: draft || '' // Hydrate from session storage
       });
+    } else if (draft) {
+      appState.contextDraft = draft;
     }
   } catch (e) {
     console.warn('Failed to load state', e);

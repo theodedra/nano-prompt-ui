@@ -40,6 +40,8 @@ function getHistorySnippet(session) {
   return slice.map(m => `${m.role === 'user' ? 'User' : 'Nano'}: ${m.text}`).join('\n');
 }
 
+// --- SESSION MANAGEMENT ---
+
 async function ensureModelSession() {
   if (!LM) return null;
 
@@ -58,9 +60,7 @@ async function ensureModelSession() {
       }
     }
 
-    if (status?.availability === 'no') {
-      return null;
-    }
+    if (status?.availability === 'no') return null;
   } catch (e) {
     console.warn('Availability check failed:', e);
   }
@@ -76,6 +76,57 @@ async function ensureModelSession() {
   
   UI.setHardwareStatus('Gemini Nano: Ready');
   return appState.model;
+}
+
+export async function refreshAvailability() {
+  if (!LM) {
+    UI.setHardwareStatus('Gemini Nano: Unavailable');
+    UI.setStatusText('Not Supported');
+    return;
+  }
+  try {
+    const status = await LM.availability(getCapabilities());
+    appState.availability = status?.availability;
+    
+    const map = {
+      'available': 'Ready',
+      'readily': 'Ready',
+      'downloading': 'Downloading...',
+      'after-download': 'Download Needed',
+      'no': 'Not Supported'
+    };
+    
+    const text = map[status?.availability] || 'Standby';
+    UI.setStatusText(text);
+    UI.setHardwareStatus(`Gemini Nano: ${text}`);
+  } catch (e) {
+    UI.setStatusText('Error');
+    UI.setHardwareStatus('Gemini Nano: Error');
+    console.warn('Refresh availability failed:', e);
+  }
+}
+
+// --- PROMPT EXECUTION HELPERS ---
+
+async function executeStreamingPrompt(model, prompt, signal, onUpdate) {
+  if (model.promptStreaming) {
+    const stream = await model.promptStreaming(prompt, { signal });
+    const reader = stream.getReader();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) {
+        buffer += value;
+        onUpdate(buffer);
+      }
+    }
+    return buffer;
+  } else {
+    const result = await model.prompt(prompt, { signal });
+    onUpdate(result);
+    return result;
+  }
 }
 
 async function runPromptInPage(prompt) {
@@ -110,74 +161,7 @@ async function runPromptInPage(prompt) {
   return result?.data || '';
 }
 
-export async function refreshAvailability() {
-  if (!LM) {
-    UI.setHardwareStatus('Gemini Nano: Unavailable');
-    UI.setStatusText('Not Supported');
-    return;
-  }
-  try {
-    const status = await LM.availability(getCapabilities());
-    appState.availability = status?.availability;
-    
-    if (status?.availability === 'available' || status?.availability === 'readily') {
-      UI.setStatusText('Ready');
-      UI.setHardwareStatus('Gemini Nano: Ready');
-    } else if (status?.availability === 'downloading') {
-      UI.setStatusText('Downloading...');
-      UI.setHardwareStatus('Gemini Nano: Downloading');
-    } else if (status?.availability === 'after-download') {
-      UI.setStatusText('Download Needed');
-      UI.setHardwareStatus('Gemini Nano: Download Needed');
-    } else if (status?.availability === 'no') {
-      UI.setStatusText('Not Supported');
-      UI.setHardwareStatus('Gemini Nano: Not Supported');
-    } else {
-      UI.setStatusText('Standby');
-      UI.setHardwareStatus('Gemini Nano: Standby');
-    }
-  } catch (e) {
-    UI.setStatusText('Error');
-    UI.setHardwareStatus('Gemini Nano: Error');
-    console.warn('Refresh availability failed:', e);
-  }
-}
-
-function cancelCurrentStream() {
-  if (activeController) {
-    activeController.abort();
-    activeController = null;
-  }
-  UI.setStopEnabled(false);
-}
-
-export function cancelGeneration() {
-  cancelCurrentStream();
-}
-
-async function executePrompt(prompt, signal, onUpdate) {
-  const model = await ensureModelSession();
-  if (!model) throw new Error('on-device model unavailable');
-  
-  if (model.promptStreaming) {
-    const stream = await model.promptStreaming(prompt, { signal });
-    const reader = stream.getReader();
-    let buffer = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) {
-        buffer += value;
-        onUpdate(buffer);
-      }
-    }
-    return buffer;
-  } else {
-    const result = await model.prompt(prompt, { signal });
-    onUpdate(result);
-    return result;
-  }
-}
+// --- MAIN PROMPT LOGIC ---
 
 export async function runPrompt({ text, contextOverride, attachments }) {
   const session = getCurrentSession();
@@ -203,22 +187,27 @@ export async function runPrompt({ text, contextOverride, attachments }) {
   let replyText = '';
 
   try {
+    const model = await ensureModelSession();
+    if (!model) throw new Error('On-device model unavailable');
+
+    // 1. Attempt Streaming
     try {
-      replyText = await executePrompt(finalPrompt, controller.signal, (chunk) => {
+      replyText = await executeStreamingPrompt(model, finalPrompt, controller.signal, (chunk) => {
         updateMessage(session.id, aiMessageIndex, { text: chunk });
         UI.updateLastMessageBubble(chunk);
       });
     } catch (err) {
-      if (err?.name === 'AbortError') throw err; 
-      console.warn('Attempt 1 failed, trying cleanup...', err);
+      if (err?.name === 'AbortError') throw err;
+      console.warn('Streaming failed, trying fallback logic...', err);
     }
 
+    // 2. Retry Clean (if context caused issues)
     if ((!replyText || !replyText.trim()) && contextOverride) {
       console.log('Empty response with context. Retrying clean.');
       activePrompt = await buildPromptWithContext(text, '', attachments);
       finalPrompt = `${activePrompt}\n\nConversation so far:\n${conversation}`;
       
-      replyText = await executePrompt(finalPrompt, controller.signal, (chunk) => {
+      replyText = await executeStreamingPrompt(model, finalPrompt, controller.signal, (chunk) => {
         updateMessage(session.id, aiMessageIndex, { text: chunk });
         UI.updateLastMessageBubble(chunk);
       });
@@ -234,18 +223,19 @@ export async function runPrompt({ text, contextOverride, attachments }) {
       aborted = true;
       updateMessage(session.id, aiMessageIndex, { text: '(stopped)' });
     } else {
+      // 3. Fallback to Page Injection
       console.log('Triggering page fallback due to:', err.message);
       try {
         const fallback = await runPromptInPage(finalPrompt);
         replyText = fallback;
       } catch (e2) {
-        updateMessage(session.id, aiMessageIndex, { text: 'Error: ' + (e2.message || e2) });
+        updateMessage(session.id, aiMessageIndex, { text: `Error: Service unavailable. (${e2.message || e2})` });
       }
     }
   }
 
-  if (!aborted) {
-    const normalized = (replyText || '').trim() || '(empty)';
+  if (!aborted && replyText) {
+    const normalized = (replyText || '').trim();
     updateMessage(session.id, aiMessageIndex, { text: normalized, ts: Date.now() });
     UI.updateLastMessageBubble(normalized); 
   }
@@ -253,6 +243,14 @@ export async function runPrompt({ text, contextOverride, attachments }) {
   UI.setBusy(false);
   UI.setStopEnabled(false);
   await saveState();
+}
+
+export function cancelGeneration() {
+  if (activeController) {
+    activeController.abort();
+    activeController = null;
+  }
+  UI.setStopEnabled(false);
 }
 
 export async function summarizeActiveTab(contextOverride) {
