@@ -170,3 +170,10 @@ export function resizeImage(file, maxWidth = 800) {
     reader.readAsDataURL(file);
   });
 }
+// ... (keep existing code)
+
+// --- NEW HELPER for AI Images ---
+export async function dataUrlToBlob(dataUrl) {
+  const res = await fetch(dataUrl);
+  return await res.blob();
+}

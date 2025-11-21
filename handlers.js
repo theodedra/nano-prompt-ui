@@ -20,7 +20,8 @@ import {
   summarizeActiveTab,
   cancelGeneration,
   speakText,
-  refreshAvailability
+  refreshAvailability,
+  resetModel // Now this import will work!
 } from './model.js';
 import { fetchContext, classifyIntent } from './context.js';
 import { resizeImage, debounce } from './utils.js';
@@ -38,7 +39,13 @@ async function refreshContextDraft(force = false) {
   try {
     const ctx = await fetchContext(force);
     const text = ctx?.text || '';
-    // Save to volatile session storage (RAM)
+    
+    if (ctx.isRestricted) {
+      UI.setRestrictedState(true);
+    } else {
+      UI.setRestrictedState(false);
+    }
+
     updateContextDraft(text);
     await saveContextDraft(text); 
     UI.setContextText(text);
@@ -51,12 +58,14 @@ async function refreshContextDraft(force = false) {
 
 function ensureTabContextSync() {
   if (tabListenersAttached) return;
-  // Safety check for API availability
   if (!chrome?.tabs?.onActivated) return;
   
-  const update = () => refreshContextDraft(false);
+  // FIX: Update UI on tab switch but DO NOT reset AI model.
+  // This keeps the chat alive while browsing.
+  const update = () => {
+      refreshContextDraft(false);
+  };
   
-  // Listen for tab switches to keep context fresh
   chrome.tabs.onActivated.addListener(update);
   chrome.tabs.onUpdated.addListener((id, info, tab) => {
     if (tab?.active && info.status === 'complete') update();
@@ -67,29 +76,26 @@ function ensureTabContextSync() {
 // --- INITIALIZATION ---
 
 export async function bootstrap() {
-  // 1. Load heavy state from IndexedDB
   await loadState();
   
-  // 2. Hydrate UI
   UI.updateTemplates(appState.templates);
   UI.renderSessions(); 
   UI.setContextText(appState.contextDraft);
   UI.renderAttachments(getAttachments());
   UI.renderLog();
   
-  // 3. Check if opened via specific action (e.g. mic shortcut)
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('mic_setup') === 'true') {
     setTimeout(() => handleMicClick(), 500);
     return; 
   }
   
-  // 4. Start Context Listeners
   ensureTabContextSync();
   
-  // 5. Initial Context Fetch (if empty)
   if (!appState.contextDraft) {
     await refreshContextDraft(true);
+  } else {
+    await refreshContextDraft(true); 
   }
 }
 
@@ -97,25 +103,21 @@ export async function bootstrap() {
 
 export async function handleAskClick() {
   const value = UI.getInputValue().trim();
-  // Default to "Hello" if empty to trigger the model
   const text = value || 'Hello'; 
   const attachments = getAttachments().slice();
   
-  // Reset UI immediately for responsiveness
   UI.setInputValue('');
   clearAttachments();
   UI.renderAttachments(getAttachments());
   
-  // Determine Intent
   let contextOverride = UI.getContextText();
   const intent = classifyIntent(text);
 
-  // Heuristic: Don't send huge context for short greetings
+  // Optimization: Don't send huge context for simple "Hi" messages
   if (text.length < 60 && intent === 'none') {
     contextOverride = '';
   }
   else if (contextOverride.includes('[System Page]')) {
-     // Try one refresh if it looks stale/system
      contextOverride = await refreshContextDraft(true);
      if (contextOverride.includes('[System Page]') && intent !== 'page') {
        contextOverride = '';
@@ -144,30 +146,30 @@ export async function handleNewSessionClick() {
   const session = createSessionFrom();
   setCurrentSession(session.id);
   await saveState();
+  
+  // Reset AI for new chat
+  resetModel(); 
+  
   UI.renderSessions();
   UI.renderLog();
   UI.closeMenu('session');
 }
 
-// LOGIC FIX: Better Delete Handling
 async function deleteSessionHandler(btn, id) {
   if (id === confirmingDeleteId) {
-    // Confirmed
     deleteSession(id);
     confirmingDeleteId = null;
-    await saveState(); // Persist deletion to IDB
+    await saveState(); 
     UI.renderSessions();
     UI.renderLog();
+    resetModel(); 
   } else {
-    // First Click
     confirmingDeleteId = id;
     UI.renderSessions(confirmingDeleteId); 
-    
-    // Auto-cancel confirmation after 3s
     setTimeout(() => {
         if (confirmingDeleteId === id) {
            confirmingDeleteId = null;
-           UI.renderSessions(); // Re-render to remove red state
+           UI.renderSessions(); 
         }
     }, 3000);
   }
@@ -188,6 +190,10 @@ async function switchSessionHandler(row) {
   setCurrentSession(id);
   UI.highlightSession(id);
   await saveState();
+  
+  // Switch context history
+  resetModel(); 
+  
   UI.closeMenu('session');
 }
 
@@ -241,6 +247,13 @@ export function handleInputKeyDown(event) {
 export function handleDocumentKeyDown(event) {
   if (event.key === 'Escape') {
     if (UI.isModalOpen()) UI.closeModal();
+    return;
+  }
+
+  if (event.key === 'Tab') {
+    const openModal = document.querySelector('.modal:not([hidden])');
+    const container = openModal || document.body;
+    UI.trapFocus(event, container);
   }
 }
 
@@ -261,7 +274,6 @@ export async function handleLogClick(event) {
       const msg = getCurrentSession().messages[idx];
       if(msg) {
         await navigator.clipboard.writeText(msg.text);
-        // Visual feedback could be added here
       }
   } else if (btn.classList.contains('speak')) {
       const msg = getCurrentSession().messages[idx];
@@ -275,7 +287,6 @@ export function handleTemplateSelect(event) {
   const text = target.dataset.text;
   UI.setInputValue(UI.getInputValue() + text);
   UI.closeMenu('templates');
-  // Optional: auto-focus input
   document.getElementById('in')?.focus();
 }
 

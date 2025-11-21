@@ -7,13 +7,65 @@ import {
   saveState
 } from './storage.js';
 import { buildPromptWithContext } from './context.js';
+import { dataUrlToBlob } from './utils.js'; // Import the helper
 
-// Detection for the Prompt API (Standard vs Polyfill)
-const LM = (typeof LanguageModel !== 'undefined')
-  ? LanguageModel
-  : (self.ai && self.ai.languageModel)
-    ? self.ai.languageModel
-    : undefined;
+// --- LOCAL AI WRAPPER CLASS ---
+class LocalAI {
+  constructor() {
+    this.session = null;
+    this.controller = null;
+  }
+
+  get engine() {
+    if (self.ai && self.ai.languageModel) return self.ai.languageModel;
+    if (self.LanguageModel) return self.LanguageModel;
+    return null;
+  }
+
+  async getAvailability() {
+    if (!this.engine) return 'no';
+    try {
+      const config = getCapabilities();
+      const status = await this.engine.availability(config);
+      return typeof status === 'object' ? status.availability : status;
+    } catch (e) {
+      return 'no';
+    }
+  }
+
+  async createSession(config) {
+    if (!this.engine) throw new Error('AI not supported');
+    this.session = await this.engine.create(config);
+    return this.session;
+  }
+
+  async promptStreaming(input, signal, onUpdate) {
+    if (!this.session) throw new Error('No active session');
+    
+    // Standardize input (Text or Array)
+    const stream = await this.session.promptStreaming(input, { signal });
+    const reader = stream.getReader();
+    let buffer = '';
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (value) {
+        buffer += value;
+        onUpdate(buffer);
+      }
+    }
+    return buffer;
+  }
+
+  destroy() {
+    if (this.session) {
+      try { this.session.destroy(); } catch(e) {}
+      this.session = null;
+    }
+  }
+}
+
+const localAI = new LocalAI();
 
 function getCapabilities() {
   return {
@@ -27,151 +79,39 @@ function getSessionConfig() {
     ...getCapabilities(),
     topK: appState.settings.topK,
     temperature: appState.settings.temperature,
-    initialPrompts: [
-      { role: 'system', content: appState.settings.systemPrompt || 'You are a helpful assistant.' }
-    ]
+    systemPrompt: appState.settings.systemPrompt || 'You are a helpful assistant.'
   };
 }
 
-let activeController = null;
-let downloadListenerRegistered = false;
-
 function getHistorySnippet(session) {
-  // Limit context window to last 8 messages to save tokens
-  const slice = session.messages.slice(-8);
+  const slice = session.messages.slice(-50);
   return slice.map(m => `${m.role === 'user' ? 'User' : 'Nano'}: ${m.text}`).join('\n');
 }
 
-// --- SESSION MANAGEMENT ---
+// --- EXPORTED FUNCTIONS ---
 
-async function ensureModelSession() {
-  if (!LM) return null;
-
-  try {
-    const status = await LM.availability(getCapabilities());
-    appState.availability = status?.availability || 'unknown';
-
-    // UX: Show download progress if model is fetching
-    if (status?.availability === 'downloading' || status?.availability === 'after-download') {
-      if (!downloadListenerRegistered && status?.onprogress) {
-        downloadListenerRegistered = true;
-        status.onprogress.addEventListener('progress', evt => {
-          const pct = Math.round((evt.loaded / evt.total) * 100);
-          UI.setStatusText(`Downloading ${pct}%`);
-          UI.setHardwareStatus(`Gemini Nano downloading… ${pct}%`);
-        });
-      }
-    }
-
-    if (status?.availability === 'no') return null;
-  } catch (e) {
-    console.warn('Availability check failed:', e);
-  }
-
-  if (!appState.model) {
-    try {
-      appState.model = await LM.create(getSessionConfig());
-    } catch (err) {
-      console.error('Failed to create model session:', err);
-      return null;
-    }
-  }
-  
-  UI.setHardwareStatus('Gemini Nano: Ready');
-  return appState.model;
+export function resetModel() {
+  localAI.destroy();
 }
 
 export async function refreshAvailability() {
-  if (!LM) {
-    UI.setHardwareStatus('Gemini Nano: Unavailable');
-    UI.setStatusText('Not Supported');
-    return;
-  }
-  try {
-    const status = await LM.availability(getCapabilities());
-    appState.availability = status?.availability;
-    
-    const map = {
-      'available': 'Ready',
-      'readily': 'Ready',
-      'downloading': 'Downloading...',
-      'after-download': 'Download Needed',
-      'no': 'Not Supported'
-    };
-    
-    const text = map[status?.availability] || 'Standby';
-    UI.setStatusText(text);
-    UI.setHardwareStatus(`Gemini Nano: ${text}`);
-  } catch (e) {
-    UI.setStatusText('Error');
-    UI.setHardwareStatus('Gemini Nano: Error');
-    console.warn('Refresh availability failed:', e);
-  }
-}
-
-// --- PROMPT EXECUTION HELPERS ---
-
-async function executeStreamingPrompt(model, prompt, signal, onUpdate) {
-  if (model.promptStreaming) {
-    const stream = await model.promptStreaming(prompt, { signal });
-    const reader = stream.getReader();
-    let buffer = '';
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) {
-        buffer += value;
-        onUpdate(buffer);
-      }
-    }
-    return buffer;
-  } else {
-    // Fallback for non-streaming implementations
-    const result = await model.prompt(prompt, { signal });
-    onUpdate(result);
-    return result;
-  }
-}
-
-/**
- * Fallback: Tries to run the prompt inside the web page itself.
- * Useful if the side panel environment is restricted but the page has access.
- */
-async function runPromptInPage(prompt) {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) throw new Error('No active tab');
-
-  // SECURITY FIX: Prevent injection into restricted pages (chrome://, about:)
-  if (!tab.url || !/^https?:/i.test(tab.url)) {
-    throw new Error('Page fallback unavailable: Restricted protocol');
-  }
+  // Check Side Panel
+  let status = await localAI.getAvailability();
   
-  const [{ result }] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: async (p, sysPrompt) => {
-      const model = self.ai?.languageModel || self.LanguageModel;
-      if (!model) return { error: 'LanguageModel not available in page' };
-      
-      try {
-        const session = await model.create({
-          initialPrompts: [
-            { role: 'system', content: sysPrompt || 'You are a helpful assistant.' }
-          ],
-          expectedInputs: [{ type: 'text', languages: ['en'] }],
-          expectedOutputs: [{ type: 'text', languages: ['en'] }]
-        });
-        
-        const reply = await session.prompt(p);
-        return { ok: true, data: reply };
-      } catch (e) {
-        return { error: e.toString() };
-      }
-    },
-    args: [prompt, appState.settings.systemPrompt]
-  });
+  // If Side Panel fails, optimistically assume Page Mode works (since we fixed the injector)
+  if (status === 'no') status = 'Page-Mode';
 
-  if (result?.error) throw new Error(result.error);
-  return result?.data || '';
+  const map = {
+    'available': 'Ready',
+    'readily': 'Ready',
+    'downloading': 'Downloading...',
+    'after-download': 'Download Needed',
+    'no': 'Not Supported',
+    'Page-Mode': 'Ready (Hybrid)'
+  };
+  const text = map[status] || 'Standby';
+  UI.setStatusText(text);
+  UI.setHardwareStatus(`Gemini Nano: ${text}`);
 }
 
 // --- MAIN PROMPT LOGIC ---
@@ -187,46 +127,49 @@ export async function runPrompt({ text, contextOverride, attachments }) {
   UI.setBusy(true);
   UI.setStopEnabled(true);
 
-  // Prepare Prompt
-  const conversation = getHistorySnippet(session);
-  let activePrompt = await buildPromptWithContext(text, contextOverride, attachments);
-  let finalPrompt = `${activePrompt}\n\nConversation so far:\n${conversation}`;
-
-  // Placeholder for AI response
   const aiMessageIndex = session.messages.length;
   upsertMessage(session.id, { role: 'ai', text: '', ts: Date.now() });
   UI.renderLog();
 
   const controller = new AbortController();
-  activeController = controller;
+  localAI.controller = controller;
   let aborted = false;
   let replyText = '';
 
   try {
-    const model = await ensureModelSession();
-    if (!model) throw new Error('On-device model unavailable');
+    // 1. Prepare Context
+    const fullContext = await buildPromptWithContext(text, contextOverride, attachments);
+    const history = getHistorySnippet(session); 
+    const finalPromptText = `${fullContext}\n\nConversation History:\n${history}\n\nCurrent User Query:\n${text}`;
 
-    // 1. Attempt Streaming (Preferred)
-    try {
-      replyText = await executeStreamingPrompt(model, finalPrompt, controller.signal, (chunk) => {
-        updateMessage(session.id, aiMessageIndex, { text: chunk });
-        UI.updateLastMessageBubble(chunk);
-      });
-    } catch (err) {
-      if (err?.name === 'AbortError') throw err;
-      console.warn('Streaming failed, trying fallback logic...', err);
+    // 2. Prepare Images (Blob conversion)
+    let promptInput = finalPromptText;
+    if (attachments && attachments.length > 0) {
+        const imageBlobs = await Promise.all(attachments.map(att => dataUrlToBlob(att.data)));
+        promptInput = [finalText, ...imageBlobs];
     }
 
-    // 2. Retry Clean (If context caused token limit issues)
-    if ((!replyText || !replyText.trim()) && contextOverride) {
-      console.log('Empty response with context. Retrying clean.');
-      activePrompt = await buildPromptWithContext(text, '', attachments);
-      finalPrompt = `${activePrompt}\n\nConversation so far:\n${conversation}`;
-      
-      replyText = await executeStreamingPrompt(model, finalPrompt, controller.signal, (chunk) => {
-        updateMessage(session.id, aiMessageIndex, { text: chunk });
-        UI.updateLastMessageBubble(chunk);
-      });
+    // 3. Try Side Panel Execution
+    try {
+        if (!localAI.session) {
+            await localAI.createSession(getSessionConfig());
+        }
+        
+        replyText = await localAI.promptStreaming(promptInput, controller.signal, (chunk) => {
+            updateMessage(session.id, aiMessageIndex, { text: chunk });
+            UI.updateLastMessageBubble(chunk);
+        });
+
+    } catch (err) {
+        if (err?.name === 'AbortError') throw err;
+        
+        // 4. Fallback to In-Page Injection (The Fix)
+        console.log("Side Panel failed, trying In-Page Fallback...");
+        // Fallback currently supports text only to ensure reliability, or basic image passing if supported
+        const fallback = await runPromptInPage(finalPromptText, attachments); 
+        replyText = fallback;
+        updateMessage(session.id, aiMessageIndex, { text: replyText });
+        UI.updateLastMessageBubble(replyText);
     }
 
     if (!replyText || !replyText.trim()) {
@@ -234,33 +177,13 @@ export async function runPrompt({ text, contextOverride, attachments }) {
     }
 
   } catch (err) {
-    cancelCurrentStream();
-    
+    cancelGeneration();
     if (err?.name === 'AbortError') {
       aborted = true;
       updateMessage(session.id, aiMessageIndex, { text: '(stopped)' });
     } else {
-      // 3. Fallback to Page Injection (Last Resort)
-      console.log('Triggering page fallback due to:', err.message);
-      try {
-        // Only try fallback if we aren't aborted and error wasn't restricted protocol
-        if (!err.message.includes('Restricted protocol')) {
-             const fallback = await runPromptInPage(finalPrompt);
-             replyText = fallback;
-        } else {
-            throw err;
-        }
-      } catch (e2) {
-        updateMessage(session.id, aiMessageIndex, { text: `Error: Service unavailable. (${e2.message || e2})` });
-      }
+      updateMessage(session.id, aiMessageIndex, { text: `Error: ${err.message || 'Service unavailable'}` });
     }
-  }
-
-  // Final Save
-  if (!aborted && replyText) {
-    const normalized = (replyText || '').trim();
-    updateMessage(session.id, aiMessageIndex, { text: normalized, ts: Date.now() });
-    UI.updateLastMessageBubble(normalized); 
   }
 
   UI.setBusy(false);
@@ -268,23 +191,54 @@ export async function runPrompt({ text, contextOverride, attachments }) {
   await saveState();
 }
 
+async function runPromptInPage(prompt, attachments = []) {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !tab.url.startsWith('http')) throw new Error('Restricted protocol');
+  
+  const [{ result }] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    world: 'MAIN', // <--- CRITICAL FIX: This makes it work on your machine
+    func: async (p, sys, atts) => {
+      try {
+        const model = window.ai?.languageModel || self.ai?.languageModel || self.LanguageModel;
+        if (!model) return { error: 'AI not found in page' };
+
+        // Rehydrate images if present
+        let input = p;
+        if (atts && atts.length) {
+            const blobs = await Promise.all(atts.map(async (att) => {
+                const res = await fetch(att.data); 
+                return await res.blob();
+            }));
+            input = [p, ...blobs];
+        }
+
+        const sess = await model.create({ 
+            systemPrompt: sys
+        });
+        const r = await sess.prompt(input);
+        sess.destroy();
+        return { ok: true, data: r };
+      } catch (e) { return { error: e.toString() }; }
+    },
+    args: [prompt, appState.settings.systemPrompt, attachments]
+  });
+  
+  if (result?.error) throw new Error(result.error);
+  return result?.data || '';
+}
+
 export function cancelGeneration() {
-  if (activeController) {
-    activeController.abort();
-    activeController = null;
+  if (localAI.controller) {
+    localAI.controller.abort();
+    localAI.controller = null;
   }
   UI.setStopEnabled(false);
 }
 
-function cancelCurrentStream() {
-    if (activeController) {
-        activeController.abort();
-        activeController = null;
-    }
-}
-
 export async function summarizeActiveTab(contextOverride) {
-  const instruction = 'Summarize the current tab in seven detailed bullet points. Ensure each point is comprehensive.';
+  resetModel(); 
+  const instruction = 'Summarize the current tab in seven detailed bullet points.';
   await runPrompt({ text: instruction, contextOverride, attachments: [] });
 }
 

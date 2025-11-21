@@ -1,6 +1,6 @@
 # Nano Prompt UI — Chrome MV3 (Side Panel Edition)
 
-![Nano Prompt UI](screenshot.png)
+![Nano Prompt UI](Screenshot.png)
 
 **TL;DR:** A privacy-first Chrome extension that runs entirely on-device using Chrome’s built-in **Gemini Nano** language model. Now powered by **IndexedDB** for high-performance history and enterprise-grade security protocols.
 
@@ -14,7 +14,7 @@ Unlike standard popups that close when you click away, **Nano Prompt UI lives in
 ## 🚀 Features
 
 * **100% Local & Private:** Runs on the `window.ai` (Prompt API) built into Chrome. No data leaves your device.
-* **⚡ High-Performance Engine (v0.4.0):**
+* **⚡ High-Performance Engine (v0.5.2):**
     * **IndexedDB Storage:** Chats and large attachments are now stored in an asynchronous database, eliminating UI lag and storage quotas.
     * **Zero-Latency Context:** Uses `chrome.storage.session` to cache tab data in RAM, preventing "State Amnesia" when the service worker sleeps.
 * **🔒 Enhanced Security:**

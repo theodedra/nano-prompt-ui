@@ -8,8 +8,6 @@ import {
 } from './storage.js';
 
 let els = {};
-// CLEANUP: Removed unused 'sessionFilter' variable
-
 let lastStatus = 'Checking...'; 
 let isSystemBusy = false;
 
@@ -30,6 +28,9 @@ export function initUI() {
     stop: $('#stop'),
     mic: $('#mic'),
     input: $('#in'),
+    askBtn: $('#ask'),
+    sumBtn: $('#sum'),
+    attachBtn: $('#attach'),
     templatesMenu: $('#templates-menu'),
     templatesTrigger: $('#templates-trigger'),
     sessionMenu: $('#session-menu'),
@@ -39,10 +40,64 @@ export function initUI() {
   };
 }
 
+// --- NEW: SYSTEM LOCK UI ---
+export function setRestrictedState(isRestricted) {
+  const interactive = [
+    els.input, 
+    els.askBtn, 
+    els.sumBtn, 
+    els.mic, 
+    els.attachBtn, 
+    els.templatesTrigger
+  ];
+
+  if (isRestricted) {
+    interactive.forEach(el => { if(el) el.disabled = true; });
+    if (els.input) els.input.placeholder = "AI disabled on system pages";
+    setStatusText("System Page");
+  } else {
+    interactive.forEach(el => { 
+      if(el) el.disabled = false; 
+    });
+    // Re-enable stop only if busy, otherwise ensure it's disabled
+    if(els.stop) els.stop.disabled = !isSystemBusy;
+    
+    if (els.input) els.input.placeholder = "Ask anything... (Shift+Enter for newline)";
+    setStatusText(lastStatus === "System Page" ? "Ready" : lastStatus);
+  }
+}
+
+// --- ACCESSIBILITY HELPERS ---
+
+export function trapFocus(e, container) {
+  const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  const focusableContent = container.querySelectorAll(focusableSelector);
+  
+  if (focusableContent.length === 0) return false;
+
+  const first = focusableContent[0];
+  const last = focusableContent[focusableContent.length - 1];
+
+  if (e.shiftKey) { 
+    if (document.activeElement === first) {
+      last.focus();
+      e.preventDefault();
+      return true;
+    }
+  } else { 
+    if (document.activeElement === last) {
+      first.focus();
+      e.preventDefault();
+      return true;
+    }
+  }
+  return false;
+}
+
 export function setBusy(isBusy) {
   isSystemBusy = isBusy;
-  $('#ask').disabled = isBusy;
-  $('#sum').disabled = isBusy;
+  if (els.askBtn) els.askBtn.disabled = isBusy;
+  if (els.sumBtn) els.sumBtn.disabled = isBusy;
   if (els.stop) els.stop.disabled = !isBusy;
 
   if (els.avail) {
@@ -79,7 +134,6 @@ function scrollToBottom() {
   if (els.log) els.log.scrollTop = els.log.scrollHeight;
 }
 
-// CLEANUP: Removed unused 'filter' argument
 export function renderSessions(confirmingId = null) {
   if (!els.sessionMenu) return;
   els.sessionMenu.innerHTML = '';
@@ -316,7 +370,8 @@ export function openSettingsModal() {
   if (els.settingsModal) {
     els.settingsModal.removeAttribute('hidden');
     document.body?.classList.add('modal-open');
-    document.getElementById('temperature')?.focus();
+    const firstInput = document.getElementById('temperature');
+    if (firstInput) firstInput.focus();
   }
 }
 
@@ -324,7 +379,8 @@ export function openContextModal() {
   if (els.contextModal) {
     els.contextModal.removeAttribute('hidden');
     document.body?.classList.add('modal-open');
-    document.getElementById('context-text')?.focus();
+    const area = document.getElementById('context-text');
+    if (area) area.focus();
   }
 }
 
@@ -333,6 +389,7 @@ export function closeModal() {
     if (modal) modal.setAttribute('hidden', 'true');
   });
   document.body?.classList.remove('modal-open');
+  if (els.input) els.input.focus();
 }
 
 export function isModalOpen() {
@@ -364,7 +421,6 @@ export function getPlaintext(sessionId) {
 
 export function highlightSession(sessionId) {
   setCurrentSession(sessionId);
-  // CLEANUP: Removed argument
   renderSessions(); 
   renderLog();
 }

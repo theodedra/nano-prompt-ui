@@ -1,76 +1,76 @@
 // background.js
 
-// 1. Define Restricted Protocols
-const RESTRICTED_PROTOCOLS = [
-  'chrome:',
-  'chrome-extension:',
-  'edge:',
-  'about:',
-  'data:',
-  'view-source:',
-  'webstore'
-];
-
-// 2. Initialization: Deny by Default & Bind Click Action
-chrome.runtime.onInstalled.addListener(async () => {
-  // FIX: This line forces the icon click to open the side panel
-  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-  
-  // Default security state: Disabled
-  await chrome.sidePanel.setOptions({ enabled: false });
-  await chrome.storage.session.set({ authorizedTabs: {} });
-});
-
-// 3. Helper: Check if URL is allowed
-function isUrlAllowed(url) {
-  if (!url) return false;
+// --- NEW: AI WARM-UP LOGIC ---
+async function warmUpModel() {
   try {
-    const urlObj = new URL(url);
-    for (const protocol of RESTRICTED_PROTOCOLS) {
-      if (urlObj.protocol.startsWith(protocol)) return false;
-    }
-    return true;
-  } catch (e) {
-    return false;
+    // Check if the 'ai' namespace exists in the Service Worker
+    // (This might fail in some Chrome versions, which is fine - we catch it)
+    if (!self.ai || !self.ai.languageModel) return;
+
+    const capabilities = await self.ai.languageModel.capabilities();
+    
+    // "after-download" means the device is capable but needs to fetch weights.
+    // We create a dummy session to trigger the download immediately.
+    if (capabilities.available === 'after-download') {
+      console.log('Nano Prompt: Triggering background model download...');
+      try {
+        const session = await self.ai.languageModel.create();
+        // Immediately destroy it; we just needed to kickstart the download logic
+        session.destroy(); 
+      } catch (e) {
+        // Ignore errors here, it's just a background optimization
+      }
+    } 
+  } catch (err) {
+    // If AI API isn't available in background, just ignore it.
+    // The extension will still work via the 'model.js' fallback.
   }
 }
 
-// 4. Core Logic: Manage Panel Visibility
-async function updatePanelState(tabId, url) {
-  if (!url) return;
-
-  const allowed = isUrlAllowed(url);
-
-  if (allowed) {
+// --- EXISTING SETUP ---
+const setupExtension = async () => {
+  try {
+    // Force Icon Click to Open Panel
+    await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+    
+    // Enable Globally & Set Path ONCE
     await chrome.sidePanel.setOptions({
-      tabId,
-      path: 'sidepanel.html',
-      enabled: true
+      enabled: true,
+      path: 'sidepanel.html'
     });
-  } else {
-    await chrome.sidePanel.setOptions({
-      tabId,
-      enabled: false
+    
+    // Context Menu Hygiene
+    chrome.contextMenus.removeAll(); 
+    chrome.contextMenus.create({
+      id: 'open_side_panel',
+      title: 'Open Nano Prompt',
+      contexts: ['all'],
+      documentUrlPatterns: ['https://*/*', 'http://*/*', 'file://*/*']
     });
+
+    // Initialize Session Storage
+    await chrome.storage.session.set({ authorizedTabs: {} });
+    
+    // TRIGGER WARM-UP (Non-blocking)
+    warmUpModel();
+
+  } catch (error) {
+    console.error('Nano Prompt Setup Failed:', error);
   }
-}
+};
 
-// 5. Event Listener: Tab Updates
-chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-  if (changeInfo.url || changeInfo.status === 'complete') {
-    await updatePanelState(tabId, tab.url);
+// Event Listener Registration
+chrome.runtime.onInstalled.addListener(setupExtension);
+chrome.runtime.onStartup.addListener(setupExtension);
+
+// Handle Right-Click Menu
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === 'open_side_panel') {
+    chrome.sidePanel.open({ windowId: tab.windowId });
   }
 });
 
-// 6. Event Listener: Tab Activation
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  const tab = await chrome.tabs.get(activeInfo.tabId);
-  if (tab.url) {
-    await updatePanelState(activeInfo.tabId, tab.url);
-  }
-});
-
-// 7. Message Handling
+// Keep-Alive
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'ping') {
     sendResponse({ status: 'alive' });

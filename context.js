@@ -1,12 +1,14 @@
 import { sanitizeText } from './utils.js';
 
+// FIX: Updated rules to prioritize history lookup
 const ASSISTANT_RULES = `You run inside a Chrome extension side panel.
-You have access to the active tab's text content.
+You have access to the active tab's text content AND the conversation history.
+If the user asks about a previous topic or summary, LOOK AT THE CHAT HISTORY.
 Do not mention browsing limitations.
 Always answer in English.
 Keep answers concise but helpful.`;
 
-let cachedContext = { text: '', ts: 0, tabId: null };
+let cachedContext = { text: '', ts: 0, tabId: null, isRestricted: false };
 
 export function classifyIntent(text) {
   const t = text.toLowerCase();
@@ -18,36 +20,30 @@ export function classifyIntent(text) {
 
 async function runContentScript(tab) {
   try {
-    // AUDIT FIX: Strict Protocol Checking
-    // Do not attempt to inject scripts into chrome://, about:, view-source:, etc.
-    if (!tab || !tab.url || !/^https?:/i.test(tab.url)) {
+    if (!tab || !tab.url || !/^(https?|file):/i.test(tab.url)) {
       return { 
         title: 'System Page', 
         url: tab?.url || 'system', 
         text: '[System Page: Content reading is disabled for security on this page.]', 
-        meta: {} 
+        meta: {},
+        isRestricted: true 
       };
     }
 
-    // Injection
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
         const pick = (selector) => document.querySelector(selector);
-        
-        // Heuristics for best content
         const bodyText = document.body?.innerText || '';
         const article = pick('article')?.innerText || '';
         const main = pick('main')?.innerText || '';
         const selection = getSelection()?.toString() || '';
         
-        // Headings for structure
         const headings = Array.from(document.querySelectorAll('h1, h2'))
           .slice(0, 6)
           .map(h => h.innerText.trim())
           .filter(Boolean);
         
-        // Priority: Selection -> Article -> Main -> Body
         const bestText = selection || article || main || bodyText;
 
         return {
@@ -56,7 +52,8 @@ async function runContentScript(tab) {
           text: bestText,
           headings,
           selection,
-          meta: { description: document.querySelector('meta[name="description"]')?.content || '' }
+          meta: { description: document.querySelector('meta[name="description"]')?.content || '' },
+          isRestricted: false
         };
       }
     });
@@ -66,17 +63,16 @@ async function runContentScript(tab) {
     return { 
       title: 'Restricted', 
       url: '', 
-      text: '[Restricted: Unable to access page content. The site may strictly block extensions.]', 
-      meta: {} 
+      text: '[Restricted: Unable to access page content.]', 
+      meta: {},
+      isRestricted: true
     };
   }
 }
 
-// Truncate text to avoid token limits (Gemini Nano has ~4k-8k context depending on version)
 function smartTruncate(text, limit) {
   if (text.length <= limit) return text;
   const truncated = text.slice(0, limit);
-  // Cut at the last period to maintain sentence integrity
   const lastPeriod = truncated.lastIndexOf('.');
   if (lastPeriod > limit * 0.8) { 
     return truncated.slice(0, lastPeriod + 1) + '\n\n[...Content truncated...]';
@@ -88,7 +84,6 @@ export async function fetchContext(force = false) {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const activeTabId = activeTab?.id ?? null;
   
-  // Cache valid for 15 seconds
   const isFresh = Date.now() - cachedContext.ts < 15_000; 
   
   if (!force && cachedContext.text && isFresh && cachedContext.tabId === activeTabId) {
@@ -102,13 +97,19 @@ export async function fetchContext(force = false) {
   if (info.url) pieces.push(`URL: ${info.url}`);
   
   if (info.text) {
-    // Truncate to 7000 chars safely
     const cleanText = smartTruncate(sanitizeText(info.text), 7000);
     pieces.push(cleanText);
   }
   
   const text = pieces.join('\n\n');
-  cachedContext = { text, ts: Date.now(), tabId: activeTabId };
+  
+  cachedContext = { 
+    text, 
+    ts: Date.now(), 
+    tabId: activeTabId,
+    isRestricted: info.isRestricted || false 
+  };
+  
   return cachedContext;
 }
 
