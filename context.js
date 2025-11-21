@@ -23,7 +23,7 @@ async function runContentScript(tab) {
     if (!tab || !tab.url || !/^(https?|file):/i.test(tab.url)) {
       return { 
         title: 'System Page', 
-        url: tab?.url || 'system', 
+        url: tab?.url?.split('?')[0] || 'system', 
         text: '[System Page: Content reading is disabled for security on this page.]', 
         meta: {},
         isRestricted: true 
@@ -48,7 +48,7 @@ async function runContentScript(tab) {
 
         return {
           title: document.title,
-          url: location.href,
+          url: location.href.split('?')[0].split('#')[0],
           text: bestText,
           headings,
           selection,
