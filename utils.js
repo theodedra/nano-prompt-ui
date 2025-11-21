@@ -4,10 +4,6 @@ export function $(selector) {
   return document.querySelector(selector);
 }
 
-/**
- * Debounce function to limit how often a function runs.
- * Used for saving state on keystrokes.
- */
 export function debounce(func, wait) {
   let timeout;
   return function(...args) {
@@ -35,56 +31,106 @@ export function formatDate(ts) {
 }
 
 /**
- * Strips unsafe characters and normalizes whitespace from untrusted text.
- * Prevents control character injection from web pages.
+ * Sanitizes text to prevent control character injection.
  */
 export function sanitizeText(str) {
   if (!str) return '';
-  // 1. Remove null bytes and control characters (except newlines/tabs)
-  // \x00-\x08\x0B-\x0C\x0E-\x1F are control chars we typically don't want
-  let clean = str.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '');
-  
-  // 2. Normalize whitespace (optional, but helps token efficiency)
-  // clean = clean.replace(/\s+/g, ' ').trim(); // Kept disabled to preserve structure for now
-  
-  return clean;
+  // Remove control characters
+  return str.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '');
 }
 
 /**
- * Basic markdown to HTML converter that keeps styling minimal and safe.
+ * Secure Markdown-to-HTML converter.
+ * REPLACES insecure regex approach with DOM-based sanitization.
+ * Addresses Audit Point 6.1: Input Sanitization [cite: 191]
  */
 export function markdownToHtml(md) {
   if (!md) return '';
+
+  // 1. Basic Formatting (Bold/Italic/Code) - Safe transformations
   let html = String(md)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-  html = html.replace(/```([\s\S]*?)```/g, (_, code) => `<pre><code>${code}</code></pre>`);
-  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-  html = html.replace(/^###\s+(.*)$/gm, '<h3>$1</h3>')
-             .replace(/^##\s+(.*)$/gm, '<h2>$1</h2>')
-             .replace(/^#\s+(.*)$/gm, '<h1>$1</h1>');
-  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-             .replace(/\*(.*?)\*/g, '<em>$1</em>');
-  html = html.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-  
-  // FIX: Filter out empty bullets
+    // Code blocks
+    .replace(/```([\s\S]*?)```/g, (_, code) => `<pre><code>${escapeHtml(code)}</code></pre>`)
+    // Inline code
+    .replace(/`([^`]+)`/g, (_, code) => `<code>${escapeHtml(code)}</code>`)
+    // Headers
+    .replace(/^###\s+(.*)$/gm, '<h3>$1</h3>')
+    .replace(/^##\s+(.*)$/gm, '<h2>$1</h2>')
+    .replace(/^#\s+(.*)$/gm, '<h1>$1</h1>')
+    // Bold/Italic
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    // Links
+    .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+  // 2. Lists
   html = html.replace(/^(\s*[-*]\s+.*(?:\n\s*[-*]\s+.*)*)/gm, list => {
-    const items = list.trim().split(/\n/).map(line => line.replace(/^\s*[-*]\s+/, '')).filter(i => i.trim());
+    const items = list.trim().split(/\n/).map(line => line.replace(/^\s*[-*]\s+/, '')).filter(Boolean);
     return `<ul>${items.map(item => `<li>${item}</li>`).join('')}</ul>`;
   });
-  
-  // FIX: Filter out empty numbered items
-  html = html.replace(/^(\s*\d+\.\s+.*(?:\n\s*\d+\.\s+.*)*)/gm, list => {
-    const items = list.trim().split(/\n/).map(line => line.replace(/^\s*\d+\.\s+/, '')).filter(i => i.trim());
-    return `<ol>${items.map(item => `<li>${item}</li>`).join('')}</ol>`;
-  });
-  
+
+  // 3. Paragraphs
   html = html.split(/\n{2,}/).map(block => {
     if (/^<(ul|ol|pre|h\d)/.test(block.trim())) return block;
     return `<p>${block.replace(/\n/g, '<br>')}</p>`;
   }).join('');
-  return html;
+
+  // 4. SANITIZATION STEP
+  // Uses browser's native DOMParser to strip dangerous tags/attributes.
+  return sanitizeHtmlString(html);
+}
+
+/**
+ * Escapes HTML special characters to prevent code execution in code blocks.
+ */
+function escapeHtml(unsafe) {
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+/**
+ * Parses HTML string into a Document, strips unsafe elements, returns clean HTML string.
+ * This mimics DOMPurify logic using native APIs.
+ */
+function sanitizeHtmlString(dirtyHtml) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(dirtyHtml, 'text/html');
+  
+  // Allowed tags
+  const allowedTags = new Set(['P', 'BR', 'STRONG', 'EM', 'CODE', 'PRE', 'UL', 'OL', 'LI', 'H1', 'H2', 'H3', 'A', 'SPAN', 'DIV']);
+  
+  const walker = document.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT);
+  const nodesToRemove = [];
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    
+    // Remove disallowed tags (SCRIPT, IFRAME, OBJECT, etc.)
+    if (!allowedTags.has(node.tagName)) {
+      nodesToRemove.push(node);
+      continue;
+    }
+
+    // Strip all attributes except 'href', 'target', 'rel' on <a> tags
+    const attrs = Array.from(node.attributes);
+    for (const attr of attrs) {
+      if (node.tagName === 'A' && ['href', 'target', 'rel'].includes(attr.name)) {
+        // Check for javascript: links
+        if (attr.name === 'href' && attr.value.trim().toLowerCase().startsWith('javascript:')) {
+            node.removeAttribute('href');
+        }
+        continue;
+      }
+      node.removeAttribute(attr.name);
+    }
+  }
+
+  nodesToRemove.forEach(n => n.remove());
+  return doc.body.innerHTML;
 }
 
 export function nanoid(size = 10) {

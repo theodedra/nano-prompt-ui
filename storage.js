@@ -1,11 +1,15 @@
 import { nanoid } from './utils.js';
 
-const LOCAL_KEY = 'nanoPromptUI.sessions.v3';
-const SYNC_KEY = 'nanoPromptUI.sessionMeta.v1';
-// NEW: Key for session-only storage (RAM based)
-const DRAFT_KEY = 'nanoPromptUI.draft';
+// --- CONSTANTS ---
+const DB_NAME = 'NanoPromptDB';
+const DB_VERSION = 1;
+const STORES = {
+  SESSIONS: 'sessions',
+  META: 'meta'
+};
 
-// REFACTOR: Export constant to avoid magic strings in UI
+const SYNC_KEY = 'nanoPromptUI.settings.v1';
+const SESSION_KEY = 'nanoPromptUI.draft';
 export const BLANK_TEMPLATE_ID = 'blank';
 
 export const DEFAULT_TEMPLATES = [
@@ -16,14 +20,14 @@ export const DEFAULT_TEMPLATES = [
   { id: 'qa', label: 'Ask expert', text: 'You are an expert researcher. Answer thoroughly:' }
 ];
 
+// --- APP STATE (In-Memory "Source of Truth") ---
 export const appState = {
   sessions: {},
   sessionOrder: [],
   currentSessionId: null,
   templates: DEFAULT_TEMPLATES.slice(),
   attachments: [],
-  contextDraft: '', // Now backed by storage.session
-  downloading: null,
+  contextDraft: '',
   availability: 'unknown',
   settings: {
     temperature: 0.2,
@@ -33,6 +37,39 @@ export const appState = {
   },
   model: null
 };
+
+// --- INDEXEDDB HELPERS (The "Lightweight Abstraction" [cite: 148]) ---
+const dbPromise = new Promise((resolve, reject) => {
+  const request = indexedDB.open(DB_NAME, DB_VERSION);
+  
+  request.onupgradeneeded = (e) => {
+    const db = e.target.result;
+    if (!db.objectStoreNames.contains(STORES.SESSIONS)) {
+      db.createObjectStore(STORES.SESSIONS, { keyPath: 'id' });
+    }
+    if (!db.objectStoreNames.contains(STORES.META)) {
+      db.createObjectStore(STORES.META, { keyPath: 'id' });
+    }
+  };
+
+  request.onsuccess = () => resolve(request.result);
+  request.onerror = () => reject(request.error);
+});
+
+async function dbOp(storeName, mode, callback) {
+  const db = await dbPromise;
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(storeName, mode);
+    const store = tx.objectStore(storeName);
+    const request = callback(store);
+    
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    tx.oncomplete = () => resolve(request.result); // Fallback
+  });
+}
+
+// --- SESSION MANAGEMENT ---
 
 function createEmptySession(title = 'New chat') {
   return {
@@ -61,6 +98,7 @@ export function getCurrentSession() {
 export function setCurrentSession(sessionId) {
   if (!appState.sessions[sessionId]) return;
   appState.currentSessionId = sessionId;
+  // Move to top of stack
   const idx = appState.sessionOrder.indexOf(sessionId);
   if (idx > 0) {
     appState.sessionOrder.splice(idx, 1);
@@ -72,7 +110,7 @@ export function createSessionFrom(baseSessionId = null) {
   const base = baseSessionId ? appState.sessions[baseSessionId] : null;
   const session = createEmptySession(base ? `${base.title} copy` : 'New chat');
   if (base) {
-    session.messages = base.messages.slice();
+    session.messages = base.messages.slice(); // Shallow copy is okay for now
   }
   appState.sessions[session.id] = session;
   appState.sessionOrder.unshift(session.id);
@@ -82,17 +120,24 @@ export function createSessionFrom(baseSessionId = null) {
 
 export function deleteSession(sessionId) {
   if (!appState.sessions[sessionId]) return;
+  
   delete appState.sessions[sessionId];
   appState.sessionOrder = appState.sessionOrder.filter(id => id !== sessionId);
+  
   if (appState.currentSessionId === sessionId) {
     appState.currentSessionId = appState.sessionOrder[0] || null;
   }
   ensureDefaultSession();
+  
+  // Async delete from IDB
+  dbOp(STORES.SESSIONS, 'readwrite', store => store.delete(sessionId))
+    .catch(e => console.error('Failed to delete session from IDB', e));
 }
 
 export function upsertMessage(sessionId, message, replaceIndex = null) {
   const session = appState.sessions[sessionId];
   if (!session) return;
+  
   if (replaceIndex === null) {
     session.messages.push(message);
   } else {
@@ -108,83 +153,126 @@ export function updateMessage(sessionId, messageIndex, patch) {
   session.updatedAt = Date.now();
 }
 
+export function renameSession(sessionId, title) {
+  if (!appState.sessions[sessionId]) return;
+  appState.sessions[sessionId].title = title;
+  appState.sessions[sessionId].updatedAt = Date.now();
+}
+
+// --- PERSISTENCE LAYER ---
+
 export async function saveState() {
   ensureDefaultSession();
-  // OPTIMIZATION: contextDraft is removed from local storage payload
-  // to prevent disk thrashing. It lives in session storage now.
-  const payload = {
-    sessions: appState.sessions,
-    sessionOrder: appState.sessionOrder,
-    currentSessionId: appState.currentSessionId,
+  
+  // 1. Save Sessions & Metadata to IndexedDB (Async, Non-blocking) [cite: 127]
+  try {
+    const db = await dbPromise;
+    const tx = db.transaction([STORES.SESSIONS, STORES.META], 'readwrite');
+    
+    // Save Session Order & Current ID
+    const metaStore = tx.objectStore(STORES.META);
+    metaStore.put({ id: 'sessionOrder', val: appState.sessionOrder });
+    metaStore.put({ id: 'currentSessionId', val: appState.currentSessionId });
+    
+    // Save ONLY the modified sessions (Optimization)
+    // For simplicity in this "vibe code", we save the current active session 
+    // and any that were touched. A full sync is safer for now.
+    const sessionStore = tx.objectStore(STORES.SESSIONS);
+    // Bulk put is not standard, so we loop. 
+    // IDB is fast enough for this loop in a side panel context.
+    appState.sessionOrder.forEach(id => {
+      const s = appState.sessions[id];
+      if (s) sessionStore.put(s);
+    });
+
+  } catch (e) {
+    console.warn('IDB Save Failed:', e);
+  }
+
+  // 2. Save Settings to Sync (Small data)
+  const settingsPayload = {
     templates: appState.templates,
     settings: appState.settings
-    // contextDraft is intentionally excluded
   };
-  try {
-    await chrome.storage.local.set({ [LOCAL_KEY]: payload });
-  } catch (e) {
-    console.warn('Failed to persist local state', e);
-  }
-  try {
-    const meta = appState.sessionOrder.map(id => {
-      const s = appState.sessions[id];
-      return s ? { id, title: s.title, updatedAt: s.updatedAt } : null;
-    }).filter(Boolean);
-    await chrome.storage.sync.set({ [SYNC_KEY]: meta.slice(0, 20) });
-  } catch (e) {
-    console.warn('Failed to sync metadata', e);
-  }
+  chrome.storage.sync.set({ [SYNC_KEY]: settingsPayload });
 }
 
-// NEW: Dedicated function for saving high-frequency draft text
+// Volatile Storage for Drafts [cite: 131]
 export async function saveContextDraft(text) {
   try {
-    await chrome.storage.session.set({ [DRAFT_KEY]: text });
+    await chrome.storage.session.set({ [SESSION_KEY]: text });
   } catch (e) {
-    console.warn('Failed to save session draft', e);
+    console.warn('Session draft save failed', e);
   }
-}
-
-export async function loadState() {
-  try {
-    // OPTIMIZATION: Load Disk (Local) and RAM (Session) in parallel
-    const [localData, sessionData] = await Promise.all([
-      chrome.storage.local.get(LOCAL_KEY),
-      chrome.storage.session.get(DRAFT_KEY)
-    ]);
-
-    const stored = localData[LOCAL_KEY];
-    const draft = sessionData[DRAFT_KEY];
-
-    if (stored) {
-      Object.assign(appState, {
-        sessions: stored.sessions || {},
-        sessionOrder: stored.sessionOrder || [],
-        currentSessionId: stored.currentSessionId || null,
-        templates: stored.templates?.length ? stored.templates : DEFAULT_TEMPLATES.slice(),
-        settings: { ...appState.settings, ...(stored.settings || {}) },
-        contextDraft: draft || '' // Hydrate from session storage
-      });
-    } else if (draft) {
-      appState.contextDraft = draft;
-    }
-  } catch (e) {
-    console.warn('Failed to load state', e);
-  }
-  ensureDefaultSession();
-  return {
-    sessions: appState.sessions,
-    order: appState.sessionOrder,
-    current: appState.currentSessionId,
-    templates: appState.templates,
-    settings: appState.settings,
-    contextDraft: appState.contextDraft
-  };
 }
 
 export function updateContextDraft(text) {
   appState.contextDraft = text;
 }
+
+export async function loadState() {
+  try {
+    // Parallel Load: IDB (Sessions), Sync (Settings), Session (Drafts)
+    const [db, syncData, sessionData] = await Promise.all([
+        dbPromise,
+        chrome.storage.sync.get(SYNC_KEY),
+        chrome.storage.session.get(SESSION_KEY)
+    ]);
+
+    // 1. Rehydrate Settings
+    if (syncData[SYNC_KEY]) {
+      appState.settings = { ...appState.settings, ...syncData[SYNC_KEY].settings };
+      if (syncData[SYNC_KEY].templates) appState.templates = syncData[SYNC_KEY].templates;
+    }
+
+    // 2. Rehydrate Draft
+    if (sessionData[SESSION_KEY]) {
+      appState.contextDraft = sessionData[SESSION_KEY];
+    }
+
+    // 3. Rehydrate Sessions from IDB
+    const tx = db.transaction([STORES.SESSIONS, STORES.META], 'readonly');
+    
+    // Helper to promise-ify requests
+    const get = (store, key) => new Promise(r => {
+       const req = store.get(key);
+       req.onsuccess = () => r(req.result?.val);
+       req.onerror = () => r(null);
+    });
+
+    const getAll = (store) => new Promise(r => {
+        const req = store.getAll();
+        req.onsuccess = () => r(req.result);
+        req.onerror = () => r([]);
+    });
+
+    const metaStore = tx.objectStore(STORES.META);
+    const sessionStore = tx.objectStore(STORES.SESSIONS);
+
+    const [order, currentId, allSessions] = await Promise.all([
+        get(metaStore, 'sessionOrder'),
+        get(metaStore, 'currentSessionId'),
+        getAll(sessionStore)
+    ]);
+
+    if (allSessions && allSessions.length) {
+        const map = {};
+        allSessions.forEach(s => map[s.id] = s);
+        appState.sessions = map;
+    }
+
+    if (order) appState.sessionOrder = order;
+    if (currentId) appState.currentSessionId = currentId;
+
+  } catch (e) {
+    console.warn('Failed to load state:', e);
+  }
+
+  ensureDefaultSession();
+  return appState;
+}
+
+// --- ATTACHMENTS & MISC ---
 
 export function addAttachment(entry) {
   appState.attachments.push(entry);
@@ -200,12 +288,6 @@ export function getAttachments() {
 
 export function updateSettings(patch) {
   appState.settings = { ...appState.settings, ...patch };
-}
-
-export function renameSession(sessionId, title) {
-  if (!appState.sessions[sessionId]) return;
-  appState.sessions[sessionId].title = title;
-  appState.sessions[sessionId].updatedAt = Date.now();
 }
 
 export function summarizeSession(sessionId) {

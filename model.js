@@ -8,6 +8,7 @@ import {
 } from './storage.js';
 import { buildPromptWithContext } from './context.js';
 
+// Detection for the Prompt API (Standard vs Polyfill)
 const LM = (typeof LanguageModel !== 'undefined')
   ? LanguageModel
   : (self.ai && self.ai.languageModel)
@@ -36,6 +37,7 @@ let activeController = null;
 let downloadListenerRegistered = false;
 
 function getHistorySnippet(session) {
+  // Limit context window to last 8 messages to save tokens
   const slice = session.messages.slice(-8);
   return slice.map(m => `${m.role === 'user' ? 'User' : 'Nano'}: ${m.text}`).join('\n');
 }
@@ -49,6 +51,7 @@ async function ensureModelSession() {
     const status = await LM.availability(getCapabilities());
     appState.availability = status?.availability || 'unknown';
 
+    // UX: Show download progress if model is fetching
     if (status?.availability === 'downloading' || status?.availability === 'after-download') {
       if (!downloadListenerRegistered && status?.onprogress) {
         downloadListenerRegistered = true;
@@ -123,15 +126,25 @@ async function executeStreamingPrompt(model, prompt, signal, onUpdate) {
     }
     return buffer;
   } else {
+    // Fallback for non-streaming implementations
     const result = await model.prompt(prompt, { signal });
     onUpdate(result);
     return result;
   }
 }
 
+/**
+ * Fallback: Tries to run the prompt inside the web page itself.
+ * Useful if the side panel environment is restricted but the page has access.
+ */
 async function runPromptInPage(prompt) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab) throw new Error('No active tab');
+
+  // SECURITY FIX: Prevent injection into restricted pages (chrome://, about:)
+  if (!tab.url || !/^https?:/i.test(tab.url)) {
+    throw new Error('Page fallback unavailable: Restricted protocol');
+  }
   
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
@@ -166,6 +179,7 @@ async function runPromptInPage(prompt) {
 export async function runPrompt({ text, contextOverride, attachments }) {
   const session = getCurrentSession();
   const userMessage = { role: 'user', text, ts: Date.now(), attachments };
+  
   upsertMessage(session.id, userMessage);
   UI.renderLog();
   await saveState();
@@ -173,10 +187,12 @@ export async function runPrompt({ text, contextOverride, attachments }) {
   UI.setBusy(true);
   UI.setStopEnabled(true);
 
+  // Prepare Prompt
   const conversation = getHistorySnippet(session);
   let activePrompt = await buildPromptWithContext(text, contextOverride, attachments);
   let finalPrompt = `${activePrompt}\n\nConversation so far:\n${conversation}`;
 
+  // Placeholder for AI response
   const aiMessageIndex = session.messages.length;
   upsertMessage(session.id, { role: 'ai', text: '', ts: Date.now() });
   UI.renderLog();
@@ -190,7 +206,7 @@ export async function runPrompt({ text, contextOverride, attachments }) {
     const model = await ensureModelSession();
     if (!model) throw new Error('On-device model unavailable');
 
-    // 1. Attempt Streaming
+    // 1. Attempt Streaming (Preferred)
     try {
       replyText = await executeStreamingPrompt(model, finalPrompt, controller.signal, (chunk) => {
         updateMessage(session.id, aiMessageIndex, { text: chunk });
@@ -201,7 +217,7 @@ export async function runPrompt({ text, contextOverride, attachments }) {
       console.warn('Streaming failed, trying fallback logic...', err);
     }
 
-    // 2. Retry Clean (if context caused issues)
+    // 2. Retry Clean (If context caused token limit issues)
     if ((!replyText || !replyText.trim()) && contextOverride) {
       console.log('Empty response with context. Retrying clean.');
       activePrompt = await buildPromptWithContext(text, '', attachments);
@@ -219,21 +235,28 @@ export async function runPrompt({ text, contextOverride, attachments }) {
 
   } catch (err) {
     cancelCurrentStream();
+    
     if (err?.name === 'AbortError') {
       aborted = true;
       updateMessage(session.id, aiMessageIndex, { text: '(stopped)' });
     } else {
-      // 3. Fallback to Page Injection
+      // 3. Fallback to Page Injection (Last Resort)
       console.log('Triggering page fallback due to:', err.message);
       try {
-        const fallback = await runPromptInPage(finalPrompt);
-        replyText = fallback;
+        // Only try fallback if we aren't aborted and error wasn't restricted protocol
+        if (!err.message.includes('Restricted protocol')) {
+             const fallback = await runPromptInPage(finalPrompt);
+             replyText = fallback;
+        } else {
+            throw err;
+        }
       } catch (e2) {
         updateMessage(session.id, aiMessageIndex, { text: `Error: Service unavailable. (${e2.message || e2})` });
       }
     }
   }
 
+  // Final Save
   if (!aborted && replyText) {
     const normalized = (replyText || '').trim();
     updateMessage(session.id, aiMessageIndex, { text: normalized, ts: Date.now() });
@@ -251,6 +274,13 @@ export function cancelGeneration() {
     activeController = null;
   }
   UI.setStopEnabled(false);
+}
+
+function cancelCurrentStream() {
+    if (activeController) {
+        activeController.abort();
+        activeController = null;
+    }
 }
 
 export async function summarizeActiveTab(contextOverride) {

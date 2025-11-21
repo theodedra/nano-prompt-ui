@@ -32,24 +32,31 @@ let tabListenersAttached = false;
 // STATE: Track which session is pending deletion
 let confirmingDeleteId = null;
 
+// --- CONTEXT MANAGEMENT ---
+
 async function refreshContextDraft(force = false) {
   try {
     const ctx = await fetchContext(force);
     const text = ctx?.text || '';
+    // Save to volatile session storage (RAM)
     updateContextDraft(text);
-    saveContextDraft(text);
+    await saveContextDraft(text); 
     UI.setContextText(text);
     return text;
   } catch (e) {
+    console.warn('Context refresh failed', e);
     return '';
   }
 }
 
 function ensureTabContextSync() {
   if (tabListenersAttached) return;
+  // Safety check for API availability
   if (!chrome?.tabs?.onActivated) return;
   
   const update = () => refreshContextDraft(false);
+  
+  // Listen for tab switches to keep context fresh
   chrome.tabs.onActivated.addListener(update);
   chrome.tabs.onUpdated.addListener((id, info, tab) => {
     if (tab?.active && info.status === 'complete') update();
@@ -57,52 +64,74 @@ function ensureTabContextSync() {
   tabListenersAttached = true;
 }
 
+// --- INITIALIZATION ---
+
 export async function bootstrap() {
+  // 1. Load heavy state from IndexedDB
   await loadState();
+  
+  // 2. Hydrate UI
   UI.updateTemplates(appState.templates);
   UI.renderSessions(); 
   UI.setContextText(appState.contextDraft);
   UI.renderAttachments(getAttachments());
   UI.renderLog();
   
+  // 3. Check if opened via specific action (e.g. mic shortcut)
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('mic_setup') === 'true') {
     setTimeout(() => handleMicClick(), 500);
     return; 
   }
   
+  // 4. Start Context Listeners
   ensureTabContextSync();
+  
+  // 5. Initial Context Fetch (if empty)
   if (!appState.contextDraft) {
     await refreshContextDraft(true);
   }
 }
 
+// --- ACTION HANDLERS ---
+
 export async function handleAskClick() {
   const value = UI.getInputValue().trim();
-  const text = value || 'Hello';
+  // Default to "Hello" if empty to trigger the model
+  const text = value || 'Hello'; 
   const attachments = getAttachments().slice();
+  
+  // Reset UI immediately for responsiveness
   UI.setInputValue('');
   clearAttachments();
   UI.renderAttachments(getAttachments());
   
+  // Determine Intent
   let contextOverride = UI.getContextText();
   const intent = classifyIntent(text);
 
+  // Heuristic: Don't send huge context for short greetings
   if (text.length < 60 && intent === 'none') {
     contextOverride = '';
   }
   else if (contextOverride.includes('[System Page]')) {
+     // Try one refresh if it looks stale/system
      contextOverride = await refreshContextDraft(true);
      if (contextOverride.includes('[System Page]') && intent !== 'page') {
        contextOverride = '';
      }
   }
 
-  await runPrompt({
-    text,
-    contextOverride,
-    attachments
-  });
+  try {
+    await runPrompt({
+      text,
+      contextOverride,
+      attachments
+    });
+  } catch (e) {
+    console.error('Prompt Execution Failed:', e);
+    UI.setStatusText('Error');
+  }
 }
 
 export async function handleSummarizeClick() {
@@ -120,23 +149,25 @@ export async function handleNewSessionClick() {
   UI.closeMenu('session');
 }
 
-// OPTIMIZED DELETE: Fixed argument mismatch here
+// LOGIC FIX: Better Delete Handling
 async function deleteSessionHandler(btn, id) {
   if (id === confirmingDeleteId) {
+    // Confirmed
     deleteSession(id);
     confirmingDeleteId = null;
-    await saveState();
+    await saveState(); // Persist deletion to IDB
     UI.renderSessions();
     UI.renderLog();
   } else {
+    // First Click
     confirmingDeleteId = id;
-    // FIX: Removed the empty string argument that was breaking the UI
     UI.renderSessions(confirmingDeleteId); 
     
+    // Auto-cancel confirmation after 3s
     setTimeout(() => {
         if (confirmingDeleteId === id) {
            confirmingDeleteId = null;
-           UI.renderSessions();
+           UI.renderSessions(); // Re-render to remove red state
         }
     }, 3000);
   }
@@ -145,7 +176,7 @@ async function deleteSessionHandler(btn, id) {
 async function renameSessionHandler(id) {
   const session = appState.sessions[id];
   const newTitle = prompt('Rename chat', session.title);
-  if(newTitle) {
+  if (newTitle) {
       renameSession(id, newTitle);
       await saveState();
       UI.renderSessions();
@@ -185,6 +216,8 @@ export async function handleCopyChatClick() {
   const text = UI.getPlaintext(appState.currentSessionId);
   if (!text) return;
   await navigator.clipboard.writeText(text);
+  UI.setStatusText('Copied!');
+  setTimeout(() => UI.setStatusText('Ready'), 1500);
 }
 
 export function handleSaveMarkdown() {
@@ -194,7 +227,7 @@ export function handleSaveMarkdown() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'chat-export.md';
+  a.download = `chat-export-${Date.now()}.md`;
   a.click();
 }
 
@@ -226,7 +259,10 @@ export async function handleLogClick(event) {
   const idx = btn.dataset.idx;
   if (btn.classList.contains('bubble-copy')) {
       const msg = getCurrentSession().messages[idx];
-      if(msg) navigator.clipboard.writeText(msg.text);
+      if(msg) {
+        await navigator.clipboard.writeText(msg.text);
+        // Visual feedback could be added here
+      }
   } else if (btn.classList.contains('speak')) {
       const msg = getCurrentSession().messages[idx];
       if(msg) speakText(msg.text);
@@ -239,6 +275,8 @@ export function handleTemplateSelect(event) {
   const text = target.dataset.text;
   UI.setInputValue(UI.getInputValue() + text);
   UI.closeMenu('templates');
+  // Optional: auto-focus input
+  document.getElementById('in')?.focus();
 }
 
 export function handleAttachClick() {
@@ -248,9 +286,13 @@ export function handleAttachClick() {
 export function handleFileInputChange(event) {
   const files = Array.from(event.target.files || []);
   files.slice(0, 3).forEach(async file => {
-      const data = await resizeImage(file, 1024);
-      addAttachment({ name: file.name, type: file.type, data });
-      UI.renderAttachments(getAttachments());
+      try {
+        const data = await resizeImage(file, 1024);
+        addAttachment({ name: file.name, type: file.type, data });
+        UI.renderAttachments(getAttachments());
+      } catch (e) {
+        console.error('Image processing failed', e);
+      }
   });
   event.target.value = '';
 }
