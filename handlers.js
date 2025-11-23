@@ -35,7 +35,15 @@ let recognizing = false;
 let tabListenersAttached = false;
 let confirmingDeleteId = null;
 
-chrome.runtime.onMessage.addListener((req) => {
+// --- COMMAND LISTENER ---
+chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
+  // 1. Respond to liveness check from Background
+  if (req.action === 'PING_PANEL') {
+    sendResponse({ ok: true });
+    return;
+  }
+  
+  // 2. Handle Actions
   if (req.action === 'CMD_SUMMARIZE') {
     runPrompt({ text: `Summarize this:\n${req.text}`, contextOverride: '', attachments: [] });
   } 
@@ -49,6 +57,8 @@ chrome.runtime.onMessage.addListener((req) => {
     runImageDescription(req.url);
   }
 });
+
+// --- CONTEXT MANAGEMENT ---
 
 async function refreshContextDraft(force = false) {
   try {
@@ -84,6 +94,8 @@ function ensureTabContextSync() {
   tabListenersAttached = true;
 }
 
+// --- INITIALIZATION ---
+
 export async function bootstrap() {
   await loadState();
   
@@ -102,9 +114,11 @@ export async function bootstrap() {
   ensureTabContextSync();
   await refreshContextDraft(true);
 
-  // NEW: Signal to Background that UI is ready for commands
+  // Tell Background we are open and ready for commands
   chrome.runtime.sendMessage({ action: 'PANEL_READY' });
 }
+
+// --- ACTION HANDLERS ---
 
 export async function handleAskClick() {
   const value = UI.getInputValue().trim();
@@ -362,10 +376,7 @@ export async function handleSaveSettings() {
     
     updateSettings({ temperature: Number(temp), topK: Number(topk), systemPrompt: sys });
     await saveState();
-    
-    // FIXED: Force model reset so new settings apply immediately
     resetModel();
-    
     UI.closeModal();
     await refreshAvailability();
 }
