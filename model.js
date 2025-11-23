@@ -7,9 +7,16 @@ import {
   saveState
 } from './storage.js';
 import { buildPromptWithContext } from './context.js';
-import { dataUrlToBlob } from './utils.js'; // Import the helper
+import { dataUrlToBlob } from './utils.js';
 
-// --- LOCAL AI WRAPPER CLASS ---
+// --- CONFIGURATION CONSTANTS ---
+// We define this once to ensure consistency across Side Panel and In-Page modes
+const MODEL_CONFIG = {
+  expectedInputs: [{ type: 'text', languages: ['en'] }],
+  expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }]
+};
+
+// --- LOCAL AI WRAPPER ---
 class LocalAI {
   constructor() {
     this.session = null;
@@ -25,24 +32,23 @@ class LocalAI {
   async getAvailability() {
     if (!this.engine) return 'no';
     try {
-      const config = getCapabilities();
-      const status = await this.engine.availability(config);
+      const status = await this.engine.availability(MODEL_CONFIG);
       return typeof status === 'object' ? status.availability : status;
     } catch (e) {
       return 'no';
     }
   }
 
-  async createSession(config) {
+  async createSession(params = {}) {
     if (!this.engine) throw new Error('AI not supported');
+    // Merge default config with any custom system prompts
+    const config = { ...MODEL_CONFIG, ...params };
     this.session = await this.engine.create(config);
     return this.session;
   }
 
   async promptStreaming(input, signal, onUpdate) {
     if (!this.session) throw new Error('No active session');
-    
-    // Standardize input (Text or Array)
     const stream = await this.session.promptStreaming(input, { signal });
     const reader = stream.getReader();
     let buffer = '';
@@ -67,16 +73,8 @@ class LocalAI {
 
 const localAI = new LocalAI();
 
-function getCapabilities() {
-  return {
-    expectedInputs: [{ type: 'text', languages: ['en'] }],
-    expectedOutputs: [{ type: 'text', languages: ['en'] }]
-  };
-}
-
 function getSessionConfig() {
   return {
-    ...getCapabilities(),
     topK: appState.settings.topK,
     temperature: appState.settings.temperature,
     systemPrompt: appState.settings.systemPrompt || 'You are a helpful assistant.'
@@ -88,18 +86,15 @@ function getHistorySnippet(session) {
   return slice.map(m => `${m.role === 'user' ? 'User' : 'Nano'}: ${m.text}`).join('\n');
 }
 
-// --- EXPORTED FUNCTIONS ---
+// --- EXPORTS ---
 
 export function resetModel() {
   localAI.destroy();
 }
 
 export async function refreshAvailability() {
-  // Check Side Panel
   let status = await localAI.getAvailability();
-  
-  // If Side Panel fails, optimistically assume Page Mode works (since we fixed the injector)
-  if (status === 'no') status = 'Page-Mode';
+  if (status === 'no') status = 'Page-Mode'; 
 
   const map = {
     'available': 'Ready',
@@ -113,8 +108,6 @@ export async function refreshAvailability() {
   UI.setStatusText(text);
   UI.setHardwareStatus(`Gemini Nano: ${text}`);
 }
-
-// --- MAIN PROMPT LOGIC ---
 
 export async function runPrompt({ text, contextOverride, attachments }) {
   const session = getCurrentSession();
@@ -133,29 +126,26 @@ export async function runPrompt({ text, contextOverride, attachments }) {
 
   const controller = new AbortController();
   localAI.controller = controller;
-  let aborted = false;
-  let replyText = '';
-
+  
   try {
-    // 1. Prepare Context
     const fullContext = await buildPromptWithContext(text, contextOverride, attachments);
     const history = getHistorySnippet(session); 
-    const finalPromptText = `${fullContext}\n\nConversation History:\n${history}\n\nCurrent User Query:\n${text}`;
+    const finalText = `${fullContext}\n\nConversation History:\n${history}\n\nCurrent User Query:\n${text}`;
 
-    // 2. Prepare Images (Blob conversion)
-    let promptInput = finalPromptText;
+    // 1. Prepare Input (Multimodal support)
+    let promptInput = finalText;
     if (attachments && attachments.length > 0) {
         const imageBlobs = await Promise.all(attachments.map(att => dataUrlToBlob(att.data)));
         promptInput = [finalText, ...imageBlobs];
     }
 
-    // 3. Try Side Panel Execution
     try {
+        // 2. Try Side Panel Execution
         if (!localAI.session) {
             await localAI.createSession(getSessionConfig());
         }
         
-        replyText = await localAI.promptStreaming(promptInput, controller.signal, (chunk) => {
+        await localAI.promptStreaming(promptInput, controller.signal, (chunk) => {
             updateMessage(session.id, aiMessageIndex, { text: chunk });
             UI.updateLastMessageBubble(chunk);
         });
@@ -163,23 +153,22 @@ export async function runPrompt({ text, contextOverride, attachments }) {
     } catch (err) {
         if (err?.name === 'AbortError') throw err;
         
-        // 4. Fallback to In-Page Injection (The Fix)
+        // 3. Fallback to Page Execution
         console.log("Side Panel failed, trying In-Page Fallback...");
-        // Fallback currently supports text only to ensure reliability, or basic image passing if supported
-        const fallback = await runPromptInPage(finalPromptText, attachments); 
-        replyText = fallback;
-        updateMessage(session.id, aiMessageIndex, { text: replyText });
-        UI.updateLastMessageBubble(replyText);
-    }
+        
+        // Warn about lost images in fallback mode
+        if (Array.isArray(promptInput)) {
+            console.warn("Fallback mode does not support images yet. Sending text only.");
+        }
 
-    if (!replyText || !replyText.trim()) {
-      throw new Error('Model returned empty response');
+        const fallback = await runPromptInPage(finalText); 
+        updateMessage(session.id, aiMessageIndex, { text: fallback });
+        UI.updateLastMessageBubble(fallback);
     }
 
   } catch (err) {
     cancelGeneration();
     if (err?.name === 'AbortError') {
-      aborted = true;
       updateMessage(session.id, aiMessageIndex, { text: '(stopped)' });
     } else {
       updateMessage(session.id, aiMessageIndex, { text: `Error: ${err.message || 'Service unavailable'}` });
@@ -191,37 +180,31 @@ export async function runPrompt({ text, contextOverride, attachments }) {
   await saveState();
 }
 
-async function runPromptInPage(prompt, attachments = []) {
+async function runPromptInPage(prompt) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.url.startsWith('http')) throw new Error('Restricted protocol');
   
+  // We hardcode the config here because we can't easily pass the 'MODEL_CONFIG' object 
+  // into the isolated context of the page without serialization issues.
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    world: 'MAIN', // <--- CRITICAL FIX: This makes it work on your machine
-    func: async (p, sys, atts) => {
+    world: 'MAIN', 
+    func: async (p, sys) => {
       try {
-        const model = window.ai?.languageModel || self.ai?.languageModel || self.LanguageModel;
+        const model = window.ai?.languageModel || self.ai?.languageModel;
         if (!model) return { error: 'AI not found in page' };
-
-        // Rehydrate images if present
-        let input = p;
-        if (atts && atts.length) {
-            const blobs = await Promise.all(atts.map(async (att) => {
-                const res = await fetch(att.data); 
-                return await res.blob();
-            }));
-            input = [p, ...blobs];
-        }
-
+        
         const sess = await model.create({ 
-            systemPrompt: sys
+          systemPrompt: sys,
+          expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }] 
         });
-        const r = await sess.prompt(input);
+        
+        const r = await sess.prompt(p);
         sess.destroy();
         return { ok: true, data: r };
       } catch (e) { return { error: e.toString() }; }
     },
-    args: [prompt, appState.settings.systemPrompt, attachments]
+    args: [prompt, appState.settings.systemPrompt]
   });
   
   if (result?.error) throw new Error(result.error);

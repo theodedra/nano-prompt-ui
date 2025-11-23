@@ -1,31 +1,31 @@
 # Nano Prompt UI — Chrome MV3 (Side Panel Edition)
 
-![Nano Prompt UI](Screenshot.png)
+![Nano Prompt UI](screenshot.png)
 
-**TL;DR:** A privacy-first Chrome extension that runs entirely on-device using Chrome’s built-in **Gemini Nano** language model. Now powered by **IndexedDB** for high-performance history and enterprise-grade security protocols.
+**TL;DR:** A privacy-first Chrome extension that runs entirely on-device using Chrome’s built-in **Gemini Nano** language model. Updated to **v0.6.0** with a hybrid execution engine, persistent context scraping, and incremental DOM rendering.
 
 ## ✨ Why Side Panel?
 
 Unlike standard popups that close when you click away, **Nano Prompt UI lives in your Side Panel**.
 * **True Multitasking:** Read an article on the left while the AI summarizes it on the right.
-* **Persistent Sessions:** Copy text from a website and paste it into the chat without the window closing or the AI forgetting its thought process.
-* **Background Processing:** Long generation tasks continue even if you switch tabs.
+* **Persistent Sessions:** Copy text from a website and paste it into the chat without the window closing.
+* **Hybrid Execution:** If the Side Panel API fails, the extension intelligently injects the model into the page context to ensure reliability.
 
-## 🚀 Features
+## 🚀 Features (v0.6.0 Production Ready)
 
-* **100% Local & Private:** Runs on the `window.ai` (Prompt API) built into Chrome. No data leaves your device.
-* **⚡ High-Performance Engine (v0.5.2):**
-    * **IndexedDB Storage:** Chats and large attachments are now stored in an asynchronous database, eliminating UI lag and storage quotas.
-    * **Zero-Latency Context:** Uses `chrome.storage.session` to cache tab data in RAM, preventing "State Amnesia" when the service worker sleeps.
-* **🔒 Enhanced Security:**
-    * **Deny-by-Default:** The side panel is strictly disabled on privileged pages (`chrome://`, `settings`) to prevent unauthorized access.
-    * **Sanitized Inputs:** Uses advanced DOM-based sanitization (no Regex) to prevent XSS attacks from malicious web content.
-* **Smart Context Engine:**
-    * **One-Click Summarization:** Instantly reads the active tab to generate concise summaries.
-    * **Smart Truncation:** Intelligently chunks long articles to fit the model's context window.
-* **Rich Input & Media:**
-    * **Multimodal Support:** Attach images to your prompts (auto-resized for performance).
-    * **Voice Mode:** Built-in speech-to-text for dictating prompts.
+* **100% Local & Private:** Runs on the `window.ai` (Prompt API). No data leaves your device.
+* **⚡ Enterprise-Grade Performance:**
+    * **Incremental Rendering:** The UI now updates via DOM Fragments, eliminating freezing even during long chat histories.
+    * **Smart Database I/O:** Uses "Dirty State" tracking to only write changed sessions to IndexedDB, drastically reducing disk usage and lag.
+* **🧠 Advanced Context Engine:**
+    * **Persistent Scraper:** A lightweight `content.js` runs in the background for instant page reading (no more repeated script injections).
+    * **Smart Truncation:** Intelligently chunks long articles to fit Gemini Nano's context window.
+* **🔒 Security First:**
+    * **Strict Sanitization:** Replaced Regex with `DOMParser` based sanitization to prevent XSS attacks.
+    * **Protocol Safety:** Automatically disables AI features on privileged pages (`chrome://`, `settings`).
+* **Rich Input:**
+    * **Multimodal:** Attach images to prompts (auto-converted to Blobs for the API).
+    * **Voice Mode:** Built-in speech-to-text.
 
 ## 🛠️ Installation (Developer Mode)
 
@@ -33,7 +33,7 @@ Unlike standard popups that close when you click away, **Nano Prompt UI lives in
 2.  Open `chrome://extensions` in your browser.
 3.  Toggle **Developer mode** (top-right corner).
 4.  Click **Load unpacked** and select the folder containing these files.
-5.  **Pin the Extension:** Click the puzzle piece icon in Chrome and pin "Nano Prompt UI" for easy access.
+5.  **Pin the Extension:** Click the puzzle piece icon in Chrome and pin "Nano Prompt UI".
 
 ## ⚙️ Enable On-Device AI (Gemini Nano)
 

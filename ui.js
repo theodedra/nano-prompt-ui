@@ -11,6 +11,10 @@ let els = {};
 let lastStatus = 'Checking...'; 
 let isSystemBusy = false;
 
+// TRACKING STATE FOR UI UPDATES
+let renderedSessionId = null;
+let lastScrollHeight = 0;
+
 const ICON_MIC = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
 const ICON_STOP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect></svg>`;
 
@@ -59,7 +63,6 @@ export function setRestrictedState(isRestricted) {
     interactive.forEach(el => { 
       if(el) el.disabled = false; 
     });
-    // Re-enable stop only if busy, otherwise ensure it's disabled
     if(els.stop) els.stop.disabled = !isSystemBusy;
     
     if (els.input) els.input.placeholder = "Ask anything... (Shift+Enter for newline)";
@@ -131,7 +134,11 @@ export function getContextText() {
 }
 
 function scrollToBottom() {
-  if (els.log) els.log.scrollTop = els.log.scrollHeight;
+  if (!els.log) return;
+  // Use RAF to prevent layout thrashing
+  requestAnimationFrame(() => {
+    els.log.scrollTop = els.log.scrollHeight;
+  });
 }
 
 export function renderSessions(confirmingId = null) {
@@ -245,22 +252,7 @@ function createMessageActions(msg, idx) {
   return actions;
 }
 
-export function renderLog() {
-  const session = getCurrentSession();
-  if (!session || !els.log) return;
-  const messages = session.messages;
-  
-  els.log.innerHTML = '';
-  
-  if (!messages.length) {
-    els.log.innerHTML = '<div class="msg ai"><div class="body"><p>Ready to chat.</p></div></div>';
-    setExportAvailability(false);
-    return;
-  }
-  
-  const fragment = document.createDocumentFragment();
-
-  messages.forEach((m, idx) => {
+function createMessageElement(m, idx) {
     const div = document.createElement('div');
     div.className = `msg ${m.role}`;
 
@@ -295,21 +287,62 @@ export function renderLog() {
     }
 
     div.appendChild(createMessageActions(m, idx));
-    fragment.appendChild(div);
-  });
+    return div;
+}
+
+export function renderLog() {
+  const session = getCurrentSession();
+  if (!session || !els.log) return;
+
+  // Detect session switch
+  if (renderedSessionId !== session.id) {
+      els.log.innerHTML = '';
+      renderedSessionId = session.id;
+  }
   
-  els.log.appendChild(fragment);
-  scrollToBottom();
+  const messages = session.messages;
+  
+  if (!messages.length) {
+    els.log.innerHTML = '<div class="msg ai"><div class="body"><p>Ready to chat.</p></div></div>';
+    setExportAvailability(false);
+    return;
+  }
+
+  // OPTIMIZATION: Incremental Append
+  const existingCount = els.log.querySelectorAll('.msg').length;
+  
+  if (existingCount < messages.length) {
+      const fragment = document.createDocumentFragment();
+      for (let i = existingCount; i < messages.length; i++) {
+          fragment.appendChild(createMessageElement(messages[i], i));
+      }
+      els.log.appendChild(fragment);
+      scrollToBottom();
+  } else if (existingCount > messages.length) {
+      // Fallback if deleted or reset
+      els.log.innerHTML = '';
+      const fragment = document.createDocumentFragment();
+      messages.forEach((m, i) => fragment.appendChild(createMessageElement(m, i)));
+      els.log.appendChild(fragment);
+  }
+  
   setExportAvailability(true);
 }
 
 export function updateLastMessageBubble(markdownText) {
   if (!els.log) return;
-  const lastMsgBody = els.log.querySelector('.msg:last-child .body');
-  if (lastMsgBody) {
-    lastMsgBody.innerHTML = markdownToHtml(markdownText);
-    scrollToBottom();
+  const lastMsg = els.log.lastElementChild;
+  
+  if (lastMsg && lastMsg.classList.contains('ai')) {
+      const body = lastMsg.querySelector('.body');
+      const newHtml = markdownToHtml(markdownText);
+      // Only write to DOM if content changed
+      if (body.innerHTML !== newHtml) {
+          body.innerHTML = newHtml;
+          scrollToBottom();
+      }
   } else {
+    // If state desynced (rare), full re-render
     renderLog();
   }
 }

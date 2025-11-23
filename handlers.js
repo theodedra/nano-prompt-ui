@@ -21,7 +21,7 @@ import {
   cancelGeneration,
   speakText,
   refreshAvailability,
-  resetModel // Now this import will work!
+  resetModel 
 } from './model.js';
 import { fetchContext, classifyIntent } from './context.js';
 import { resizeImage, debounce } from './utils.js';
@@ -29,8 +29,6 @@ import { resizeImage, debounce } from './utils.js';
 let recognition;
 let recognizing = false;
 let tabListenersAttached = false;
-
-// STATE: Track which session is pending deletion
 let confirmingDeleteId = null;
 
 // --- CONTEXT MANAGEMENT ---
@@ -60,11 +58,7 @@ function ensureTabContextSync() {
   if (tabListenersAttached) return;
   if (!chrome?.tabs?.onActivated) return;
   
-  // FIX: Update UI on tab switch but DO NOT reset AI model.
-  // This keeps the chat alive while browsing.
-  const update = () => {
-      refreshContextDraft(false);
-  };
+  const update = () => { refreshContextDraft(false); };
   
   chrome.tabs.onActivated.addListener(update);
   chrome.tabs.onUpdated.addListener((id, info, tab) => {
@@ -91,12 +85,7 @@ export async function bootstrap() {
   }
   
   ensureTabContextSync();
-  
-  if (!appState.contextDraft) {
-    await refreshContextDraft(true);
-  } else {
-    await refreshContextDraft(true); 
-  }
+  await refreshContextDraft(true);
 }
 
 // --- ACTION HANDLERS ---
@@ -113,7 +102,7 @@ export async function handleAskClick() {
   let contextOverride = UI.getContextText();
   const intent = classifyIntent(text);
 
-  // Optimization: Don't send huge context for simple "Hi" messages
+  // Context Optimization
   if (text.length < 60 && intent === 'none') {
     contextOverride = '';
   }
@@ -125,11 +114,7 @@ export async function handleAskClick() {
   }
 
   try {
-    await runPrompt({
-      text,
-      contextOverride,
-      attachments
-    });
+    await runPrompt({ text, contextOverride, attachments });
   } catch (e) {
     console.error('Prompt Execution Failed:', e);
     UI.setStatusText('Error');
@@ -147,9 +132,7 @@ export async function handleNewSessionClick() {
   setCurrentSession(session.id);
   await saveState();
   
-  // Reset AI for new chat
   resetModel(); 
-  
   UI.renderSessions();
   UI.renderLog();
   UI.closeMenu('session');
@@ -190,10 +173,7 @@ async function switchSessionHandler(row) {
   setCurrentSession(id);
   UI.highlightSession(id);
   await saveState();
-  
-  // Switch context history
   resetModel(); 
-  
   UI.closeMenu('session');
 }
 
@@ -212,10 +192,7 @@ export async function handleSessionMenuClick(event) {
     }
     return;
   }
-
-  if (row) {
-    await switchSessionHandler(row);
-  }
+  if (row) await switchSessionHandler(row);
 }
 
 export async function handleCopyChatClick() {
@@ -249,7 +226,6 @@ export function handleDocumentKeyDown(event) {
     if (UI.isModalOpen()) UI.closeModal();
     return;
   }
-
   if (event.key === 'Tab') {
     const openModal = document.querySelector('.modal:not([hidden])');
     const container = openModal || document.body;
@@ -260,9 +236,7 @@ export function handleDocumentKeyDown(event) {
 export function handleModalClick(event) {
   const btn = event.target.closest('[data-dismiss="modal"]');
   const backdrop = event.target.classList.contains('modal-backdrop');
-  if (btn || backdrop) {
-    UI.closeModal();
-  }
+  if (btn || backdrop) UI.closeModal();
 }
 
 export async function handleLogClick(event) {
@@ -272,9 +246,7 @@ export async function handleLogClick(event) {
   const idx = btn.dataset.idx;
   if (btn.classList.contains('bubble-copy')) {
       const msg = getCurrentSession().messages[idx];
-      if(msg) {
-        await navigator.clipboard.writeText(msg.text);
-      }
+      if(msg) await navigator.clipboard.writeText(msg.text);
   } else if (btn.classList.contains('speak')) {
       const msg = getCurrentSession().messages[idx];
       if(msg) speakText(msg.text);
