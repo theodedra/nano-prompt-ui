@@ -7,13 +7,15 @@ import {
   saveState
 } from './storage.js';
 import { buildPromptWithContext } from './context.js';
-import { dataUrlToBlob } from './utils.js';
+import { dataUrlToBlob, resizeImage } from './utils.js';
 
+// --- CONFIGURATION CONSTANTS ---
 const MODEL_CONFIG = {
   expectedInputs: [{ type: 'text', languages: ['en'] }],
   expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }]
 };
 
+// --- LOCAL AI WRAPPER ---
 class LocalAI {
   constructor() {
     this.session = null;
@@ -50,6 +52,7 @@ class LocalAI {
       const { value, done } = await reader.read();
       if (done) break;
       if (value) {
+        // Smart Accumulator logic
         if (fullText.length > 0 && value.startsWith(fullText)) {
             fullText = value;
         } else {
@@ -120,6 +123,85 @@ export async function runTranslator(text) {
   });
 }
 
+// --- IMAGE DESCRIPTION ---
+export async function runImageDescription(url) {
+  UI.setStatusText("Analyzing Image...");
+  
+  try {
+    // 1. Smart Fetch
+    const blob = await fetchImageWithRetry(url);
+    
+    // 2. Resize (Safety)
+    UI.setStatusText("Optimizing...");
+    const optimizedBase64 = await resizeImage(blob, 512); // 512px limit for safety
+    
+    const attachment = {
+      name: "Analyzed Image",
+      type: "image/jpeg",
+      data: optimizedBase64
+    };
+
+    // 3. Reset model to clear memory before image task
+    resetModel();
+    
+    await runPrompt({ 
+      text: "Describe this image in detail.", 
+      contextOverride: '', 
+      attachments: [attachment] 
+    });
+
+  } catch (e) {
+    console.error(e);
+    UI.setStatusText("Error");
+    resetModel(); 
+    const session = getCurrentSession();
+    upsertMessage(session.id, { 
+      role: 'ai', 
+      text: `**Image Error:** ${e.message}.`, 
+      ts: Date.now() 
+    });
+    UI.renderLog();
+  }
+}
+
+// Helper for Image Fetching
+async function fetchImageWithRetry(url) {
+  // 1. Extension Fetch
+  try {
+    const controller = new AbortController();
+    const id = setTimeout(() => controller.abort(), 5000); 
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(id);
+    if (res.ok) return await res.blob();
+  } catch (e) {}
+
+  // 2. Page Proxy Fetch
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab || tab.url.startsWith('chrome://')) throw new Error("Restricted Tab");
+
+    const [{ result: base64 }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: async (imgUrl) => {
+        try {
+          const r = await fetch(imgUrl);
+          const b = await r.blob();
+          return await new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(b);
+          });
+        } catch { return null; }
+      },
+      args: [url]
+    });
+
+    if (base64) return await (await fetch(base64)).blob();
+  } catch (e) {}
+
+  throw new Error("Could not download image data");
+}
+
 export async function runPrompt({ text, contextOverride, attachments }) {
   const session = getCurrentSession();
   const userMessage = { role: 'user', text, ts: Date.now(), attachments };
@@ -144,8 +226,7 @@ export async function runPrompt({ text, contextOverride, attachments }) {
     const finalText = `${fullContext}\n\nConversation History:\n${history}\n\nCurrent User Query:\n${text}`;
 
     let promptInput = finalText;
-    // Attachments logic simplified for text-only stability
-    if (attachments && attachments.length > 0) {
+    if (attachments?.length > 0) {
         const imageBlobs = await Promise.all(attachments.map(att => dataUrlToBlob(att.data)));
         promptInput = [finalText, ...imageBlobs];
     }
@@ -160,7 +241,13 @@ export async function runPrompt({ text, contextOverride, attachments }) {
 
     } catch (err) {
         if (err?.name === 'AbortError') throw err;
-        console.log("Side Panel failed, fallback to page...", err);
+        console.log("Side Panel failed, attempting fallback...");
+
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (tab && tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('edge://'))) {
+             throw new Error("AI not available on system pages.");
+        }
+
         const fallback = await runPromptInPage(finalText, attachments); 
         updateMessage(session.id, aiMessageIndex, { text: fallback });
         UI.updateLastMessageBubble(fallback);
@@ -168,11 +255,13 @@ export async function runPrompt({ text, contextOverride, attachments }) {
 
   } catch (err) {
     cancelGeneration();
-    if (err?.name === 'AbortError') {
-      updateMessage(session.id, aiMessageIndex, { text: '(stopped)' });
-    } else {
-      updateMessage(session.id, aiMessageIndex, { text: `Error: ${err.message || 'Busy'}` });
-    }
+    resetModel(); 
+    
+    let msg = err.message || 'Service unavailable';
+    if (err?.name === 'AbortError') msg = '(stopped)';
+    
+    updateMessage(session.id, aiMessageIndex, { text: `Error: ${msg}` });
+    UI.updateLastMessageBubble(`Error: ${msg}`);
   }
 
   UI.setBusy(false);

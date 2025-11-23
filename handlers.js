@@ -24,7 +24,8 @@ import {
   resetModel,
   runRewriter,   
   runSummarizer,
-  runTranslator // New Import
+  runTranslator,
+  runImageDescription 
 } from './model.js';
 import { fetchContext, classifyIntent } from './context.js';
 import { resizeImage, debounce } from './utils.js';
@@ -34,7 +35,6 @@ let recognizing = false;
 let tabListenersAttached = false;
 let confirmingDeleteId = null;
 
-// --- LISTEN FOR CONTEXT MENU COMMANDS ---
 chrome.runtime.onMessage.addListener((req) => {
   if (req.action === 'CMD_SUMMARIZE') {
     runPrompt({ text: `Summarize this:\n${req.text}`, contextOverride: '', attachments: [] });
@@ -45,9 +45,10 @@ chrome.runtime.onMessage.addListener((req) => {
   else if (req.action === 'CMD_TRANSLATE') {
     runTranslator(req.text);
   }
+  else if (req.action === 'CMD_DESCRIBE_IMAGE') {
+    runImageDescription(req.url);
+  }
 });
-
-// --- CONTEXT MANAGEMENT ---
 
 async function refreshContextDraft(force = false) {
   try {
@@ -83,8 +84,6 @@ function ensureTabContextSync() {
   tabListenersAttached = true;
 }
 
-// --- INITIALIZATION ---
-
 export async function bootstrap() {
   await loadState();
   
@@ -102,9 +101,10 @@ export async function bootstrap() {
   
   ensureTabContextSync();
   await refreshContextDraft(true);
-}
 
-// --- ACTION HANDLERS ---
+  // NEW: Signal to Background that UI is ready for commands
+  chrome.runtime.sendMessage({ action: 'PANEL_READY' });
+}
 
 export async function handleAskClick() {
   const value = UI.getInputValue().trim();
@@ -362,6 +362,10 @@ export async function handleSaveSettings() {
     
     updateSettings({ temperature: Number(temp), topK: Number(topk), systemPrompt: sys });
     await saveState();
+    
+    // FIXED: Force model reset so new settings apply immediately
+    resetModel();
+    
     UI.closeModal();
     await refreshAvailability();
 }
