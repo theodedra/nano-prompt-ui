@@ -1,54 +1,102 @@
-// content.js - Runs persistently on webpages to provide instant context
+// content.js
 
-// Listen for messages from the Side Panel
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'GET_CONTEXT') {
     const context = scrapePage();
     sendResponse(context);
   }
-  // Return true is only needed for async response, but we are sync here.
 });
+
+const NOISE_PHRASES = [
+  "Jump to", "Skip to", "main content", "accessibility", 
+  "Easy Apply", "connections work here", "Actively reviewing",
+  "results", "Expired", "ago", "See more", "show more",
+  "Keyboard shortcuts", "opens in a new window", "verficiation",
+  "Apply now", "Save", "Share"
+];
+
+function isVisible(el) {
+  if (!el) return false;
+  const style = window.getComputedStyle(el);
+  return style.display !== 'none' && 
+         style.visibility !== 'hidden' && 
+         style.opacity !== '0' &&
+         el.offsetWidth > 0 && 
+         el.offsetHeight > 0;
+}
 
 function scrapePage() {
   try {
-    const pick = (selector) => document.querySelector(selector);
+    const selection = window.getSelection()?.toString();
+    if (selection && selection.trim().length > 0) {
+      return {
+        title: document.title,
+        url: window.location.href.split('?')[0],
+        text: selection.trim(),
+        isSelection: true,
+        isRestricted: false
+      };
+    }
+
+    const selectors = [
+      'main', '[role="main"]', '#main', '#content', 
+      '.jobs-search-results-list', '.job-view-layout', 'article', 
+      '.feed-shared-update-v2'
+    ];
+
+    let root = document.body;
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && isVisible(el)) {
+        root = el;
+        break;
+      }
+    }
+
+    const walker = document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: (node) => {
+          if (!node.parentElement || !isVisible(node.parentElement)) return NodeFilter.FILTER_REJECT;
+          const tag = node.parentElement.tagName;
+          if (['SCRIPT', 'STYLE', 'NOSCRIPT', 'NAV', 'FOOTER', 'BUTTON', 'SVG', 'PATH'].includes(tag)) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          const text = node.textContent.trim();
+          if (text.length < 2) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      }
+    );
+
+    const contentParts = [];
+    let currentNode;
     
-    // 1. Try to find the "meat" of the page
-    const article = pick('article')?.innerText;
-    const main = pick('main')?.innerText;
-    const bodyText = document.body?.innerText || '';
-    
-    // 2. Check for user highlighted text
-    const selection = window.getSelection()?.toString() || '';
+    while (currentNode = walker.nextNode()) {
+      const txt = currentNode.textContent.trim();
+      const isNoise = NOISE_PHRASES.some(phrase => txt.includes(phrase));
+      if (!isNoise) {
+        contentParts.push(txt);
+      }
+    }
 
-    // 3. Grab headings for structure
-    const headings = Array.from(document.querySelectorAll('h1, h2'))
-      .slice(0, 6)
-      .map(h => h.innerText.trim())
-      .filter(Boolean);
+    let cleanText = contentParts.join('\n');
+    cleanText = cleanText.replace(/\n{3,}/g, '\n\n');
 
-    // 4. Meta Description for summary context
-    const description = document.querySelector('meta[name="description"]')?.content || '';
-
-    // Priority: Selection > Article > Main > Body
-    const bestText = selection || article || main || bodyText;
+    if (!cleanText || cleanText.length < 50) {
+      cleanText = document.body.innerText.substring(0, 5000); 
+    }
 
     return {
       title: document.title,
-      url: window.location.href.split('?')[0], // Remove query params for privacy
-      text: bestText || '',
-      headings,
-      selection,
-      meta: { description },
+      url: window.location.href.split('?')[0],
+      text: cleanText,
+      meta: { description: document.querySelector('meta[name="description"]')?.content || '' },
       isRestricted: false
     };
+
   } catch (e) {
-    // Fallback if something blocks DOM access
-    return {
-      title: 'Page Error',
-      url: '',
-      text: '[Error reading page content]',
-      isRestricted: true
-    };
+    return { title: 'Page Error', url: '', text: '[Error reading page content]', isRestricted: true };
   }
 }

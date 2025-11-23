@@ -1,8 +1,8 @@
 # Nano Prompt UI — Chrome MV3 (Side Panel Edition)
 
-![Nano Prompt UI](screenshot.png)
+![Nano Prompt UI](Screenshot.png)
 
-**TL;DR:** A privacy-first Chrome extension that runs entirely on-device using Chrome’s built-in **Gemini Nano** language model. Updated to **v0.6.0** with a hybrid execution engine, persistent context scraping, and incremental DOM rendering.
+**TL;DR:** A privacy-first Chrome extension that runs entirely on-device using Chrome’s built-in **Gemini Nano** language model. Version **0.7.0** introduces contextual actions (Summarize, Rewrite, Translate) directly from the right-click menu.
 
 ## ✨ Why Side Panel?
 
@@ -11,21 +11,22 @@ Unlike standard popups that close when you click away, **Nano Prompt UI lives in
 * **Persistent Sessions:** Copy text from a website and paste it into the chat without the window closing.
 * **Hybrid Execution:** If the Side Panel API fails, the extension intelligently injects the model into the page context to ensure reliability.
 
-## 🚀 Features (v0.6.0 Production Ready)
+## 🚀 Features (v0.7.0 Update)
 
 * **100% Local & Private:** Runs on the `window.ai` (Prompt API). No data leaves your device.
 * **⚡ Enterprise-Grade Performance:**
-    * **Incremental Rendering:** The UI now updates via DOM Fragments, eliminating freezing even during long chat histories.
-    * **Smart Database I/O:** Uses "Dirty State" tracking to only write changed sessions to IndexedDB, drastically reducing disk usage and lag.
+    * **Incremental Rendering:** The UI updates via DOM Fragments, eliminating freezing during long chats.
+    * **Smart Database I/O:** Only writes changed sessions to IndexedDB, drastically reducing disk usage.
+* **🖱️ Context Menu Integration (New!):**
+    * **Summarize Selection:** Right-click any text to instantly generate a bulleted summary in the panel.
+    * **Rewrite Selection:** Right-click to rewrite text (Formal tone default).
+    * **Translate to English:** Instantly translate selected text from any language.
 * **🧠 Advanced Context Engine:**
-    * **Persistent Scraper:** A lightweight `content.js` runs in the background for instant page reading (no more repeated script injections).
+    * **Hybrid Scraper:** Uses `TreeWalker` technology to clean "noise" (ads, navbars) from Single Page Apps (SPAs) while preserving content structure.
     * **Smart Truncation:** Intelligently chunks long articles to fit Gemini Nano's context window.
 * **🔒 Security First:**
     * **Strict Sanitization:** Replaced Regex with `DOMParser` based sanitization to prevent XSS attacks.
     * **Protocol Safety:** Automatically disables AI features on privileged pages (`chrome://`, `settings`).
-* **Rich Input:**
-    * **Multimodal:** Attach images to prompts (auto-converted to Blobs for the API).
-    * **Voice Mode:** Built-in speech-to-text.
 
 ## 🛠️ Installation (Developer Mode)
 

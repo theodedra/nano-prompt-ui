@@ -7,7 +7,6 @@ Do not mention browsing limitations.
 Always answer in English.
 Keep answers concise but helpful.`;
 
-// Cache to prevent spamming the page
 let cachedContext = { text: '', ts: 0, tabId: null, isRestricted: false };
 
 export function classifyIntent(text) {
@@ -28,48 +27,36 @@ function smartTruncate(text, limit) {
   return truncated + '\n\n[...Content truncated...]';
 }
 
-/**
- * Robustly fetches context.
- * 1. Checks if tab is restricted (chrome://, etc).
- * 2. Tries to message the persistent content script (Fast).
- * 3. If that fails (Old tab), injects the script dynamically (Self-healing).
- */
 export async function fetchContext(force = false) {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   
-  // 1. Basic Tab Validation
-  if (!activeTab || !activeTab.id) {
-    return { text: '', isRestricted: true };
-  }
-
+  if (!activeTab || !activeTab.id) return { text: '', isRestricted: true };
+  
   const activeTabId = activeTab.id;
-
-  // 2. Cache Check (15 seconds)
   const isFresh = Date.now() - cachedContext.ts < 15_000; 
+  
   if (!force && cachedContext.text && isFresh && cachedContext.tabId === activeTabId) {
     return cachedContext;
   }
 
-  // 3. Check for Restricted Protocols (Security)
   if (!activeTab.url || !/^(https?|file):/i.test(activeTab.url)) {
     return { 
       text: '[System Page: AI disabled for security.]', 
-      tabId: activeTabId,
+      tabId: activeTabId, 
       isRestricted: true 
     };
   }
 
-  // 4. Communication Strategy
   try {
     const rawData = await sendMessageWithFallback(activeTabId);
     
-    // Process Data
     const pieces = [];
     if (rawData.title) pieces.push(`Title: ${sanitizeText(rawData.title)}`);
     if (rawData.url) pieces.push(`URL: ${rawData.url}`);
     
     if (rawData.text) {
-      const clean = smartTruncate(sanitizeText(rawData.text), 7000);
+      // Increased limit slightly as clean text is more valuable
+      const clean = smartTruncate(sanitizeText(rawData.text), 8000);
       pieces.push(clean);
     }
 
@@ -92,21 +79,14 @@ export async function fetchContext(force = false) {
   }
 }
 
-/**
- * Tries to message content.js. If it fails, injects it and tries again.
- */
 async function sendMessageWithFallback(tabId) {
   try {
-    // Attempt 1: Fast Message
     return await chrome.tabs.sendMessage(tabId, { action: 'GET_CONTEXT' });
   } catch (e) {
-    // Attempt 2: Inject script (Self-healing for old tabs)
-    // console.log("Content script missing, injecting...");
     await chrome.scripting.executeScript({
       target: { tabId },
       files: ['content.js']
     });
-    // Retry Message
     return await chrome.tabs.sendMessage(tabId, { action: 'GET_CONTEXT' });
   }
 }

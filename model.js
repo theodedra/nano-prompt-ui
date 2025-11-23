@@ -9,24 +9,18 @@ import {
 import { buildPromptWithContext } from './context.js';
 import { dataUrlToBlob } from './utils.js';
 
-// --- CONFIGURATION CONSTANTS ---
-// We define this once to ensure consistency across Side Panel and In-Page modes
 const MODEL_CONFIG = {
   expectedInputs: [{ type: 'text', languages: ['en'] }],
   expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }]
 };
 
-// --- LOCAL AI WRAPPER ---
 class LocalAI {
   constructor() {
     this.session = null;
-    this.controller = null;
   }
 
   get engine() {
-    if (self.ai && self.ai.languageModel) return self.ai.languageModel;
-    if (self.LanguageModel) return self.LanguageModel;
-    return null;
+    return self.ai?.languageModel || self.LanguageModel;
   }
 
   async getAvailability() {
@@ -34,14 +28,11 @@ class LocalAI {
     try {
       const status = await this.engine.availability(MODEL_CONFIG);
       return typeof status === 'object' ? status.availability : status;
-    } catch (e) {
-      return 'no';
-    }
+    } catch (e) { return 'no'; }
   }
 
   async createSession(params = {}) {
     if (!this.engine) throw new Error('AI not supported');
-    // Merge default config with any custom system prompts
     const config = { ...MODEL_CONFIG, ...params };
     this.session = await this.engine.create(config);
     return this.session;
@@ -49,18 +40,25 @@ class LocalAI {
 
   async promptStreaming(input, signal, onUpdate) {
     if (!this.session) throw new Error('No active session');
+    
     const stream = await this.session.promptStreaming(input, { signal });
     const reader = stream.getReader();
-    let buffer = '';
+    
+    let fullText = ''; 
+    
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
       if (value) {
-        buffer += value;
-        onUpdate(buffer);
+        if (fullText.length > 0 && value.startsWith(fullText)) {
+            fullText = value;
+        } else {
+            fullText += value;
+        }
+        onUpdate(fullText);
       }
     }
-    return buffer;
+    return fullText;
   }
 
   destroy() {
@@ -88,25 +86,38 @@ function getHistorySnippet(session) {
 
 // --- EXPORTS ---
 
-export function resetModel() {
-  localAI.destroy();
-}
+export function resetModel() { localAI.destroy(); }
 
 export async function refreshAvailability() {
   let status = await localAI.getAvailability();
   if (status === 'no') status = 'Page-Mode'; 
-
-  const map = {
-    'available': 'Ready',
-    'readily': 'Ready',
-    'downloading': 'Downloading...',
-    'after-download': 'Download Needed',
-    'no': 'Not Supported',
-    'Page-Mode': 'Ready (Hybrid)'
-  };
-  const text = map[status] || 'Standby';
+  const text = status === 'readily' ? 'Ready' : status;
   UI.setStatusText(text);
   UI.setHardwareStatus(`Gemini Nano: ${text}`);
+}
+
+export async function runSummarizer(text) {
+  await runPrompt({ 
+    text: `Summarize the following content into key bullet points:\n\n${text}`, 
+    contextOverride: '', 
+    attachments: [] 
+  });
+}
+
+export async function runRewriter(text, tone = 'professional') {
+  await runPrompt({ 
+    text: `Rewrite the following text to be more ${tone}:\n\n${text}`, 
+    contextOverride: '', 
+    attachments: [] 
+  });
+}
+
+export async function runTranslator(text) {
+  await runPrompt({ 
+    text: `Translate the following text to English:\n\n${text}`, 
+    contextOverride: '', 
+    attachments: [] 
+  });
 }
 
 export async function runPrompt({ text, contextOverride, attachments }) {
@@ -132,18 +143,15 @@ export async function runPrompt({ text, contextOverride, attachments }) {
     const history = getHistorySnippet(session); 
     const finalText = `${fullContext}\n\nConversation History:\n${history}\n\nCurrent User Query:\n${text}`;
 
-    // 1. Prepare Input (Multimodal support)
     let promptInput = finalText;
+    // Attachments logic simplified for text-only stability
     if (attachments && attachments.length > 0) {
         const imageBlobs = await Promise.all(attachments.map(att => dataUrlToBlob(att.data)));
         promptInput = [finalText, ...imageBlobs];
     }
 
     try {
-        // 2. Try Side Panel Execution
-        if (!localAI.session) {
-            await localAI.createSession(getSessionConfig());
-        }
+        if (!localAI.session) await localAI.createSession(getSessionConfig());
         
         await localAI.promptStreaming(promptInput, controller.signal, (chunk) => {
             updateMessage(session.id, aiMessageIndex, { text: chunk });
@@ -152,16 +160,8 @@ export async function runPrompt({ text, contextOverride, attachments }) {
 
     } catch (err) {
         if (err?.name === 'AbortError') throw err;
-        
-        // 3. Fallback to Page Execution
-        console.log("Side Panel failed, trying In-Page Fallback...");
-        
-        // Warn about lost images in fallback mode
-        if (Array.isArray(promptInput)) {
-            console.warn("Fallback mode does not support images yet. Sending text only.");
-        }
-
-        const fallback = await runPromptInPage(finalText); 
+        console.log("Side Panel failed, fallback to page...", err);
+        const fallback = await runPromptInPage(finalText, attachments); 
         updateMessage(session.id, aiMessageIndex, { text: fallback });
         UI.updateLastMessageBubble(fallback);
     }
@@ -171,7 +171,7 @@ export async function runPrompt({ text, contextOverride, attachments }) {
     if (err?.name === 'AbortError') {
       updateMessage(session.id, aiMessageIndex, { text: '(stopped)' });
     } else {
-      updateMessage(session.id, aiMessageIndex, { text: `Error: ${err.message || 'Service unavailable'}` });
+      updateMessage(session.id, aiMessageIndex, { text: `Error: ${err.message || 'Busy'}` });
     }
   }
 
@@ -180,16 +180,14 @@ export async function runPrompt({ text, contextOverride, attachments }) {
   await saveState();
 }
 
-async function runPromptInPage(prompt) {
+async function runPromptInPage(prompt, attachments = []) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.url.startsWith('http')) throw new Error('Restricted protocol');
   
-  // We hardcode the config here because we can't easily pass the 'MODEL_CONFIG' object 
-  // into the isolated context of the page without serialization issues.
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     world: 'MAIN', 
-    func: async (p, sys) => {
+    func: async (p, sys, atts) => {
       try {
         const model = window.ai?.languageModel || self.ai?.languageModel;
         if (!model) return { error: 'AI not found in page' };
@@ -199,12 +197,21 @@ async function runPromptInPage(prompt) {
           expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }] 
         });
         
-        const r = await sess.prompt(p);
+        let input = p;
+        if (atts && atts.length > 0) {
+            const blobs = await Promise.all(atts.map(async (att) => {
+                const res = await fetch(att.data);
+                return await res.blob();
+            }));
+            input = [p, ...blobs];
+        }
+
+        const r = await sess.prompt(input);
         sess.destroy();
         return { ok: true, data: r };
       } catch (e) { return { error: e.toString() }; }
     },
-    args: [prompt, appState.settings.systemPrompt]
+    args: [prompt, appState.settings.systemPrompt, attachments]
   });
   
   if (result?.error) throw new Error(result.error);
@@ -221,14 +228,12 @@ export function cancelGeneration() {
 
 export async function summarizeActiveTab(contextOverride) {
   resetModel(); 
-  const instruction = 'Summarize the current tab in seven detailed bullet points.';
-  await runPrompt({ text: instruction, contextOverride, attachments: [] });
+  await runPrompt({ text: 'Summarize the current tab in seven detailed bullet points.', contextOverride, attachments: [] });
 }
 
 export function speakText(text) {
   if (!('speechSynthesis' in window)) return;
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = 'en-US'; 
-  window.speechSynthesis.cancel();
   window.speechSynthesis.speak(utterance);
 }

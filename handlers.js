@@ -21,7 +21,10 @@ import {
   cancelGeneration,
   speakText,
   refreshAvailability,
-  resetModel 
+  resetModel,
+  runRewriter,   
+  runSummarizer,
+  runTranslator // New Import
 } from './model.js';
 import { fetchContext, classifyIntent } from './context.js';
 import { resizeImage, debounce } from './utils.js';
@@ -30,6 +33,19 @@ let recognition;
 let recognizing = false;
 let tabListenersAttached = false;
 let confirmingDeleteId = null;
+
+// --- LISTEN FOR CONTEXT MENU COMMANDS ---
+chrome.runtime.onMessage.addListener((req) => {
+  if (req.action === 'CMD_SUMMARIZE') {
+    runPrompt({ text: `Summarize this:\n${req.text}`, contextOverride: '', attachments: [] });
+  } 
+  else if (req.action === 'CMD_REWRITE') {
+    runRewriter(req.text, 'more-formal');
+  }
+  else if (req.action === 'CMD_TRANSLATE') {
+    runTranslator(req.text);
+  }
+});
 
 // --- CONTEXT MANAGEMENT ---
 
@@ -102,7 +118,6 @@ export async function handleAskClick() {
   let contextOverride = UI.getContextText();
   const intent = classifyIntent(text);
 
-  // Context Optimization
   if (text.length < 60 && intent === 'none') {
     contextOverride = '';
   }

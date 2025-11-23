@@ -10,10 +10,7 @@ import {
 let els = {};
 let lastStatus = 'Checking...'; 
 let isSystemBusy = false;
-
-// TRACKING STATE FOR UI UPDATES
 let renderedSessionId = null;
-let lastScrollHeight = 0;
 
 const ICON_MIC = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
 const ICON_STOP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect></svg>`;
@@ -44,15 +41,9 @@ export function initUI() {
   };
 }
 
-// --- NEW: SYSTEM LOCK UI ---
 export function setRestrictedState(isRestricted) {
   const interactive = [
-    els.input, 
-    els.askBtn, 
-    els.sumBtn, 
-    els.mic, 
-    els.attachBtn, 
-    els.templatesTrigger
+    els.input, els.askBtn, els.sumBtn, els.mic, els.attachBtn, els.templatesTrigger
   ];
 
   if (isRestricted) {
@@ -60,39 +51,25 @@ export function setRestrictedState(isRestricted) {
     if (els.input) els.input.placeholder = "AI disabled on system pages";
     setStatusText("System Page");
   } else {
-    interactive.forEach(el => { 
-      if(el) el.disabled = false; 
-    });
+    interactive.forEach(el => { if(el) el.disabled = false; });
     if(els.stop) els.stop.disabled = !isSystemBusy;
-    
     if (els.input) els.input.placeholder = "Ask anything... (Shift+Enter for newline)";
     setStatusText(lastStatus === "System Page" ? "Ready" : lastStatus);
   }
 }
-
-// --- ACCESSIBILITY HELPERS ---
 
 export function trapFocus(e, container) {
   const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
   const focusableContent = container.querySelectorAll(focusableSelector);
   
   if (focusableContent.length === 0) return false;
-
   const first = focusableContent[0];
   const last = focusableContent[focusableContent.length - 1];
 
   if (e.shiftKey) { 
-    if (document.activeElement === first) {
-      last.focus();
-      e.preventDefault();
-      return true;
-    }
+    if (document.activeElement === first) { last.focus(); e.preventDefault(); return true; }
   } else { 
-    if (document.activeElement === last) {
-      first.focus();
-      e.preventDefault();
-      return true;
-    }
+    if (document.activeElement === last) { first.focus(); e.preventDefault(); return true; }
   }
   return false;
 }
@@ -135,7 +112,6 @@ export function getContextText() {
 
 function scrollToBottom() {
   if (!els.log) return;
-  // Use RAF to prevent layout thrashing
   requestAnimationFrame(() => {
     els.log.scrollTop = els.log.scrollHeight;
   });
@@ -294,7 +270,7 @@ export function renderLog() {
   const session = getCurrentSession();
   if (!session || !els.log) return;
 
-  // Detect session switch
+  // Detect session switch and clear
   if (renderedSessionId !== session.id) {
       els.log.innerHTML = '';
       renderedSessionId = session.id;
@@ -302,14 +278,22 @@ export function renderLog() {
   
   const messages = session.messages;
   
-  if (!messages.length) {
-    els.log.innerHTML = '<div class="msg ai"><div class="body"><p>Ready to chat.</p></div></div>';
+  // --- FIX START: Handle Empty State ---
+  if (messages.length === 0) {
+    els.log.innerHTML = '<div class="msg ai placeholder"><div class="body"><p>Ready to chat.</p></div></div>';
     setExportAvailability(false);
     return;
   }
 
-  // OPTIMIZATION: Incremental Append
-  const existingCount = els.log.querySelectorAll('.msg').length;
+  // --- FIX START: Remove Placeholder if chatting starts ---
+  const placeholder = els.log.querySelector('.placeholder');
+  if (placeholder) {
+    placeholder.remove();
+  }
+  // --- FIX END ---
+
+  // Incremental Append
+  const existingCount = els.log.querySelectorAll('.msg:not(.placeholder)').length;
   
   if (existingCount < messages.length) {
       const fragment = document.createDocumentFragment();
@@ -319,7 +303,7 @@ export function renderLog() {
       els.log.appendChild(fragment);
       scrollToBottom();
   } else if (existingCount > messages.length) {
-      // Fallback if deleted or reset
+      // Fallback if deleted/reset
       els.log.innerHTML = '';
       const fragment = document.createDocumentFragment();
       messages.forEach((m, i) => fragment.appendChild(createMessageElement(m, i)));
@@ -336,13 +320,11 @@ export function updateLastMessageBubble(markdownText) {
   if (lastMsg && lastMsg.classList.contains('ai')) {
       const body = lastMsg.querySelector('.body');
       const newHtml = markdownToHtml(markdownText);
-      // Only write to DOM if content changed
       if (body.innerHTML !== newHtml) {
           body.innerHTML = newHtml;
           scrollToBottom();
       }
   } else {
-    // If state desynced (rare), full re-render
     renderLog();
   }
 }
