@@ -10,6 +10,7 @@ const STORES = {
 const SYNC_KEY = 'nanoPromptUI.settings.v1';
 const SESSION_KEY = 'nanoPromptUI.draft';
 export const BLANK_TEMPLATE_ID = 'blank';
+const MAX_SESSIONS = 100; // Maximum number of sessions to keep
 
 export const DEFAULT_TEMPLATES = [
   { id: BLANK_TEMPLATE_ID, label: 'Templates…', text: '' },
@@ -61,7 +62,7 @@ async function dbOp(storeName, mode, callback) {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, mode);
     const store = tx.objectStore(storeName);
-    
+
     let reqResult = null;
     const request = callback(store);
 
@@ -70,7 +71,15 @@ async function dbOp(storeName, mode, callback) {
     request.onerror = () => reject(request.error);
 
     tx.oncomplete = () => resolve(reqResult);
-    tx.onerror = () => reject(tx.error);
+    tx.onerror = (event) => {
+      // QUOTA HANDLING: Detect quota exceeded errors
+      if (event.target.error?.name === 'QuotaExceededError') {
+        console.error('IndexedDB quota exceeded. Consider clearing old sessions.');
+        reject(new Error('Storage quota exceeded. Please delete old sessions.'));
+      } else {
+        reject(tx.error);
+      }
+    };
   });
 }
 
@@ -114,12 +123,25 @@ export function createSessionFrom(baseSessionId = null) {
   const base = baseSessionId ? appState.sessions[baseSessionId] : null;
   const session = createEmptySession(base ? `${base.title} copy` : 'New chat');
   if (base) {
-    session.messages = base.messages.slice(); 
+    session.messages = base.messages.slice();
   }
   appState.sessions[session.id] = session;
   appState.sessionOrder.unshift(session.id);
   appState.currentSessionId = session.id;
-  dirtySessions.add(session.id); 
+  dirtySessions.add(session.id);
+
+  // AUTO-CLEANUP: Remove oldest sessions if limit exceeded
+  if (appState.sessionOrder.length > MAX_SESSIONS) {
+    const sessionsToRemove = appState.sessionOrder.slice(MAX_SESSIONS);
+    sessionsToRemove.forEach(oldId => {
+      delete appState.sessions[oldId];
+      dirtySessions.delete(oldId);
+      dbOp(STORES.SESSIONS, 'readwrite', store => store.delete(oldId))
+        .catch(e => console.error('Failed to delete old session from IDB', e));
+    });
+    appState.sessionOrder = appState.sessionOrder.slice(0, MAX_SESSIONS);
+  }
+
   return session;
 }
 
@@ -143,14 +165,28 @@ export function deleteSession(sessionId) {
 export function upsertMessage(sessionId, message, replaceIndex = null) {
   const session = appState.sessions[sessionId];
   if (!session) return;
-  
+
+  // MESSAGE VALIDATION: Ensure message has required fields
+  if (!message || typeof message !== 'object') {
+    console.error('Invalid message: must be an object');
+    return;
+  }
+  if (!message.role || !['user', 'ai'].includes(message.role)) {
+    console.error('Invalid message role:', message.role);
+    return;
+  }
+  if (typeof message.text !== 'string') {
+    console.error('Invalid message text: must be a string');
+    return;
+  }
+
   if (replaceIndex === null) {
     session.messages.push(message);
   } else {
     session.messages[replaceIndex] = message;
   }
   session.updatedAt = Date.now();
-  dirtySessions.add(sessionId); 
+  dirtySessions.add(sessionId);
 }
 
 export function updateMessage(sessionId, messageIndex, patch) {

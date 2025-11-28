@@ -1,56 +1,6 @@
 // background.js
 
 let pendingAction = null;
-let dispatching = false;
-
-// --- RELIABILITY HELPERS ---
-
-// Attempt to send the queued action to the side panel
-async function tryDeliverPendingAction() {
-  if (!pendingAction || dispatching) return false;
-
-  dispatching = true;
-  try {
-    await chrome.runtime.sendMessage(pendingAction);
-    pendingAction = null;
-    return true;
-  } catch (e) {
-    // Panel might not be ready yet, or closed immediately
-    // We keep pendingAction null to avoid infinite loops, but log warning
-    console.warn('Nano Prompt: Failed to send action to panel', e);
-    return false;
-  } finally {
-    dispatching = false;
-  }
-}
-
-// Wait for the panel to either announce itself (PANEL_READY) or respond to a ping
-function waitForPanelReady(timeout = 4000) {
-  return new Promise((resolve) => {
-    let finished = false;
-
-    const finish = (ready) => {
-      if (finished) return;
-      finished = true;
-      clearTimeout(timer);
-      chrome.runtime.onMessage.removeListener(onMessage);
-      resolve(ready);
-    };
-
-    const onMessage = (message) => {
-      if (message.action === 'PANEL_READY') finish(true);
-    };
-
-    chrome.runtime.onMessage.addListener(onMessage);
-
-    // Active Ping: Check if panel is already open and listening
-    chrome.runtime.sendMessage({ action: 'PING_PANEL' }, (resp) => {
-      if (!chrome.runtime.lastError && resp?.ok) finish(true);
-    });
-
-    const timer = setTimeout(() => finish(false), timeout);
-  });
-}
 
 // --- AI WARM-UP LOGIC ---
 async function warmUpModel() {
@@ -76,9 +26,11 @@ async function warmUpModel() {
       } catch (e) {
         console.warn('Nano Prompt: Warmup failed (non-critical):', e);
       }
-    } 
+    } else {
+        console.log('Nano Prompt: AI not ready yet. Status:', capabilities.available);
+    }
   } catch (err) {
-    // Ignore if AI API not available
+    console.log('Nano Prompt: AI API not detected.');
   }
 }
 
@@ -106,34 +58,35 @@ const setupExtension = async () => {
 chrome.runtime.onInstalled.addListener(setupExtension);
 chrome.runtime.onStartup.addListener(setupExtension);
 
-// --- HANDLING CLICKS WITH HANDSHAKE ---
+// HANDLE MENU CLICKS with Handshake
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  // 1. Ensure panel is opening
   await chrome.sidePanel.open({ windowId: tab.windowId });
 
-  // 2. Queue the action
+  // Queue the action
   if (info.menuItemId === 'summarize_sel') pendingAction = { action: 'CMD_SUMMARIZE', text: info.selectionText };
   else if (info.menuItemId === 'rewrite_sel') pendingAction = { action: 'CMD_REWRITE', text: info.selectionText };
   else if (info.menuItemId === 'translate_sel') pendingAction = { action: 'CMD_TRANSLATE', text: info.selectionText };
   else if (info.menuItemId === 'describe_img') pendingAction = { action: 'CMD_DESCRIBE_IMAGE', url: info.srcUrl };
-
-  // 3. Wait for panel to confirm it exists
-  const ready = await waitForPanelReady();
   
-  if (!ready) {
-    console.warn('Nano Prompt: Side panel did not confirm readiness; attempting dispatch anyway.');
-  }
-
-  // 4. Send
-  await tryDeliverPendingAction();
+  // If panel is already open, send immediately (it might not send PANEL_READY if already loaded)
+  // TIMEOUT FIX: Increased to 1000ms for slower systems
+  setTimeout(() => {
+      if (pendingAction) {
+          chrome.runtime.sendMessage(pendingAction).catch(() => {});
+          // We don't clear pendingAction here; we let PANEL_READY clear it to be safe for cold starts
+      }
+  }, 1000);
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'ping') {
     sendResponse({ status: 'alive' });
-  }
+  } 
   else if (message.action === 'PANEL_READY') {
-    // The panel just opened and told us it's ready. Send any queued data.
-    tryDeliverPendingAction();
+      if (pendingAction) {
+          console.log("Nano Prompt: Sending queued action", pendingAction);
+          chrome.runtime.sendMessage(pendingAction);
+          pendingAction = null;
+      }
   }
 });

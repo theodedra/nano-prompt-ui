@@ -22,10 +22,11 @@ import {
   speakText,
   refreshAvailability,
   resetModel,
-  runRewriter,   
+  runRewriter,
   runSummarizer,
   runTranslator,
-  runImageDescription 
+  runImageDescription,
+  isSomethingRunning
 } from './model.js';
 import { fetchContext, classifyIntent } from './context.js';
 import { resizeImage, debounce } from './utils.js';
@@ -35,15 +36,7 @@ let recognizing = false;
 let tabListenersAttached = false;
 let confirmingDeleteId = null;
 
-// --- COMMAND LISTENER ---
-chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
-  // 1. Respond to liveness check from Background
-  if (req.action === 'PING_PANEL') {
-    sendResponse({ ok: true });
-    return;
-  }
-  
-  // 2. Handle Actions
+chrome.runtime.onMessage.addListener((req) => {
   if (req.action === 'CMD_SUMMARIZE') {
     runPrompt({ text: `Summarize this:\n${req.text}`, contextOverride: '', attachments: [] });
   } 
@@ -58,21 +51,29 @@ chrome.runtime.onMessage.addListener((req, _sender, sendResponse) => {
   }
 });
 
-// --- CONTEXT MANAGEMENT ---
-
-async function refreshContextDraft(force = false) {
+async function refreshContextDraft(force = false, shouldSave = true) {
   try {
     const ctx = await fetchContext(force);
     const text = ctx?.text || '';
-    
+
     if (ctx.isRestricted) {
       UI.setRestrictedState(true);
     } else {
       UI.setRestrictedState(false);
     }
 
+    // TAB SWITCH FIX: Restore stop button state after tab change
+    // This ensures stop button stays enabled if narration/generation is active
+    UI.restoreStopButtonState(isSomethingRunning());
+
     updateContextDraft(text);
-    await saveContextDraft(text); 
+
+    // OPTIMIZATION: Only save when explicitly requested (user-initiated or forced)
+    // Auto-refreshes from tab switches don't need to persist
+    if (shouldSave) {
+      await saveContextDraft(text);
+    }
+
     UI.setContextText(text);
     return text;
   } catch (e) {
@@ -84,17 +85,17 @@ async function refreshContextDraft(force = false) {
 function ensureTabContextSync() {
   if (tabListenersAttached) return;
   if (!chrome?.tabs?.onActivated) return;
-  
-  const update = () => { refreshContextDraft(false); };
-  
-  chrome.tabs.onActivated.addListener(update);
+
+  // PERFORMANCE FIX: Debounce both tab activation and updates
+  const TAB_UPDATE_DEBOUNCE_MS = 300;
+  const debouncedUpdate = debounce(() => { refreshContextDraft(false, false); }, TAB_UPDATE_DEBOUNCE_MS);
+
+  chrome.tabs.onActivated.addListener(() => debouncedUpdate());
   chrome.tabs.onUpdated.addListener((id, info, tab) => {
-    if (tab?.active && info.status === 'complete') update();
+    if (tab?.active && info.status === 'complete') debouncedUpdate();
   });
   tabListenersAttached = true;
 }
-
-// --- INITIALIZATION ---
 
 export async function bootstrap() {
   await loadState();
@@ -114,11 +115,9 @@ export async function bootstrap() {
   ensureTabContextSync();
   await refreshContextDraft(true);
 
-  // Tell Background we are open and ready for commands
+  // NEW: Signal to Background that UI is ready for commands
   chrome.runtime.sendMessage({ action: 'PANEL_READY' });
 }
-
-// --- ACTION HANDLERS ---
 
 export async function handleAskClick() {
   const value = UI.getInputValue().trim();
@@ -320,21 +319,48 @@ export function handleAttachmentListClick(event) {
 export function handleMicClick() {
     const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Speech) return alert('Speech recognition not supported in this browser.');
-    
-    if (recognizing) { recognition.stop(); return; }
-    
+
+    if (recognizing) {
+      // CLEANUP FIX: Properly stop and cleanup recognition
+      if (recognition) {
+        recognition.stop();
+        recognition = null;
+      }
+      return;
+    }
+
     recognition = new Speech();
     recognition.continuous = true;
     recognition.interimResults = true;
-    
+
     recognition.onstart = () => { recognizing = true; UI.setMicState(true); };
-    recognition.onend = () => { recognizing = false; UI.setMicState(false); };
+    recognition.onend = () => {
+      recognizing = false;
+      UI.setMicState(false);
+      // MEMORY LEAK FIX: Clear recognition reference when done
+      recognition = null;
+    };
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error:', event.error);
+      recognizing = false;
+      UI.setMicState(false);
+      // CLEANUP: Clear reference on error
+      recognition = null;
+    };
     recognition.onresult = (e) => {
         let t = '';
         for (let i = 0; i < e.results.length; ++i) t += e.results[i][0].transcript;
         UI.setInputValue(t);
     };
-    recognition.start();
+
+    try {
+      recognition.start();
+    } catch (e) {
+      console.error('Failed to start speech recognition:', e);
+      recognition = null;
+      recognizing = false;
+      UI.setMicState(false);
+    }
 }
 
 export function handleSpeakLast() {
@@ -352,11 +378,17 @@ export async function handleToggleContext() {
   await refreshContextDraft(false); 
 }
 
-export const handleContextInput = debounce((event) => {
+// OPTIMIZATION: Only update in-memory state on input (no storage writes)
+export function handleContextInput(event) {
   const text = event.target.value;
   updateContextDraft(text);
-  saveContextDraft(text);
-}, 500);
+}
+
+// OPTIMIZATION: Save to storage only on blur (fewer writes)
+export async function handleContextBlur(event) {
+  const text = event.target.value;
+  await saveContextDraft(text);
+}
 
 export function handleOpenSettings() {
   UI.openSettingsModal();
@@ -376,7 +408,10 @@ export async function handleSaveSettings() {
     
     updateSettings({ temperature: Number(temp), topK: Number(topk), systemPrompt: sys });
     await saveState();
+    
+    // FIXED: Force model reset so new settings apply immediately
     resetModel();
+    
     UI.closeModal();
     await refreshAvailability();
 }

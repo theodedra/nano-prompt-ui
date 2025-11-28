@@ -8,9 +8,12 @@ import {
 } from './storage.js';
 
 let els = {};
-let lastStatus = 'Checking...'; 
+let lastStatus = 'Checking...';
 let isSystemBusy = false;
 let renderedSessionId = null;
+
+// UPDATED: Observer for smooth scrolling
+let scrollObserver = null;
 
 const ICON_MIC = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
 const ICON_STOP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect></svg>`;
@@ -39,6 +42,14 @@ export function initUI() {
     settingsModal: $('#settings-modal'),
     contextModal: $('#context-modal')
   };
+
+  // UPDATED: Initialize ResizeObserver for smooth auto-scrolling
+  // We observe the last message element. When it grows (streaming), we scroll.
+  if (window.ResizeObserver && els.log) {
+    scrollObserver = new ResizeObserver(() => {
+       scrollToBottom();
+    });
+  }
 }
 
 export function setRestrictedState(isRestricted) {
@@ -48,6 +59,8 @@ export function setRestrictedState(isRestricted) {
 
   if (isRestricted) {
     interactive.forEach(el => { if(el) el.disabled = true; });
+    // TAB SWITCH FIX: Don't disable stop button if something is running
+    // Stop button should remain functional even on restricted pages if narration/generation is active
     if (els.input) els.input.placeholder = "AI disabled on system pages";
     setStatusText("System Page");
   } else {
@@ -110,11 +123,26 @@ export function getContextText() {
   return els.contextText?.value?.trim() || '';
 }
 
+// UPDATED: Simplified scroll logic, called by Observer
 function scrollToBottom() {
   if (!els.log) return;
-  requestAnimationFrame(() => {
-    els.log.scrollTop = els.log.scrollHeight;
-  });
+  els.log.scrollTop = els.log.scrollHeight;
+}
+
+// UPDATED: Helper to attach observer to the latest message
+function observeLastMessage() {
+  if (!scrollObserver || !els.log) return;
+
+  // Disconnect previous observations
+  scrollObserver.disconnect();
+
+  const lastMsg = els.log.lastElementChild;
+  if (lastMsg) {
+    scrollObserver.observe(lastMsg);
+  }
+
+  // Also scroll once immediately
+  scrollToBottom();
 }
 
 export function renderSessions(confirmingId = null) {
@@ -234,7 +262,7 @@ function createMessageElement(m, idx) {
 
     const header = document.createElement('div');
     header.className = 'msg-header';
-    
+
     const label = document.createElement('span');
     label.className = 'sender-label';
     label.textContent = m.role === 'user' ? 'You' : 'Nano';
@@ -247,7 +275,13 @@ function createMessageElement(m, idx) {
 
     const body = document.createElement('div');
     body.className = 'body';
-    body.innerHTML = markdownToHtml(m.text || '');
+
+    // LOADING ANIMATION: Show three dots for empty AI messages
+    if (m.role === 'ai' && (!m.text || m.text.trim() === '')) {
+      body.innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
+    } else {
+      body.innerHTML = markdownToHtml(m.text || '');
+    }
     div.appendChild(body);
 
     if (m.attachments?.length) {
@@ -262,7 +296,23 @@ function createMessageElement(m, idx) {
       div.appendChild(att);
     }
 
-    div.appendChild(createMessageActions(m, idx));
+    const actions = createMessageActions(m, idx);
+    div.appendChild(actions);
+
+    // SMART POSITIONING: Detect cursor position and reposition buttons
+    div.addEventListener('mousemove', (e) => {
+      const rect = div.getBoundingClientRect();
+      const mouseY = e.clientY - rect.top;
+      const halfHeight = rect.height / 2;
+
+      // If cursor is in bottom half, show buttons at bottom
+      if (mouseY > halfHeight) {
+        actions.classList.add('bottom');
+      } else {
+        actions.classList.remove('bottom');
+      }
+    });
+
     return div;
 }
 
@@ -294,14 +344,13 @@ export function renderLog() {
 
   // Incremental Append
   const existingCount = els.log.querySelectorAll('.msg:not(.placeholder)').length;
-  
+
   if (existingCount < messages.length) {
       const fragment = document.createDocumentFragment();
       for (let i = existingCount; i < messages.length; i++) {
           fragment.appendChild(createMessageElement(messages[i], i));
       }
       els.log.appendChild(fragment);
-      scrollToBottom();
   } else if (existingCount > messages.length) {
       // Fallback if deleted/reset
       els.log.innerHTML = '';
@@ -309,20 +358,33 @@ export function renderLog() {
       messages.forEach((m, i) => fragment.appendChild(createMessageElement(m, i)));
       els.log.appendChild(fragment);
   }
-  
+
   setExportAvailability(true);
+
+  // UPDATED: Start observing the new last element
+  observeLastMessage();
 }
 
 export function updateLastMessageBubble(markdownText) {
   if (!els.log) return;
   const lastMsg = els.log.lastElementChild;
-  
+
   if (lastMsg && lastMsg.classList.contains('ai')) {
       const body = lastMsg.querySelector('.body');
-      const newHtml = markdownToHtml(markdownText);
+
+      // LOADING ANIMATION: Show three dots if text is empty, otherwise show content
+      let newHtml;
+      if (!markdownText || markdownText.trim() === '') {
+        newHtml = '<div class="loading-dots"><span></span><span></span><span></span></div>';
+      } else {
+        newHtml = markdownToHtml(markdownText);
+      }
+
       if (body.innerHTML !== newHtml) {
           body.innerHTML = newHtml;
-          scrollToBottom();
+          // Note: We don't need to call scrollToBottom here anymore.
+          // The ResizeObserver setup in initUI/observeLastMessage will detect
+          // that 'lastMsg' has grown in height and call scrollToBottom automatically.
       }
   } else {
     renderLog();
@@ -422,6 +484,12 @@ export function setInputValue(value) {
 
 export function setStopEnabled(canStop) {
   if (els.stop) els.stop.disabled = !canStop;
+}
+
+// SIMPLIFIED: Accept state as parameter instead of dynamic import
+// This eliminates circular dependency complexity
+export function restoreStopButtonState(isActive) {
+  if (els.stop) els.stop.disabled = !isActive;
 }
 
 export function getSessionMarkdown(sessionId) {

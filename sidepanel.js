@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Context
     { sel: '#toggle-context', ev: 'click', fn: Handlers.handleToggleContext },
     { sel: '#context-text', ev: 'input', fn: Handlers.handleContextInput },
+    { sel: '#context-text', ev: 'blur', fn: Handlers.handleContextBlur },
     { sel: '#context-modal', ev: 'click', fn: Handlers.handleModalClick },
 
     // Settings
