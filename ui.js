@@ -6,17 +6,18 @@ import {
   summarizeSession,
   BLANK_TEMPLATE_ID
 } from './storage.js';
+import { UI_MESSAGES, ICONS } from './constants.js';
 
 let els = {};
-let lastStatus = 'Checking...';
+let lastStatus = UI_MESSAGES.CHECKING;
 let isSystemBusy = false;
 let renderedSessionId = null;
 
 // UPDATED: Observer for smooth scrolling
 let scrollObserver = null;
 
-const ICON_MIC = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`;
-const ICON_STOP = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect></svg>`;
+const ICON_MIC = ICONS.MIC;
+const ICON_STOP = ICONS.STOP;
 
 export function initUI() {
   els = {
@@ -61,13 +62,13 @@ export function setRestrictedState(isRestricted) {
     interactive.forEach(el => { if(el) el.disabled = true; });
     // TAB SWITCH FIX: Don't disable stop button if something is running
     // Stop button should remain functional even on restricted pages if narration/generation is active
-    if (els.input) els.input.placeholder = "AI disabled on system pages";
-    setStatusText("System Page");
+    if (els.input) els.input.placeholder = UI_MESSAGES.INPUT_PLACEHOLDER_DISABLED;
+    setStatusText(UI_MESSAGES.SYSTEM_PAGE);
   } else {
     interactive.forEach(el => { if(el) el.disabled = false; });
     if(els.stop) els.stop.disabled = !isSystemBusy;
-    if (els.input) els.input.placeholder = "Ask anything... (Shift+Enter for newline)";
-    setStatusText(lastStatus === "System Page" ? "Ready" : lastStatus);
+    if (els.input) els.input.placeholder = UI_MESSAGES.INPUT_PLACEHOLDER;
+    setStatusText(lastStatus === UI_MESSAGES.SYSTEM_PAGE ? UI_MESSAGES.READY : lastStatus);
   }
 }
 
@@ -95,8 +96,8 @@ export function setBusy(isBusy) {
 
   if (els.avail) {
     if (isBusy) {
-      els.avail.textContent = 'Thinking...';
-      els.avail.classList.add('pulse'); 
+      els.avail.textContent = UI_MESSAGES.THINKING;
+      els.avail.classList.add('pulse');
     } else {
       els.avail.textContent = lastStatus;
       els.avail.classList.remove('pulse');

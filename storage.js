@@ -1,25 +1,26 @@
 import { nanoid } from './utils.js';
+import { toast } from './toast.js';
+import {
+  STORAGE_KEYS,
+  LIMITS,
+  DEFAULT_TEMPLATES,
+  BLANK_TEMPLATE_ID,
+  DEFAULT_SETTINGS,
+  VALIDATION,
+  USER_ERROR_MESSAGES
+} from './constants.js';
 
-const DB_NAME = 'NanoPromptDB';
-const DB_VERSION = 1;
-const STORES = {
-  SESSIONS: 'sessions',
-  META: 'meta'
-};
+const { DB_NAME, DB_VERSION, STORES } = STORAGE_KEYS;
+const SYNC_KEY = STORAGE_KEYS.SYNC;
+const SESSION_KEY = STORAGE_KEYS.SESSION_DRAFT;
+const MAX_SESSIONS = LIMITS.MAX_SESSIONS;
 
-const SYNC_KEY = 'nanoPromptUI.settings.v1';
-const SESSION_KEY = 'nanoPromptUI.draft';
-export const BLANK_TEMPLATE_ID = 'blank';
-const MAX_SESSIONS = 100; // Maximum number of sessions to keep
+// Re-export for backwards compatibility
+export { BLANK_TEMPLATE_ID, DEFAULT_TEMPLATES };
 
-export const DEFAULT_TEMPLATES = [
-  { id: BLANK_TEMPLATE_ID, label: 'Templates…', text: '' },
-  { id: 'translator', label: 'Translate text', text: 'Translate the following text to English and explain any idioms:' },
-  { id: 'proof', label: 'Proofread', text: 'You are a meticulous proofreader. Improve grammar and clarity for this text:' },
-  { id: 'summary', label: 'Summarize', text: 'Summarize the following content in concise bullet points:' },
-  { id: 'qa', label: 'Ask expert', text: 'You are an expert researcher. Answer thoroughly:' }
-];
-
+/**
+ * Application state object
+ */
 export const appState = {
   sessions: {},
   sessionOrder: [],
@@ -28,20 +29,18 @@ export const appState = {
   attachments: [],
   contextDraft: '',
   availability: 'unknown',
-  settings: {
-    temperature: 0.2,
-    topK: 40,
-    systemPrompt: 'You are a helpful, concise assistant.',
-    tone: 'balanced'
-  },
+  settings: { ...DEFAULT_SETTINGS },
   model: null
 };
 
 const dirtySessions = new Set();
 
+/**
+ * IndexedDB connection promise
+ */
 const dbPromise = new Promise((resolve, reject) => {
   const request = indexedDB.open(DB_NAME, DB_VERSION);
-  
+
   request.onupgradeneeded = (e) => {
     const db = e.target.result;
     if (!db.objectStoreNames.contains(STORES.SESSIONS)) {
@@ -56,7 +55,13 @@ const dbPromise = new Promise((resolve, reject) => {
   request.onerror = () => reject(request.error);
 });
 
-// FIXED: Transaction handling to prevent early resolution
+/**
+ * Execute a database operation with proper transaction handling
+ * @param {string} storeName - Store name
+ * @param {string} mode - Transaction mode ('readonly' or 'readwrite')
+ * @param {Function} callback - Callback that receives the object store
+ * @returns {Promise<any>} Operation result
+ */
 async function dbOp(storeName, mode, callback) {
   const db = await dbPromise;
   return new Promise((resolve, reject) => {
@@ -75,7 +80,8 @@ async function dbOp(storeName, mode, callback) {
       // QUOTA HANDLING: Detect quota exceeded errors
       if (event.target.error?.name === 'QuotaExceededError') {
         console.error('IndexedDB quota exceeded. Consider clearing old sessions.');
-        reject(new Error('Storage quota exceeded. Please delete old sessions.'));
+        toast.error(USER_ERROR_MESSAGES.STORAGE_QUOTA_EXCEEDED);
+        reject(new Error(USER_ERROR_MESSAGES.STORAGE_QUOTA_EXCEEDED));
       } else {
         reject(tx.error);
       }
@@ -83,6 +89,11 @@ async function dbOp(storeName, mode, callback) {
   });
 }
 
+/**
+ * Create a new empty session
+ * @param {string} title - Session title
+ * @returns {{id: string, title: string, createdAt: number, updatedAt: number, messages: Array}}
+ */
 function createEmptySession(title = 'New chat') {
   return {
     id: nanoid(),
@@ -93,25 +104,36 @@ function createEmptySession(title = 'New chat') {
   };
 }
 
+/**
+ * Ensure at least one session exists
+ */
 function ensureDefaultSession() {
   if (!appState.currentSessionId || !appState.sessions[appState.currentSessionId]) {
     const session = createEmptySession();
     appState.sessions[session.id] = session;
     appState.sessionOrder = [session.id];
     appState.currentSessionId = session.id;
-    dirtySessions.add(session.id); 
+    dirtySessions.add(session.id);
   }
 }
 
+/**
+ * Get the current active session
+ * @returns {{id: string, title: string, messages: Array}} Current session
+ */
 export function getCurrentSession() {
   ensureDefaultSession();
   return appState.sessions[appState.currentSessionId];
 }
 
+/**
+ * Set the current active session and update order
+ * @param {string} sessionId - Session ID to activate
+ */
 export function setCurrentSession(sessionId) {
   if (!appState.sessions[sessionId]) return;
   appState.currentSessionId = sessionId;
-  
+
   const idx = appState.sessionOrder.indexOf(sessionId);
   if (idx > 0) {
     appState.sessionOrder.splice(idx, 1);
@@ -119,6 +141,11 @@ export function setCurrentSession(sessionId) {
   }
 }
 
+/**
+ * Create a new session, optionally copying from existing session
+ * @param {string|null} baseSessionId - Session ID to copy from (optional)
+ * @returns {{id: string, title: string, messages: Array}} New session
+ */
 export function createSessionFrom(baseSessionId = null) {
   const base = baseSessionId ? appState.sessions[baseSessionId] : null;
   const session = createEmptySession(base ? `${base.title} copy` : 'New chat');
@@ -145,23 +172,33 @@ export function createSessionFrom(baseSessionId = null) {
   return session;
 }
 
+/**
+ * Delete a session
+ * @param {string} sessionId - Session ID to delete
+ */
 export function deleteSession(sessionId) {
   if (!appState.sessions[sessionId]) return;
-  
+
   delete appState.sessions[sessionId];
-  dirtySessions.delete(sessionId); 
-  
+  dirtySessions.delete(sessionId);
+
   appState.sessionOrder = appState.sessionOrder.filter(id => id !== sessionId);
-  
+
   if (appState.currentSessionId === sessionId) {
     appState.currentSessionId = appState.sessionOrder[0] || null;
   }
   ensureDefaultSession();
-  
+
   dbOp(STORES.SESSIONS, 'readwrite', store => store.delete(sessionId))
     .catch(e => console.error('Failed to delete session from IDB', e));
 }
 
+/**
+ * Add or replace a message in a session
+ * @param {string} sessionId - Session ID
+ * @param {{role: string, text: string, ts: number}} message - Message object
+ * @param {number|null} replaceIndex - Index to replace (null to append)
+ */
 export function upsertMessage(sessionId, message, replaceIndex = null) {
   const session = appState.sessions[sessionId];
   if (!session) return;
@@ -171,7 +208,7 @@ export function upsertMessage(sessionId, message, replaceIndex = null) {
     console.error('Invalid message: must be an object');
     return;
   }
-  if (!message.role || !['user', 'ai'].includes(message.role)) {
+  if (!message.role || !VALIDATION.VALID_MESSAGE_ROLES.includes(message.role)) {
     console.error('Invalid message role:', message.role);
     return;
   }
@@ -189,44 +226,60 @@ export function upsertMessage(sessionId, message, replaceIndex = null) {
   dirtySessions.add(sessionId);
 }
 
+/**
+ * Update an existing message with a patch object
+ * @param {string} sessionId - Session ID
+ * @param {number} messageIndex - Message index to update
+ * @param {object} patch - Fields to update
+ */
 export function updateMessage(sessionId, messageIndex, patch) {
   const session = appState.sessions[sessionId];
   if (!session || !session.messages[messageIndex]) return;
   session.messages[messageIndex] = { ...session.messages[messageIndex], ...patch };
   session.updatedAt = Date.now();
-  dirtySessions.add(sessionId); 
+  dirtySessions.add(sessionId);
 }
 
+/**
+ * Rename a session
+ * @param {string} sessionId - Session ID
+ * @param {string} title - New title
+ */
 export function renameSession(sessionId, title) {
   if (!appState.sessions[sessionId]) return;
   appState.sessions[sessionId].title = title;
   appState.sessions[sessionId].updatedAt = Date.now();
-  dirtySessions.add(sessionId); 
+  dirtySessions.add(sessionId);
 }
 
+/**
+ * Save state to IndexedDB and chrome.storage.sync
+ * @returns {Promise<void>}
+ */
 export async function saveState() {
   ensureDefaultSession();
-  
+
   try {
     const db = await dbPromise;
     const tx = db.transaction([STORES.SESSIONS, STORES.META], 'readwrite');
-    
+
     const metaStore = tx.objectStore(STORES.META);
     metaStore.put({ id: 'sessionOrder', val: appState.sessionOrder });
     metaStore.put({ id: 'currentSessionId', val: appState.currentSessionId });
-    
+
     const sessionStore = tx.objectStore(STORES.SESSIONS);
-    
+
     if (dirtySessions.size > 0) {
         dirtySessions.forEach(id => {
             const s = appState.sessions[id];
             if (s) sessionStore.put(s);
         });
-        dirtySessions.clear(); 
+        dirtySessions.clear();
     }
 
   } catch (e) {
     console.warn('IDB Save Failed:', e);
+    toast.error(USER_ERROR_MESSAGES.STORAGE_SAVE_FAILED);
   }
 
   const settingsPayload = {
@@ -236,6 +289,11 @@ export async function saveState() {
   chrome.storage.sync.set({ [SYNC_KEY]: settingsPayload });
 }
 
+/**
+ * Save context draft to session storage
+ * @param {string} text - Context text
+ * @returns {Promise<void>}
+ */
 export async function saveContextDraft(text) {
   try {
     await chrome.storage.session.set({ [SESSION_KEY]: text });
@@ -244,10 +302,18 @@ export async function saveContextDraft(text) {
   }
 }
 
+/**
+ * Update context draft in memory only
+ * @param {string} text - Context text
+ */
 export function updateContextDraft(text) {
   appState.contextDraft = text;
 }
 
+/**
+ * Load state from IndexedDB and chrome.storage
+ * @returns {Promise<object>} Loaded app state
+ */
 export async function loadState() {
   try {
     const [db, syncData, sessionData] = await Promise.all([
@@ -266,7 +332,7 @@ export async function loadState() {
     }
 
     const tx = db.transaction([STORES.SESSIONS, STORES.META], 'readonly');
-    
+
     // Helper to promise-ify requests manually since we are inside a transaction
     const getVal = (store, key) => new Promise(r => {
        const req = store.get(key);
@@ -306,22 +372,42 @@ export async function loadState() {
   return appState;
 }
 
+/**
+ * Add an attachment to the current attachments list
+ * @param {{name: string, type: string, data: string}} entry - Attachment object
+ */
 export function addAttachment(entry) {
   appState.attachments.push(entry);
 }
 
+/**
+ * Clear all attachments
+ */
 export function clearAttachments() {
   appState.attachments = [];
 }
 
+/**
+ * Get current attachments list
+ * @returns {Array<{name: string, type: string, data: string}>} Attachments
+ */
 export function getAttachments() {
   return appState.attachments;
 }
 
+/**
+ * Update settings with a patch object
+ * @param {object} patch - Settings to update
+ */
 export function updateSettings(patch) {
   appState.settings = { ...appState.settings, ...patch };
 }
 
+/**
+ * Get plain text summary of a session's messages
+ * @param {string} sessionId - Session ID
+ * @returns {string} Plain text summary
+ */
 export function summarizeSession(sessionId) {
   const session = appState.sessions[sessionId];
   if (!session) return '';

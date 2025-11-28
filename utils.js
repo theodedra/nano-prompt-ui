@@ -1,9 +1,22 @@
 // utils.js - General utility functions
 
+import { VALIDATION, LIMITS } from './constants.js';
+
+/**
+ * Query selector helper
+ * @param {string} selector - CSS selector
+ * @returns {Element|null} Found element or null
+ */
 export function $(selector) {
   return document.querySelector(selector);
 }
 
+/**
+ * Debounce function execution
+ * @param {Function} func - Function to debounce
+ * @param {number} wait - Wait time in milliseconds
+ * @returns {Function} Debounced function
+ */
 export function debounce(func, wait) {
   let timeout;
   return function(...args) {
@@ -12,6 +25,11 @@ export function debounce(func, wait) {
   };
 }
 
+/**
+ * Format timestamp to time string
+ * @param {number} ts - Timestamp
+ * @returns {string} Formatted time (HH:MM)
+ */
 export function formatTime(ts) {
   try {
     const d = new Date(ts);
@@ -21,6 +39,11 @@ export function formatTime(ts) {
   }
 }
 
+/**
+ * Format timestamp to date string
+ * @param {number} ts - Timestamp
+ * @returns {string} Formatted date and time
+ */
 export function formatDate(ts) {
   try {
     const d = new Date(ts);
@@ -30,11 +53,21 @@ export function formatDate(ts) {
   }
 }
 
+/**
+ * Sanitize text by removing control characters
+ * @param {string} str - Text to sanitize
+ * @returns {string} Sanitized text
+ */
 export function sanitizeText(str) {
   if (!str) return '';
   return str.replace(/[\x00-\x08\x0B-\x0C\x0E-\x1F\x7F]/g, '');
 }
 
+/**
+ * Generate a random ID using crypto API
+ * @param {number} size - Length of ID (default: 10)
+ * @returns {string} Random ID
+ */
 export function nanoid(size = 10) {
   const alphabet = '0123456789abcdefghijklmnopqrstuvwxyz';
   let id = '';
@@ -44,7 +77,13 @@ export function nanoid(size = 10) {
   return id;
 }
 
-export function resizeImage(file, maxWidth = 800) {
+/**
+ * Resize image file to max width while maintaining aspect ratio
+ * @param {File} file - Image file to resize
+ * @param {number} maxWidth - Maximum width in pixels
+ * @returns {Promise<string>} Base64 encoded image data URL
+ */
+export function resizeImage(file, maxWidth = LIMITS.IMAGE_DEFAULT_MAX_WIDTH) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -71,7 +110,11 @@ export function resizeImage(file, maxWidth = 800) {
   });
 }
 
-// Helper to convert DataURL to Blob for the AI model
+/**
+ * Convert data URL to Blob for AI model input
+ * @param {string} dataUrl - Data URL string
+ * @returns {Promise<Blob>} Image blob
+ */
 export async function dataUrlToBlob(dataUrl) {
   const res = await fetch(dataUrl);
   return await res.blob();
@@ -79,7 +122,9 @@ export async function dataUrlToBlob(dataUrl) {
 
 /**
  * PRODUCTION READY MARKDOWN SANITIZER
- * Uses DOMParser to strictly allow only safe tags.
+ * Convert markdown to HTML with strict sanitization
+ * @param {string} md - Markdown text
+ * @returns {string} Sanitized HTML
  */
 export function markdownToHtml(md) {
   if (!md) return '';
@@ -110,6 +155,11 @@ export function markdownToHtml(md) {
   return sanitizeHtmlString(html);
 }
 
+/**
+ * Escape HTML special characters
+ * @param {string} unsafe - Unsafe HTML string
+ * @returns {string} Escaped HTML
+ */
 function escapeHtml(unsafe) {
   return unsafe
     .replace(/&/g, "&amp;")
@@ -119,11 +169,16 @@ function escapeHtml(unsafe) {
     .replace(/'/g, "&#039;");
 }
 
+/**
+ * Sanitize HTML string using whitelist approach
+ * @param {string} dirtyHtml - Unsanitized HTML
+ * @returns {string} Sanitized HTML
+ */
 function sanitizeHtmlString(dirtyHtml) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(dirtyHtml, 'text/html');
-  const allowedTags = new Set(['P', 'BR', 'STRONG', 'EM', 'CODE', 'PRE', 'UL', 'OL', 'LI', 'H1', 'H2', 'H3', 'A', 'SPAN', 'DIV']);
-  
+  const allowedTags = VALIDATION.ALLOWED_HTML_TAGS;
+
   const walker = document.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT);
   const nodesToRemove = [];
 
@@ -133,10 +188,10 @@ function sanitizeHtmlString(dirtyHtml) {
       nodesToRemove.push(node);
       continue;
     }
-    // Strip attributes (Allow only href/target on A)
+    // Strip attributes (Allow only href/target/rel on A)
     const attrs = Array.from(node.attributes);
     for (const attr of attrs) {
-      if (node.tagName === 'A' && ['href', 'target', 'rel'].includes(attr.name)) {
+      if (node.tagName === 'A' && VALIDATION.ALLOWED_LINK_ATTRIBUTES.includes(attr.name)) {
         if (attr.name === 'href' && attr.value.trim().toLowerCase().startsWith('javascript:')) {
             node.removeAttribute('href');
         }

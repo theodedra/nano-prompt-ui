@@ -1,83 +1,96 @@
 import { sanitizeText } from './utils.js';
-
-const ASSISTANT_RULES = `You run inside a Chrome extension side panel.
-You have access to the active tab's text content AND the conversation history.
-If the user asks about a previous topic or summary, LOOK AT THE CHAT HISTORY.
-Do not mention browsing limitations.
-Always answer in English.
-Keep answers concise but helpful.`;
-
-// Gemini Nano often has a 4k token window. We reserve space for system prompt + user query.
-const MAX_CONTEXT_TOKENS = 3000;
+import {
+  ASSISTANT_RULES,
+  LIMITS,
+  TIMING,
+  UI_MESSAGES,
+  INTENT_PATTERNS,
+  INTENT_TYPES,
+  VALIDATION
+} from './constants.js';
 
 let cachedContext = { text: '', ts: 0, tabId: null, isRestricted: false };
 
+/**
+ * Classify user intent based on query text
+ * @param {string} text - User query text
+ * @returns {string} Intent type ('page', 'time', 'location', or 'none')
+ */
 export function classifyIntent(text) {
   const t = text.toLowerCase();
-  if (/summari|page|article|tab|website|context|window/.test(t)) return 'page';
-  if (/time|date|today|now/.test(t)) return 'time';
-  if (/where|location|lat|long/.test(t)) return 'location';
-  return 'none';
+  if (INTENT_PATTERNS.page.test(t)) return INTENT_TYPES.PAGE;
+  if (INTENT_PATTERNS.time.test(t)) return INTENT_TYPES.TIME;
+  if (INTENT_PATTERNS.location.test(t)) return INTENT_TYPES.LOCATION;
+  return INTENT_TYPES.NONE;
 }
 
 /**
  * Rough estimation of tokens (1 token ~= 4 chars for English)
+ * @param {string} text - Text to estimate
+ * @returns {number} Estimated token count
  */
 function estimateTokens(text) {
-  return Math.ceil(text.length / 4);
+  return Math.ceil(text.length / LIMITS.TOKEN_TO_CHAR_RATIO);
 }
 
 /**
  * Smart truncation based on Token count instead of raw characters
+ * @param {string} text - Text to truncate
+ * @param {number} maxTokens - Maximum token count
+ * @returns {string} Truncated text with clean boundaries
  */
 function smartTruncate(text, maxTokens) {
   const currentTokens = estimateTokens(text);
   if (currentTokens <= maxTokens) return text;
 
   // Approximate char limit based on tokens
-  const charLimit = maxTokens * 4;
+  const charLimit = maxTokens * LIMITS.TOKEN_TO_CHAR_RATIO;
 
   const truncated = text.slice(0, charLimit);
   const lastPeriod = truncated.lastIndexOf('.');
 
   // If we found a period near the end, cut cleanly there
-  if (lastPeriod > charLimit * 0.8) {
-    return truncated.slice(0, lastPeriod + 1) + '\n\n[...Content truncated due to length...]';
+  if (lastPeriod > charLimit * LIMITS.TRUNCATE_CLEAN_CUT_THRESHOLD) {
+    return truncated.slice(0, lastPeriod + 1) + UI_MESSAGES.TRUNCATED;
   }
 
-  return truncated + '\n\n[...Content truncated due to length...]';
+  return truncated + UI_MESSAGES.TRUNCATED;
 }
 
+/**
+ * Fetch context from the active tab with caching
+ * @param {boolean} force - Force refresh ignoring cache
+ * @returns {Promise<{text: string, tabId: number|null, isRestricted: boolean}>} Context object
+ */
 export async function fetchContext(force = false) {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  
+
   if (!activeTab || !activeTab.id) return { text: '', isRestricted: true };
-  
+
   const activeTabId = activeTab.id;
-  const isFresh = Date.now() - cachedContext.ts < 15_000; 
-  
+  const isFresh = Date.now() - cachedContext.ts < TIMING.CONTEXT_CACHE_MS;
+
   if (!force && cachedContext.text && isFresh && cachedContext.tabId === activeTabId) {
     return cachedContext;
   }
 
-  if (!activeTab.url || !/^(https?|file):/i.test(activeTab.url)) {
-    return { 
-      text: '[System Page: AI disabled for security.]', 
-      tabId: activeTabId, 
-      isRestricted: true 
+  if (!activeTab.url || !VALIDATION.ALLOWED_PAGE_PROTOCOLS.test(activeTab.url)) {
+    return {
+      text: UI_MESSAGES.SYSTEM_PAGE_AI_DISABLED,
+      tabId: activeTabId,
+      isRestricted: true
     };
   }
 
   try {
     const rawData = await sendMessageWithFallback(activeTabId);
-    
+
     const pieces = [];
     if (rawData.title) pieces.push(`Title: ${sanitizeText(rawData.title)}`);
     if (rawData.url) pieces.push(`URL: ${rawData.url}`);
-    
+
     if (rawData.text) {
-      // UPDATED: Use token-based truncation
-      const clean = smartTruncate(sanitizeText(rawData.text), MAX_CONTEXT_TOKENS);
+      const clean = smartTruncate(sanitizeText(rawData.text), LIMITS.MAX_CONTEXT_TOKENS);
       pieces.push(clean);
     }
 
@@ -93,13 +106,18 @@ export async function fetchContext(force = false) {
   } catch (e) {
     console.warn('Context extraction failed:', e);
     return {
-      text: '[Error: Could not read page. Refresh the tab.]',
+      text: UI_MESSAGES.RESTRICTED_PAGE,
       tabId: activeTabId,
       isRestricted: true
     };
   }
 }
 
+/**
+ * Send message to content script with automatic injection fallback
+ * @param {number} tabId - Tab ID to send message to
+ * @returns {Promise<object>} Context data from content script
+ */
 async function sendMessageWithFallback(tabId) {
   try {
     return await chrome.tabs.sendMessage(tabId, { action: 'GET_CONTEXT' });
@@ -112,6 +130,10 @@ async function sendMessageWithFallback(tabId) {
   }
 }
 
+/**
+ * Get the currently cached context without fetching
+ * @returns {{text: string, ts: number, tabId: number|null, isRestricted: boolean}}
+ */
 export function getCachedContext() {
   return cachedContext;
 }
@@ -127,7 +149,7 @@ export function getCachedContext() {
 //    - Affect other tabs or persist malicious instructions
 //
 // 2. EXISTING SECURITY LAYERS:
-//    - System page blocking (context.js:63-69) - AI disabled on chrome://, edge://
+//    - System page blocking (context.js:77) - AI disabled on chrome://, edge://
 //    - Content script isolation - No access to page JavaScript execution context
 //    - Sanitization (utils.js:33-36) - Control characters stripped from all text
 //    - No privileged APIs - Extension has no dangerous permissions exposed to AI
@@ -143,6 +165,14 @@ export function getCachedContext() {
 //    - User can always see the source page and judge AI response quality
 //
 // CONCLUSION: Current approach is secure. No additional wrapping needed.
+
+/**
+ * Build the final prompt with context, attachments, and system rules
+ * @param {string} userText - User's query
+ * @param {string} contextOverride - Optional context to use instead of auto-fetched
+ * @param {Array<{name: string}>} attachments - Attached files
+ * @returns {Promise<string>} Complete prompt string
+ */
 export async function buildPromptWithContext(userText, contextOverride = '', attachments = []) {
   const intent = classifyIntent(userText);
   let contextText = contextOverride;
@@ -158,7 +188,7 @@ export async function buildPromptWithContext(userText, contextOverride = '', att
     parts.push('Attachments (Filenames only):\n' + desc);
   }
 
-  if (intent === 'time') {
+  if (intent === INTENT_TYPES.TIME) {
     parts.push(`Time: ${new Date().toLocaleString()}`);
   }
 

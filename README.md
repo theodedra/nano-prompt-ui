@@ -2,7 +2,7 @@
 
 ![Nano Prompt UI](Screenshot.png)
 
-**TL;DR:** A privacy-first Chrome extension that runs entirely on-device using Chrome's built-in **Gemini Nano** language model. Version **0.8.0** brings security hardening, performance optimizations, and polished UX improvements.
+**TL;DR:** A privacy-first Chrome extension that runs entirely on-device using Chrome's built-in **Gemini Nano** language model. Version **0.9.0** introduces smart auto-naming, toast notifications, and a major code architecture overhaul.
 
 ## ✨ Why Side Panel?
 
@@ -21,7 +21,30 @@ Unlike standard popups that close when you click away, **Nano Prompt UI lives in
     * **Translate to English:** Instantly translate selected text from any language.
     * **Describe Image:** Right-click any image to get an AI-generated description.
 
-### v0.8.0 Highlights
+### v0.9.0 Highlights
+
+* **🏷️ Smart Auto-Naming:**
+    * **AI-Generated Titles:** Chat sessions automatically get descriptive titles based on the first conversation exchange.
+    * **No More "New chat" Clutter:** Easily identify chats at a glance.
+    * **Background Processing:** Title generation runs silently without blocking the UI.
+
+* **🔔 Toast Notification System:**
+    * **Visual Feedback:** Elegant notifications for copy, save, delete, rename, and error actions.
+    * **4 Toast Types:** Info (blue), Success (green), Warning (orange), Error (red).
+    * **Smooth Animations:** Slide-up appearance with auto-dismiss.
+    * **Accessibility:** Proper ARIA attributes for screen readers.
+
+* **🏗️ Architecture Overhaul:**
+    * **Centralized Configuration:** New `constants.js` consolidates all magic numbers, timing values, and UI strings.
+    * **Single Source of Truth:** Easy to adjust timeouts, limits, and messages in one place.
+    * **Comprehensive Documentation:** JSDoc comments on all functions with parameter/return types.
+    * **Better Maintainability:** Reduced code duplication across files.
+
+* **📝 Improved Error Messages:**
+    * **User-Friendly Language:** Clear, actionable error messages instead of technical jargon.
+    * **Contextual Feedback:** Specific messages for image errors, AI failures, storage issues, and speech problems.
+
+### v0.8.0 Features (Previous Release)
 
 * **⚡ Performance Overhaul:**
     * **Token-Based Context Management:** Smart truncation based on Gemini Nano's ~4K token window instead of raw character counts.
@@ -40,12 +63,6 @@ Unlike standard popups that close when you click away, **Nano Prompt UI lives in
     * **Improved Stop Behavior:** Stopping generation preserves partial output with `*(stopped)*` marker.
     * **Multi-Utility Stop:** Single button stops both AI generation and speech narration.
     * **Session Auto-Cleanup:** Automatically removes oldest sessions when limit (100) is reached.
-
-* **🐛 Bug Fixes:**
-    * Fixed race condition when sending rapid queries.
-    * Fixed stop button state persisting across tab switches.
-    * Fixed memory leak in speech recognition cleanup.
-    * Fixed timeout cleanup in image fetching.
 
 ### Architecture
 * **🧠 Advanced Context Engine:**
@@ -81,13 +98,33 @@ To use this extension, you must enable Chrome's experimental AI features:
 3.  Click **Check for update**.
 4.  Wait until you see a version number (e.g., `2024.5.21.1`) and Status: **Up-to-date**.
 
+## 📂 Project Structure
+
+```
+nano-prompt-ui/
+├── manifest.json      # Extension configuration
+├── background.js      # Service worker & context menus
+├── content.js         # Page content scraper
+├── sidepanel.html     # Main UI
+├── sidepanel.js       # UI event bindings
+├── sidepanel.css      # Styles (including toast notifications)
+├── constants.js       # 🆕 Centralized configuration
+├── toast.js           # 🆕 Toast notification system
+├── model.js           # AI wrapper & title generation
+├── handlers.js        # Event handlers
+├── storage.js         # IndexedDB & state management
+├── context.js         # Context extraction & prompts
+├── utils.js           # Utility functions
+├── SECURITY.md        # Security documentation
+└── README.md          # This file
+```
+
 ## 🔒 Security
 
 This extension implements defense-in-depth security. See [SECURITY.md](SECURITY.md) for:
 - Detailed security layer documentation
 - Prompt injection analysis
 - Attack scenario mitigations
-- Security audit results (Grade: A+)
 
 ## 📜 License
 
