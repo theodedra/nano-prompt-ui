@@ -22,7 +22,8 @@ export { BLANK_TEMPLATE_ID, DEFAULT_TEMPLATES };
  * Application state object
  */
 export const appState = {
-  sessions: {},
+  sessions: {},           // Loaded sessions (full data)
+  sessionMeta: {},        // Session metadata only (id, title, timestamp)
   sessionOrder: [],
   currentSessionId: null,
   templates: DEFAULT_TEMPLATES.slice(),
@@ -30,7 +31,8 @@ export const appState = {
   contextDraft: '',
   availability: 'unknown',
   settings: { ...DEFAULT_SETTINGS },
-  model: null
+  model: null,
+  lazyLoadEnabled: true   // Enable lazy loading when MAX_SESSIONS is high
 };
 
 const dirtySessions = new Set();
@@ -118,21 +120,80 @@ function ensureDefaultSession() {
 }
 
 /**
+ * Load a single session from IndexedDB
+ * @param {string} sessionId - Session ID to load
+ * @returns {Promise<object|null>} Session data or null
+ */
+async function loadSession(sessionId) {
+  try {
+    const session = await dbOp(STORES.SESSIONS, 'readonly', store => store.get(sessionId));
+    return session;
+  } catch (e) {
+    console.error('Failed to load session:', sessionId, e);
+    return null;
+  }
+}
+
+/**
  * Get the current active session
+ * Lazy loads from IndexedDB if not in memory
+ * @returns {Promise<{id: string, title: string, messages: Array}>} Current session
+ */
+export async function getCurrentSession() {
+  ensureDefaultSession();
+
+  const sessionId = appState.currentSessionId;
+
+  // If session is already loaded, return it
+  if (appState.sessions[sessionId]) {
+    return appState.sessions[sessionId];
+  }
+
+  // Lazy load from IndexedDB if enabled
+  if (appState.lazyLoadEnabled) {
+    const session = await loadSession(sessionId);
+    if (session) {
+      appState.sessions[sessionId] = session;
+      return session;
+    }
+  }
+
+  // Fallback: return from sessions if available
+  return appState.sessions[sessionId];
+}
+
+/**
+ * Get the current active session synchronously
+ * Use this when session is guaranteed to be loaded
  * @returns {{id: string, title: string, messages: Array}} Current session
  */
-export function getCurrentSession() {
+export function getCurrentSessionSync() {
   ensureDefaultSession();
   return appState.sessions[appState.currentSessionId];
 }
 
 /**
  * Set the current active session and update order
+ * Lazy loads session data if not in memory
  * @param {string} sessionId - Session ID to activate
+ * @returns {Promise<void>}
  */
-export function setCurrentSession(sessionId) {
-  if (!appState.sessions[sessionId]) return;
+export async function setCurrentSession(sessionId) {
+  // Check if session exists in metadata or loaded sessions
+  if (!appState.sessionMeta[sessionId] && !appState.sessions[sessionId]) {
+    console.warn('Session not found:', sessionId);
+    return;
+  }
+
   appState.currentSessionId = sessionId;
+
+  // Lazy load session if not already loaded
+  if (appState.lazyLoadEnabled && !appState.sessions[sessionId]) {
+    const session = await loadSession(sessionId);
+    if (session) {
+      appState.sessions[sessionId] = session;
+    }
+  }
 
   const idx = appState.sessionOrder.indexOf(sessionId);
   if (idx > 0) {
@@ -312,6 +373,7 @@ export function updateContextDraft(text) {
 
 /**
  * Load state from IndexedDB and chrome.storage
+ * Uses lazy loading for session data when enabled
  * @returns {Promise<object>} Loaded app state
  */
 export async function loadState() {
@@ -324,6 +386,14 @@ export async function loadState() {
 
     if (syncData[SYNC_KEY]) {
       appState.settings = { ...appState.settings, ...syncData[SYNC_KEY].settings };
+
+      // Migration: Update old "concise" system prompt to new "detailed" default
+      if (appState.settings.systemPrompt === 'You are a helpful, concise assistant.') {
+        appState.settings.systemPrompt = DEFAULT_SETTINGS.systemPrompt;
+        // Save the migrated settings
+        await chrome.storage.sync.set({ [SYNC_KEY]: { settings: appState.settings, templates: appState.templates } });
+      }
+
       if (syncData[SYNC_KEY].templates) appState.templates = syncData[SYNC_KEY].templates;
     }
 
@@ -355,14 +425,55 @@ export async function loadState() {
         getAllVal(sessionStore)
     ]);
 
+    if (order) appState.sessionOrder = order;
+    if (currentId) appState.currentSessionId = currentId;
+
+    // LAZY LOADING LOGIC
     if (allSessions && allSessions.length) {
+      // Determine if we should enable lazy loading
+      // Enable for 50+ sessions to reduce memory usage
+      const shouldLazyLoad = allSessions.length >= 50;
+      appState.lazyLoadEnabled = shouldLazyLoad;
+
+      if (shouldLazyLoad) {
+        // LAZY MODE: Only load metadata + current session
+        const metaMap = {};
+        allSessions.forEach(s => {
+          metaMap[s.id] = {
+            id: s.id,
+            title: s.title,
+            createdAt: s.createdAt,
+            updatedAt: s.updatedAt,
+            messageCount: s.messages?.length || 0
+          };
+        });
+        appState.sessionMeta = metaMap;
+
+        // Load only the current session's full data
+        const currentSession = allSessions.find(s => s.id === currentId);
+        if (currentSession) {
+          appState.sessions[currentId] = currentSession;
+        }
+      } else {
+        // EAGER MODE: Load all sessions (original behavior)
         const map = {};
         allSessions.forEach(s => map[s.id] = s);
         appState.sessions = map;
-    }
 
-    if (order) appState.sessionOrder = order;
-    if (currentId) appState.currentSessionId = currentId;
+        // Also populate metadata for consistency
+        const metaMap = {};
+        allSessions.forEach(s => {
+          metaMap[s.id] = {
+            id: s.id,
+            title: s.title,
+            createdAt: s.createdAt,
+            updatedAt: s.updatedAt,
+            messageCount: s.messages?.length || 0
+          };
+        });
+        appState.sessionMeta = metaMap;
+      }
+    }
 
   } catch (e) {
     console.warn('Failed to load state:', e);

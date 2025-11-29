@@ -26,6 +26,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     { sel: '#session-trigger', ev: 'click', fn: (e) => { e.stopPropagation(); UI.toggleMenu('session'); } },
     { sel: '#session-menu', ev: 'click', fn: Handlers.handleSessionMenuClick },
     { sel: '#new-session', ev: 'click', fn: Handlers.handleNewSessionClick },
+    { sel: '#language-trigger', ev: 'click', fn: (e) => { e.stopPropagation(); UI.toggleMenu('language'); } },
+    { sel: '#language-menu', ev: 'click', fn: Handlers.handleLanguageSelect },
+    { sel: '#theme-trigger', ev: 'click', fn: (e) => { e.stopPropagation(); UI.toggleMenu('theme'); } },
+    { sel: '#theme-menu', ev: 'click', fn: Handlers.handleThemeSelect },
 
     // Media & Inputs
     { sel: '#attach', ev: 'click', fn: Handlers.handleAttachClick },
@@ -45,7 +49,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     { sel: '#open-settings', ev: 'click', fn: Handlers.handleOpenSettings },
     { sel: '#close-settings', ev: 'click', fn: Handlers.handleCloseSettings },
     { sel: '#save-settings', ev: 'click', fn: Handlers.handleSaveSettings },
-    { sel: '#settings-modal', ev: 'click', fn: Handlers.handleModalClick }
+    { sel: '#settings-modal', ev: 'click', fn: Handlers.handleModalClick },
+
+    // Setup Guide
+    { sel: '#open-setup-guide', ev: 'click', fn: Handlers.handleOpenSetupGuide },
+    { sel: '#setup-guide-modal', ev: 'click', fn: Handlers.handleModalClick }
   ];
 
   // --- APPLY BINDINGS ---
@@ -55,6 +63,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#templates-dropdown')) UI.closeMenu('templates');
     if (!e.target.closest('#session-dropdown')) UI.closeMenu('session');
+    if (!e.target.closest('#language-dropdown')) UI.closeMenu('language');
+    if (!e.target.closest('#theme-dropdown')) UI.closeMenu('theme');
   });
 
   document.getElementById('in')?.addEventListener('keydown', Handlers.handleInputKeyDown);

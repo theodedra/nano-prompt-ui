@@ -34,10 +34,14 @@ export const LIMITS = {
 
   // Image processing
   IMAGE_MAX_WIDTH: 1_024,             // Max width for uploaded images
-  IMAGE_MAX_WIDTH_DESCRIPTION: 512,   // Max width for image description (smaller for safety)
+  IMAGE_MAX_WIDTH_DESCRIPTION: 512,   // Max width for image description
   IMAGE_DEFAULT_MAX_WIDTH: 800,       // Default max width for resizeImage function
   IMAGE_QUALITY: 0.7,                 // JPEG compression quality (0-1)
   MAX_ATTACHMENTS: 3,                 // Max number of attachments per message
+
+  // PDF processing
+  PDF_MAX_PAGES: 50,                  // Maximum pages to extract from PDF
+  PDF_MAX_CHARS: 50_000,              // Maximum characters to extract from PDF (~12,500 tokens)
 
   // Storage
   MAX_SESSIONS: 100,                  // Maximum number of sessions to keep
@@ -59,16 +63,31 @@ export const LIMITS = {
 // ============================================================================
 
 export const MODEL_CONFIG = {
-  expectedInputs: [{ type: 'text', languages: ['en'] }],
+  expectedInputs: [
+    { type: 'text', languages: ['en'] },
+    { type: 'image' }  // Multimodal support for image analysis
+  ],
   expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }]
 };
 
 export const DEFAULT_SETTINGS = {
-  temperature: 0.2,
-  topK: 40,
-  systemPrompt: 'You are a helpful, concise assistant.',
-  tone: 'balanced'
+  temperature: 1.0,  // Default creativity level (0.0-2.0, 1.0 is balanced)
+  topK: 64,          // Default diversity setting (1-128, 64 is balanced)
+  systemPrompt: 'You are a helpful assistant. Provide thorough, detailed responses.',
+  tone: 'balanced',
+  language: 'en',    // Default language: English (en, es, ja supported)
+  theme: 'auto'      // Theme preference: 'auto' (system), 'dark', or 'light'
 };
+
+/**
+ * Get a setting value with fallback to default
+ * @param {Object} settings - Settings object
+ * @param {string} key - Setting key
+ * @returns {*} Setting value or default
+ */
+export function getSettingOrDefault(settings, key) {
+  return settings?.[key] ?? DEFAULT_SETTINGS[key];
+}
 
 // ============================================================================
 // SYSTEM PROMPTS
@@ -78,7 +97,6 @@ export const ASSISTANT_RULES = `You run inside a Chrome extension side panel.
 You have access to the active tab's text content AND the conversation history.
 If the user asks about a previous topic or summary, LOOK AT THE CHAT HISTORY.
 Do not mention browsing limitations.
-Always answer in English.
 Keep answers concise but helpful.`;
 
 // Title generation prompt for auto-naming chat sessions
@@ -184,6 +202,37 @@ export const SCRAPING = {
 };
 
 // ============================================================================
+// UI LABELS
+// ============================================================================
+
+export const LANGUAGE_LABELS = {
+  'en': 'English',
+  'es': 'Español (Spanish)',
+  'fr': 'Français (French)',
+  'de': 'Deutsch (German)',
+  'it': 'Italiano (Italian)',
+  'pt': 'Português (Portuguese)',
+  'ru': 'Русский (Russian)',
+  'zh': '中文 (Chinese)',
+  'ja': '日本語 (Japanese)',
+  'ko': '한국어 (Korean)',
+  'ar': 'العربية (Arabic)',
+  'hi': 'हिन्दी (Hindi)'
+};
+
+export const LANGUAGE_NAMES = {
+  'en': 'English',
+  'es': 'Spanish',
+  'ja': 'Japanese'
+};
+
+export const THEME_LABELS = {
+  'auto': 'Auto (System)',
+  'dark': 'Dark',
+  'light': 'Light'
+};
+
+// ============================================================================
 // TEMPLATES
 // ============================================================================
 
@@ -280,6 +329,10 @@ export const USER_ERROR_MESSAGES = {
   IMAGE_FETCH_FAILED: 'Could not download image. Please try again or check your connection.',
   IMAGE_INVALID_URL: 'Invalid image URL. Only HTTP/HTTPS images are supported.',
   IMAGE_PROCESSING_FAILED: 'Failed to process image. The image might be too large or corrupted.',
+  IMAGE_NOT_SUPPORTED: 'Gemini Nano does not support image analysis in this context. Try using the "Describe image from URL" context menu instead.',
+
+  PDF_PROCESSING_FAILED: 'Failed to process PDF. The file might be corrupted or password-protected.',
+  PDF_TOO_LARGE: 'PDF is too large. Maximum 50 pages supported.',
 
   AI_UNAVAILABLE: 'AI is not available. Please check that Gemini Nano is enabled in chrome://flags',
   AI_SYSTEM_PAGE: 'AI is disabled on system pages for security.',

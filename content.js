@@ -28,12 +28,18 @@ const SCRAPING_CONSTANTS = {
   MIN_TEXT_LENGTH: 2
 };
 
-chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-  if (request.action === 'GET_CONTEXT') {
-    const context = scrapePage();
-    sendResponse(context);
-  }
-});
+// Check if chrome.runtime is available before adding listener
+// This prevents errors when extension is reloaded or disabled
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
+  chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (request.action === 'GET_CONTEXT') {
+      const context = scrapePage();
+      sendResponse(context);
+    }
+  });
+} else {
+  console.warn('[NanoPrompt] Content script loaded but chrome.runtime is not available. This is normal after extension reload.');
+}
 
 /**
  * Check if an element is visible in the DOM

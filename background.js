@@ -3,7 +3,10 @@
 
 // Inline constants (subset needed for background script)
 const MODEL_CONFIG = {
-  expectedInputs: [{ type: 'text', languages: ['en'] }],
+  expectedInputs: [
+    { type: 'text', languages: ['en'] },
+    { type: 'image' }  // Multimodal support for image analysis
+  ],
   expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }]
 };
 
@@ -29,15 +32,24 @@ let pendingAction = null;
  */
 async function warmUpModel() {
   try {
-    if (!self.ai || !self.ai.languageModel) return;
+    // Check if LanguageModel API is available (global constructor in Chrome extensions)
+    if (typeof LanguageModel === 'undefined') return;
 
-    const capabilities = await self.ai.languageModel.capabilities();
+    const availabilityResult = await LanguageModel.availability({
+      temperature: 1.0,
+      topK: 40,
+      expectedOutputs: MODEL_CONFIG.expectedOutputs
+    });
 
-    if (capabilities.available === 'after-download' || capabilities.available === 'readily') {
+    const status = typeof availabilityResult === 'object' ? availabilityResult.availability : availabilityResult;
+
+    if (status === 'after-download' || status === 'readily') {
       console.log(LOG_PREFIX.INFO, 'Triggering background model warmup...');
       try {
-        const session = await self.ai.languageModel.create({
+        const session = await LanguageModel.create({
             systemPrompt: 'Warmup',
+            temperature: 1.0,
+            topK: 40,
             expectedOutputs: MODEL_CONFIG.expectedOutputs
         });
         session.destroy();
@@ -46,7 +58,7 @@ async function warmUpModel() {
         console.warn(LOG_PREFIX.WARN, 'Warmup failed (non-critical):', e);
       }
     } else {
-        console.log(LOG_PREFIX.INFO, 'AI not ready yet. Status:', capabilities.available);
+        console.log(LOG_PREFIX.INFO, 'AI not ready yet. Status:', status);
     }
   } catch (err) {
     console.log(LOG_PREFIX.INFO, 'AI API not detected.');
@@ -67,7 +79,8 @@ const setupExtension = async () => {
     chrome.contextMenus.create({ id: 'open_panel', title: 'Open Nano Prompt', contexts: ['all'] });
     chrome.contextMenus.create({ id: 'summarize_sel', title: 'Summarize "%s"', contexts: ['selection'] });
     chrome.contextMenus.create({ id: 'rewrite_sel', title: 'Rewrite "%s" (Formal)', contexts: ['selection'] });
-    chrome.contextMenus.create({ id: 'translate_sel', title: 'Translate to English', contexts: ['selection'] });
+    chrome.contextMenus.create({ id: 'translate_sel', title: 'Translate "%s"', contexts: ['selection'] });
+    // Image description enabled - multimodal now supported
     chrome.contextMenus.create({ id: 'describe_img', title: 'Describe image', contexts: ['image'] });
 
     await chrome.storage.session.set({ authorizedTabs: {} });

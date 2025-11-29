@@ -6,6 +6,7 @@ import {
   deleteSession,
   setCurrentSession,
   getCurrentSession,
+  getCurrentSessionSync,
   addAttachment,
   clearAttachments,
   getAttachments,
@@ -14,6 +15,7 @@ import {
   updateSettings,
   renameSession
 } from './storage.js';
+import { checkAllAPIs, getSetupStatus } from './setup-guide.js';
 import * as UI from './ui.js';
 import {
   runPrompt,
@@ -30,13 +32,17 @@ import {
 } from './model.js';
 import { fetchContext, classifyIntent } from './context.js';
 import { resizeImage, debounce } from './utils.js';
+import { extractPdfText, isPdfFile } from './pdf.js';
 import { toast } from './toast.js';
 import {
   TIMING,
   LIMITS,
   UI_MESSAGES,
   USER_ERROR_MESSAGES,
-  INTENT_TYPES
+  INTENT_TYPES,
+  LANGUAGE_LABELS,
+  THEME_LABELS,
+  getSettingOrDefault
 } from './constants.js';
 
 let recognition;
@@ -125,6 +131,9 @@ function ensureTabContextSync() {
  */
 export async function bootstrap() {
   await loadState();
+
+  // Apply theme immediately on load
+  applyTheme(getSettingOrDefault(appState.settings, 'theme'));
 
   UI.updateTemplates(appState.templates);
   UI.renderSessions();
@@ -361,13 +370,13 @@ export async function handleLogClick(event) {
 
   const idx = btn.dataset.idx;
   if (btn.classList.contains('bubble-copy')) {
-      const msg = getCurrentSession().messages[idx];
+      const msg = getCurrentSessionSync().messages[idx];
       if(msg) {
         await navigator.clipboard.writeText(msg.text);
         toast.success('Message copied');
       }
   } else if (btn.classList.contains('speak')) {
-      const msg = getCurrentSession().messages[idx];
+      const msg = getCurrentSessionSync().messages[idx];
       if(msg) speakText(msg.text);
   }
 }
@@ -393,22 +402,113 @@ export function handleAttachClick() {
 }
 
 /**
- * Handle file input change - process and attach images
+ * Handle file input change - process and attach images or PDFs
  * @param {Event} event - Change event
  */
 export function handleFileInputChange(event) {
   const files = Array.from(event.target.files || []);
   files.slice(0, LIMITS.MAX_ATTACHMENTS).forEach(async file => {
       try {
-        const data = await resizeImage(file, LIMITS.IMAGE_MAX_WIDTH);
-        addAttachment({ name: file.name, type: file.type, data });
-        UI.renderAttachments(getAttachments());
+        // Handle PDF files
+        if (isPdfFile(file)) {
+          toast.info(`Processing PDF: ${file.name}...`);
+          const pdfText = await extractPdfText(file);
+          addAttachment({
+            name: file.name,
+            type: 'application/pdf',
+            data: pdfText
+          });
+          UI.renderAttachments(getAttachments());
+          toast.success('PDF processed successfully');
+        }
+        // Handle image files - convert to blob for storage (will convert to canvas when sending to API)
+        else if (file.type.startsWith('image/')) {
+          toast.info(`Processing image: ${file.name}...`);
+          const canvas = await fileToCanvas(file, LIMITS.IMAGE_MAX_WIDTH);
+          // Convert canvas to blob for IndexedDB storage (canvas cannot be serialized)
+          const blob = await canvasToBlob(canvas, file.type);
+          addAttachment({
+            name: file.name,
+            type: file.type,
+            data: blob  // Store as blob, convert to canvas when needed
+          });
+          UI.renderAttachments(getAttachments());
+          toast.success('Image processed successfully');
+        }
+        else {
+          toast.warning('Unsupported file type. Only images and PDFs are supported.');
+        }
       } catch (e) {
-        console.error('Image processing failed', e);
-        toast.error(USER_ERROR_MESSAGES.IMAGE_PROCESSING_FAILED);
+        console.error('File processing failed', e);
+        if (isPdfFile(file)) {
+          const errorMsg = e.message || USER_ERROR_MESSAGES.PDF_PROCESSING_FAILED;
+          toast.error(`PDF Error: ${errorMsg}`);
+        } else {
+          toast.error(USER_ERROR_MESSAGES.IMAGE_PROCESSING_FAILED);
+        }
       }
   });
   event.target.value = '';
+}
+
+/**
+ * Convert image file to canvas (required for Prompt API)
+ * @param {File} file - Image file
+ * @param {number} maxWidth - Maximum width for resizing
+ * @returns {Promise<HTMLCanvasElement>}
+ */
+async function fileToCanvas(file, maxWidth) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = (e) => {
+      const img = new Image();
+
+      img.onload = () => {
+        // Calculate scaled dimensions
+        let width = img.width;
+        let height = img.height;
+
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+
+        // Create canvas and draw resized image
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        resolve(canvas);
+      };
+
+      img.onerror = () => reject(new Error('Failed to load image'));
+      img.src = e.target.result;
+    };
+
+    reader.onerror = () => reject(new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Convert canvas to blob for storage (IndexedDB cannot store canvas objects)
+ * @param {HTMLCanvasElement} canvas - Canvas element
+ * @param {string} mimeType - Image MIME type (e.g., 'image/jpeg')
+ * @returns {Promise<Blob>}
+ */
+async function canvasToBlob(canvas, mimeType = 'image/jpeg') {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error('Failed to convert canvas to blob'));
+      }
+    }, mimeType, 0.95);  // 95% quality for JPEG
+  });
 }
 
 /**
@@ -482,7 +582,7 @@ export function handleMicClick() {
  * Handle speak last AI response button click
  */
 export function handleSpeakLast() {
-    const msgs = getCurrentSession().messages;
+    const msgs = getCurrentSessionSync().messages;
     const last = [...msgs].reverse().find(m => m.role === 'ai');
     if (last) speakText(last.text);
 }
@@ -527,9 +627,82 @@ export async function handleContextBlur(event) {
  */
 export function handleOpenSettings() {
   UI.openSettingsModal();
-  document.getElementById('temperature').value = appState.settings.temperature;
+  const tempSlider = document.getElementById('temperature');
+  const tempValue = document.getElementById('temperature-value');
+
+  tempSlider.value = appState.settings.temperature;
+  tempValue.textContent = appState.settings.temperature;
+
+  // Update value display when slider changes
+  tempSlider.oninput = () => {
+    tempValue.textContent = tempSlider.value;
+  };
+
   document.getElementById('topk').value = appState.settings.topK;
   document.getElementById('system-prompt').value = appState.settings.systemPrompt;
+
+  // Update language dropdown to show current selection
+  const currentLang = getSettingOrDefault(appState.settings, 'language');
+  const langTrigger = document.getElementById('language-trigger');
+  if (langTrigger) {
+    langTrigger.textContent = LANGUAGE_LABELS[currentLang] || LANGUAGE_LABELS['en'];
+    langTrigger.dataset.selectedLang = currentLang;
+  }
+
+  // Update theme dropdown to show current selection
+  const currentTheme = getSettingOrDefault(appState.settings, 'theme');
+  const themeTrigger = document.getElementById('theme-trigger');
+  if (themeTrigger) {
+    themeTrigger.textContent = THEME_LABELS[currentTheme] || THEME_LABELS['auto'];
+    themeTrigger.dataset.selectedTheme = currentTheme;
+  }
+}
+
+/**
+ * Handle language dropdown selection
+ * @param {MouseEvent} event - Click event
+ */
+export function handleLanguageSelect(event) {
+  const target = event.target.closest('.dropdown-item');
+  if (!target) return;
+
+  const lang = target.dataset.lang;
+  const langText = target.textContent;
+
+  // Update trigger button text
+  const trigger = document.getElementById('language-trigger');
+  if (trigger) {
+    trigger.textContent = langText;
+  }
+
+  // Store selected language in a temporary attribute for save handler
+  trigger.dataset.selectedLang = lang;
+
+  // Close dropdown
+  UI.closeMenu('language');
+}
+
+/**
+ * Handle theme dropdown selection
+ */
+export function handleThemeSelect(event) {
+  const target = event.target.closest('.dropdown-item');
+  if (!target) return;
+
+  const theme = target.dataset.theme;
+  const themeText = target.textContent;
+
+  // Update trigger button text
+  const trigger = document.getElementById('theme-trigger');
+  if (trigger) {
+    trigger.textContent = themeText;
+  }
+
+  // Store selected theme in a temporary attribute for save handler
+  trigger.dataset.selectedTheme = theme;
+
+  // Close dropdown
+  UI.closeMenu('theme');
 }
 
 /**
@@ -548,13 +721,205 @@ export async function handleSaveSettings() {
     const topk = document.getElementById('topk').value;
     const sys = document.getElementById('system-prompt').value;
 
-    updateSettings({ temperature: Number(temp), topK: Number(topk), systemPrompt: sys });
+    // Get selected language from dropdown trigger
+    const langTrigger = document.getElementById('language-trigger');
+    const lang = langTrigger?.dataset.selectedLang || getSettingOrDefault(appState.settings, 'language');
+
+    // Get selected theme from dropdown trigger
+    const themeTrigger = document.getElementById('theme-trigger');
+    const theme = themeTrigger?.dataset.selectedTheme || getSettingOrDefault(appState.settings, 'theme');
+
+    updateSettings({ temperature: Number(temp), topK: Number(topk), systemPrompt: sys, language: lang, theme });
     await saveState();
 
-    // FIXED: Force model reset so new settings apply immediately
+    // Apply theme immediately
+    applyTheme(theme);
+
+    // Force model reset so new settings apply immediately
     resetModel();
 
     UI.closeModal();
     await refreshAvailability();
     toast.success('Settings saved');
+}
+
+/**
+ * Handle setup guide button click
+ * @returns {Promise<void>}
+ */
+export async function handleOpenSetupGuide() {
+  UI.openSetupGuideModal();
+
+  const content = document.getElementById('setup-content');
+  content.innerHTML = '<p class="setup-intro">Checking API availability...</p>';
+
+  try {
+    const status = await getSetupStatus();
+    renderSetupGuide(status);
+  } catch (e) {
+    content.innerHTML = `<p class="error">Error checking API status: ${e.message}</p>`;
+  }
+}
+
+/**
+ * Render setup guide content
+ * @param {Object} status - Setup status from getSetupStatus()
+ */
+function renderSetupGuide(status) {
+  const content = document.getElementById('setup-content');
+
+  let html = '';
+
+  // Browser check
+  if (!status.browserInfo.isChrome) {
+    html += `<div class="setup-section error">
+      <h3>❌ Unsupported Browser</h3>
+      <p>Chrome Built-in AI APIs are only available in Google Chrome.</p>
+      <p><strong>Your browser:</strong> ${navigator.userAgent}</p>
+    </div>`;
+    content.innerHTML = html;
+    return;
+  }
+
+  if (!status.browserInfo.recommendedVersion) {
+    html += `<div class="setup-section warning">
+      <h3>⚠️ Chrome Version</h3>
+      <p><strong>Current:</strong> Chrome ${status.browserInfo.chromeVersion}</p>
+      <p><strong>Recommended:</strong> Chrome 138+</p>
+      <p>Some features may not work properly. Please update Chrome.</p>
+    </div>`;
+  }
+
+  // Overall status
+  if (status.isFullySetup) {
+    html += `<div class="setup-section success">
+      <h3>✅ All Required APIs Ready</h3>
+      <p>Your setup is complete! All required APIs are available.</p>
+    </div>`;
+  } else {
+    html += `<div class="setup-section error">
+      <h3>❌ Setup Incomplete</h3>
+      <p>Some required APIs are missing. Follow the instructions below to enable them.</p>
+    </div>`;
+  }
+
+  // Required APIs
+  html += '<div class="setup-section"><h3>Required APIs</h3>';
+
+  status.requiredAPIs.forEach(api => {
+    const statusIcon = api.available ? '✅' : '❌';
+    const statusClass = api.available ? 'success' : 'error';
+
+    html += `<div class="api-item ${statusClass}">
+      <div class="api-header">
+        <span class="api-icon">${statusIcon}</span>
+        <div style="flex: 1;">
+          <div class="api-name">${getAPIName(api)}</div>
+          <div class="api-status">${api.message}</div>
+        </div>
+      </div>`;
+
+    if (!api.available) {
+      html += `<div class="api-instructions">
+        <p><strong>To enable:</strong></p>
+        <ol>
+          <li>Copy this flag: <code class="flag-url">${api.flag}</code></li>
+          <li>Paste it into your Chrome address bar</li>
+          <li>Set to: <strong>${api.flagValue}</strong></li>
+          <li>Click "Relaunch" button</li>
+        </ol>
+      </div>`;
+    } else if (api.multilingual !== undefined) {
+      html += `<div class="api-info">
+        <p><strong>Multilingual (es, ja):</strong> ${api.multilingual ? '✅ Enabled' : '❌ Disabled'}</p>
+        ${!api.multilingual ? '<p><small>For Spanish/Japanese support, set flag to "Enabled multilingual"</small></p>' : ''}
+      </div>`;
+    }
+
+    html += '</div>';
+  });
+
+  html += '</div>';
+
+  // Optional APIs
+  html += '<div class="setup-section"><h3>Optional Features (Nice-to-Have)</h3>';
+  html += '<p class="section-desc">These features provide better performance but are not required:</p>';
+
+  status.optionalAPIs.forEach(api => {
+    const statusIcon = api.available ? '✅' : '⚪';
+    const statusClass = api.available ? 'success' : 'optional';
+
+    html += `<div class="api-item ${statusClass}">
+      <div class="api-header">
+        <span class="api-icon">${statusIcon}</span>
+        <div style="flex: 1;">
+          <div class="api-name">${getAPIName(api)}</div>
+          <div class="api-status">${api.message}</div>
+        </div>
+      </div>`;
+
+    if (!api.available && api.fallback) {
+      html += `<div class="api-info">
+        <p><strong>Fallback:</strong> ${api.fallback}</p>
+      </div>`;
+    }
+
+    if (!api.available) {
+      html += `<div class="api-instructions collapsed">
+        <p><strong>To enable (optional):</strong></p>
+        <ol>
+          <li>Flag: <code class="flag-url">${api.flag}</code></li>
+          <li>Set to: <strong>${api.flagValue}</strong></li>
+        </ol>
+      </div>`;
+    }
+
+    html += '</div>';
+  });
+
+  html += '</div>';
+
+  // Instructions footer
+  html += `<div class="setup-footer">
+    <p><strong>After changing flags:</strong> Chrome will show a "Relaunch" button. Click it to restart Chrome and apply changes.</p>
+    <p><strong>Having issues?</strong> Make sure you have:</p>
+    <ul>
+      <li>At least 22 GB free disk space</li>
+      <li>GPU with 4+ GB VRAM or CPU with 16GB RAM</li>
+      <li>Unmetered internet connection for model downloads</li>
+    </ul>
+  </div>`;
+
+  content.innerHTML = html;
+}
+
+/**
+ * Get friendly name for API
+ * @param {Object} api - API status object
+ * @returns {string} Friendly name
+ */
+function getAPIName(api) {
+  if (api.flag.includes('prompt-api')) return 'Prompt API (Gemini Nano)';
+  if (api.flag.includes('translation-api')) return 'Translation API';
+  if (api.flag.includes('language-detection')) return 'Language Detection API';
+  if (api.flag.includes('summarization')) return 'Summarization API';
+  if (api.flag.includes('rewriter')) return 'Rewriter API';
+  return 'Unknown API';
+}
+
+/**
+ * Apply theme to the document
+ * @param {string} theme - Theme preference: 'auto', 'dark', or 'light'
+ */
+export function applyTheme(theme) {
+  const root = document.documentElement;
+
+  if (theme === 'auto') {
+    // Use browser/system preference
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    root.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+  } else {
+    // Use explicit theme
+    root.setAttribute('data-theme', theme);
+  }
 }

@@ -69,8 +69,8 @@
             </div>
 
             <div class="attach">
-              <input type="file" id="file-input" accept="image/*" multiple hidden />
-              <button id="attach" class="icon" title="Attach image" aria-label="Attach image">
+              <input type="file" id="file-input" accept="image/*,.pdf,application/pdf" multiple hidden />
+              <button id="attach" class="icon" title="Attach image or PDF" aria-label="Attach image or PDF">
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>
               </button>
             </div>
@@ -101,17 +101,65 @@
         </button>
       </header>
       
-      <label for="temperature" title="Low = Precise, High = Creative">Creativity
-        <input type="range" id="temperature" min="0" max="1" step="0.1" />
+      <label for="temperature" title="Low = Precise, High = Creative">Creativity: <span id="temperature-value">1.0</span>
+        <input type="range" id="temperature" min="0" max="2" step="0.1" />
       </label>
-      <label for="topk" title="Controls word variety (1-64)">Vocabulary
-        <input type="number" id="topk" min="1" max="64" />
+      <label for="topk" title="Controls word variety (1-128)">Vocabulary
+        <input type="number" id="topk" min="1" max="128" />
       </label>
-      
+
+      <label title="Select AI response language">Language
+        <div class="dropdown" id="language-dropdown">
+          <button id="language-trigger" class="dropdown-trigger" aria-haspopup="true" aria-expanded="false">
+            English
+          </button>
+          <ul id="language-menu" class="dropdown-menu" hidden role="menu">
+            <li><button class="dropdown-item" data-lang="en">English</button></li>
+            <li><button class="dropdown-item" data-lang="es">Español (Spanish)</button></li>
+            <li><button class="dropdown-item" data-lang="fr">Français (French)</button></li>
+            <li><button class="dropdown-item" data-lang="de">Deutsch (German)</button></li>
+            <li><button class="dropdown-item" data-lang="it">Italiano (Italian)</button></li>
+            <li><button class="dropdown-item" data-lang="pt">Português (Portuguese)</button></li>
+            <li><button class="dropdown-item" data-lang="ru">Русский (Russian)</button></li>
+            <li><button class="dropdown-item" data-lang="zh">中文 (Chinese)</button></li>
+            <li><button class="dropdown-item" data-lang="ja">日本語 (Japanese)</button></li>
+            <li><button class="dropdown-item" data-lang="ko">한국어 (Korean)</button></li>
+            <li><button class="dropdown-item" data-lang="ar">العربية (Arabic)</button></li>
+            <li><button class="dropdown-item" data-lang="hi">हिन्दी (Hindi)</button></li>
+          </ul>
+        </div>
+      </label>
+
+      <label title="Select theme preference">Theme
+        <div class="dropdown" id="theme-dropdown">
+          <button id="theme-trigger" class="dropdown-trigger" aria-haspopup="true" aria-expanded="false">
+            Auto (System)
+          </button>
+          <ul id="theme-menu" class="dropdown-menu" hidden role="menu">
+            <li><button class="dropdown-item" data-theme="auto">Auto (System)</button></li>
+            <li><button class="dropdown-item" data-theme="dark">Dark</button></li>
+            <li><button class="dropdown-item" data-theme="light">Light</button></li>
+          </ul>
+        </div>
+      </label>
+
       <label for="system-prompt">System prompt
         <textarea id="system-prompt"></textarea>
       </label>
-      <button id="save-settings" class="filled">Save</button>
+
+      <div class="info-note">
+        <svg class="info-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+        <div class="info-text">
+          <strong>Text-to-Speech:</strong> Uses your browser's built-in voice synthesis.
+          Depending on your browser settings, voices may be online or offline.
+          Configure at <code>chrome://settings/tts-engine</code>
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="open-setup-guide" class="tonal">Setup Guide</button>
+        <button id="save-settings" class="filled">Save</button>
+      </div>
     </div>
   </div>
 
@@ -126,6 +174,24 @@
       </header>
       <textarea id="context-text" aria-label="Editable page context" placeholder="Context will appear here..."></textarea>
       <button class="filled" data-dismiss="modal">Done</button>
+    </div>
+  </div>
+
+  <div id="setup-guide-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="setup-title">
+    <div class="modal-backdrop" data-dismiss="modal" aria-hidden="true"></div>
+    <div class="modal-card setup-guide-card" role="document">
+      <header>
+        <h2 id="setup-title">Setup Guide</h2>
+        <button id="close-setup-guide" class="icon" aria-label="Close setup guide" data-dismiss="modal">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </header>
+
+      <div id="setup-content">
+        <p class="setup-intro">Checking API availability...</p>
+      </div>
+
+      <button class="filled" data-dismiss="modal">Close</button>
     </div>
   </div>
 

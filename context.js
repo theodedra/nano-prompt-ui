@@ -184,8 +184,14 @@ export async function buildPromptWithContext(userText, contextOverride = '', att
   }
 
   if (attachments.length) {
-    const desc = attachments.map((att, i) => `[Attachment ${i + 1}: ${att.name}]`).join('\n');
-    parts.push('Attachments (Filenames only):\n' + desc);
+    const attachmentInfo = attachments.map((att, i) => {
+      if (att.type === 'application/pdf') {
+        return `[Attachment ${i + 1}: ${att.name}]\nPDF Content:\n${att.data}`;
+      } else {
+        return `[Attachment ${i + 1}: ${att.name} - Image]`;
+      }
+    }).join('\n\n');
+    parts.push('Attachments:\n' + attachmentInfo);
   }
 
   if (intent === INTENT_TYPES.TIME) {

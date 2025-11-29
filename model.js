@@ -2,6 +2,7 @@ import * as UI from './ui.js';
 import {
   appState,
   getCurrentSession,
+  getCurrentSessionSync,
   upsertMessage,
   updateMessage,
   saveState,
@@ -19,7 +20,9 @@ import {
   VALIDATION,
   SPEECH,
   DEFAULT_SETTINGS,
-  TITLE_GENERATION_PROMPT
+  TITLE_GENERATION_PROMPT,
+  LANGUAGE_NAMES,
+  getSettingOrDefault
 } from './constants.js';
 
 // --- LOCAL AI WRAPPER ---
@@ -33,6 +36,11 @@ class LocalAI {
   }
 
   get engine() {
+    // In Chrome extensions, LanguageModel is a global constructor
+    if (typeof LanguageModel !== 'undefined') {
+      return LanguageModel;
+    }
+    // Fallback for older implementations
     return self.ai?.languageModel || self.LanguageModel;
   }
 
@@ -58,6 +66,17 @@ class LocalAI {
     const config = { ...MODEL_CONFIG, ...params };
     this.session = await this.engine.create(config);
     return this.session;
+  }
+
+  /**
+   * Non-streaming prompt for faster responses (used for images)
+   * @param {string|Array} input - Prompt text or array with text and blobs
+   * @param {AbortSignal} signal - Abort signal for cancellation
+   * @returns {Promise<string>} Complete response text
+   */
+  async prompt(input, signal) {
+    if (!this.session) throw new Error('No active session');
+    return await this.session.prompt(input, { signal });
   }
 
   /**
@@ -106,13 +125,25 @@ const localAI = new LocalAI();
 
 /**
  * Get session configuration from app state
- * @returns {{topK: number, temperature: number, systemPrompt: string}}
+ * @returns {{topK: number, temperature: number, systemPrompt: string, expectedInputs: Array, expectedOutputs: Array}}
  */
 function getSessionConfig() {
+  const userLanguage = getSettingOrDefault(appState.settings, 'language');
+
+  // Gemini Nano only supports en, es, ja
+  // For other languages, fallback to English for Prompt API
+  const supportedLanguages = ['en', 'es', 'ja'];
+  const language = supportedLanguages.includes(userLanguage) ? userLanguage : 'en';
+
   return {
     topK: appState.settings.topK,
     temperature: appState.settings.temperature,
-    systemPrompt: appState.settings.systemPrompt || DEFAULT_SETTINGS.systemPrompt
+    systemPrompt: appState.settings.systemPrompt || DEFAULT_SETTINGS.systemPrompt,
+    expectedInputs: [
+      { type: 'text', languages: [language] },
+      { type: 'image' }
+    ],
+    expectedOutputs: [{ type: 'text', format: 'plain-text', languages: [language] }]
   };
 }
 
@@ -173,16 +204,114 @@ export async function runRewriter(text, tone = 'professional') {
 }
 
 /**
- * Translate text to English
+ * Translate text to user's selected language using Chrome Translation API
  * @param {string} text - Text to translate
  * @returns {Promise<void>}
  */
 export async function runTranslator(text) {
-  await runPrompt({
-    text: `Translate the following text to English:\n\n${text}`,
-    contextOverride: '',
-    attachments: []
-  });
+  const session = getCurrentSessionSync();
+  const targetLang = getSettingOrDefault(appState.settings, 'language');
+
+  UI.setBusy(true);
+  UI.setStatusText('Detecting language...');
+
+  try {
+    // Check if Translation API is available
+    if (!self.Translator || !self.LanguageDetector) {
+      throw new Error('Translation API not available. Please enable chrome://flags/#translation-api');
+    }
+
+    // Step 1: Detect source language
+    let sourceLang = 'en';
+    try {
+      const detectorAvailability = await self.LanguageDetector.availability();
+      if (detectorAvailability !== 'no') {
+        const detector = await self.LanguageDetector.create();
+        const results = await detector.detect(text);
+        if (results && results.length > 0) {
+          sourceLang = results[0].detectedLanguage;
+        }
+        detector.destroy();
+      }
+    } catch (e) {
+      console.warn('Language detection failed, assuming English:', e);
+    }
+
+    // Don't translate if source is same as target
+    if (sourceLang === targetLang) {
+      const userMessage = { role: 'user', text: `Translate: ${text}`, ts: Date.now() };
+      const aiMessage = {
+        role: 'ai',
+        text: `The text is already in the target language (${targetLang.toUpperCase()}). No translation needed:\n\n${text}`,
+        ts: Date.now()
+      };
+      upsertMessage(session.id, userMessage);
+      upsertMessage(session.id, aiMessage);
+      UI.renderLog();
+      UI.setBusy(false);
+      UI.setStatusText('Ready to chat.');
+      await saveState();
+      return;
+    }
+
+    // Step 2: Check if translation is available for this language pair
+    UI.setStatusText('Preparing translator...');
+    const translatorAvailability = await self.Translator.availability({
+      sourceLanguage: sourceLang,
+      targetLanguage: targetLang
+    });
+
+    if (translatorAvailability === 'no') {
+      throw new Error(`Translation from ${sourceLang} to ${targetLang} is not supported`);
+    }
+
+    // Step 3: Create translator and translate
+    UI.setStatusText('Translating...');
+    const translator = await self.Translator.create({
+      sourceLanguage: sourceLang,
+      targetLanguage: targetLang,
+      monitor(m) {
+        m.addEventListener('downloadprogress', (e) => {
+          UI.setStatusText(`Downloading translation model... ${Math.round(e.loaded * 100)}%`);
+        });
+      }
+    });
+
+    const translatedText = await translator.translate(text);
+    translator.destroy();
+
+    // Step 4: Display result
+    const userMessage = {
+      role: 'user',
+      text: `Translate (${sourceLang} → ${targetLang}): ${text}`,
+      ts: Date.now()
+    };
+    const aiMessage = { role: 'ai', text: translatedText, ts: Date.now() };
+
+    upsertMessage(session.id, userMessage);
+    upsertMessage(session.id, aiMessage);
+    UI.renderLog();
+    await saveState();
+
+    UI.setBusy(false);
+    UI.setStatusText('Ready to chat.');
+    toast.success('Translation complete');
+
+  } catch (error) {
+    console.error('Translation failed:', error);
+
+    // Fallback to Gemini Nano Prompt API
+    UI.setStatusText('Using fallback translation...');
+    const langName = LANGUAGE_NAMES[targetLang] || 'English';
+
+    await runPrompt({
+      text: `Translate the following text to ${langName}:\n\n${text}`,
+      contextOverride: '',
+      attachments: []
+    });
+
+    toast.warning('Used Gemini Nano fallback (Translation API unavailable)');
+  }
 }
 
 // --- IMAGE DESCRIPTION ---
@@ -198,19 +327,17 @@ export async function runImageDescription(url) {
     // 1. Smart Fetch
     const blob = await fetchImageWithRetry(url);
 
-    // 2. Resize (Safety)
-    UI.setStatusText(UI_MESSAGES.OPTIMIZING);
-    const optimizedBase64 = await resizeImage(blob, LIMITS.IMAGE_MAX_WIDTH_DESCRIPTION);
-
+    // 2. Store as blob for IndexedDB compatibility
     const attachment = {
       name: "Analyzed Image",
       type: "image/jpeg",
-      data: optimizedBase64
+      data: blob  // Store as blob (will be converted to canvas in runPrompt)
     };
 
     // 3. Reset model to clear memory before image task
     resetModel();
 
+    // runPrompt will handle status updates from here
     await runPrompt({
       text: "Describe this image in detail.",
       contextOverride: '',
@@ -222,7 +349,7 @@ export async function runImageDescription(url) {
     UI.setStatusText(UI_MESSAGES.ERROR);
     toast.error(USER_ERROR_MESSAGES.IMAGE_PROCESSING_FAILED);
     resetModel();
-    const session = getCurrentSession();
+    const session = getCurrentSessionSync();
     upsertMessage(session.id, {
       role: 'ai',
       text: `**Image Error:** ${e.message}.`,
@@ -348,16 +475,19 @@ async function fetchImageWithRetry(url) {
  * @param {{text: string, contextOverride: string, attachments: Array}} params - Prompt parameters
  * @returns {Promise<void>}
  */
-export async function runPrompt({ text, contextOverride, attachments }) {
-  const session = getCurrentSession();
-  const userMessage = { role: 'user', text, ts: Date.now(), attachments };
+export async function runPrompt({ text, contextOverride, attachments, displayText = null }) {
+  const session = getCurrentSessionSync();
+  // Use displayText for chat history if provided, otherwise use text
+  const userMessage = { role: 'user', text: displayText || text, ts: Date.now(), attachments };
 
   upsertMessage(session.id, userMessage);
   UI.renderLog();
-  await saveState();
+  // PERFORMANCE: Don't block on saveState - save in background after streaming
+  // await saveState();  // REMOVED - moved to end of function
 
   UI.setBusy(true);
   UI.setStopEnabled(true);
+  UI.setStatusText('Thinking...');
 
   const aiMessageIndex = session.messages.length;
   upsertMessage(session.id, { role: 'ai', text: '', ts: Date.now() });
@@ -380,14 +510,38 @@ export async function runPrompt({ text, contextOverride, attachments }) {
     const history = getHistorySnippet(session);
     const finalText = `${fullContext}\n\nConversation History:\n${history}\n\nCurrent User Query:\n${text}`;
 
+    // Separate images from PDFs (PDFs are already text, included in finalText)
+    const imageAttachments = attachments?.filter(att => att.type.startsWith('image/')) || [];
+
     let promptInput = finalText;
-    if (attachments?.length > 0) {
-        const imageBlobs = await Promise.all(attachments.map(att => dataUrlToBlob(att.data)));
-        promptInput = [finalText, ...imageBlobs];
+    if (imageAttachments.length > 0) {
+      // att.data is now a Blob (for IndexedDB storage), convert to canvas for Prompt API
+      try {
+        const canvases = await Promise.all(
+          imageAttachments.map(async (att) => {
+            const canvas = await blobToCanvas(att.data, LIMITS.IMAGE_MAX_WIDTH);
+            return canvas;
+          })
+        );
+
+        // Prompt API multimodal format: message with role and content array
+        promptInput = [{
+          role: "user",
+          content: [
+            { type: "text", value: finalText },
+            ...canvases.map(canvas => ({ type: "image", value: canvas }))
+          ]
+        }];
+      } catch (conversionError) {
+        console.error("Failed to convert blob to canvas:", conversionError);
+        throw new Error(`Image conversion failed: ${conversionError.message}`);
+      }
     }
 
     try {
         if (!localAI.session) await localAI.createSession(getSessionConfig());
+
+        UI.setStatusText('Generating response...');
 
         await localAI.promptStreaming(promptInput, controller.signal, (chunk) => {
             updateMessage(session.id, aiMessageIndex, { text: chunk });
@@ -396,7 +550,8 @@ export async function runPrompt({ text, contextOverride, attachments }) {
 
     } catch (err) {
         if (err?.name === 'AbortError') throw err;
-        console.log("Side Panel failed, attempting fallback...");
+        console.error("Side Panel failed with error:", err);
+        console.error("Error name:", err?.name, "Message:", err?.message);
 
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (tab && tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('edge://'))) {
@@ -404,9 +559,16 @@ export async function runPrompt({ text, contextOverride, attachments }) {
              throw new Error(USER_ERROR_MESSAGES.AI_SYSTEM_PAGE);
         }
 
-        const fallback = await runPromptInPage(finalText, attachments);
-        updateMessage(session.id, aiMessageIndex, { text: fallback });
-        UI.updateLastMessageBubble(fallback);
+        // Try fallback for non-image prompts (images don't work in page context)
+        if (imageAttachments.length === 0) {
+          const fallback = await runPromptInPage(finalText, attachments);
+          updateMessage(session.id, aiMessageIndex, { text: fallback });
+          UI.updateLastMessageBubble(fallback);
+        } else {
+          // Image prompts failed - can't use page fallback
+          console.error("Image prompt failed, cannot use fallback. Original error:", err);
+          throw new Error(`Image analysis failed: ${err?.message || 'Unknown error'}`);
+        }
     }
 
   } catch (err) {
@@ -444,6 +606,7 @@ export async function runPrompt({ text, contextOverride, attachments }) {
 
   UI.setBusy(false);
   UI.setStopEnabled(false);
+  UI.setStatusText('Ready to chat.');
   await saveState();
 
   // AUTO-NAMING: Generate title after first AI response
@@ -681,4 +844,46 @@ AI: ${aiMsg.text.slice(0, LIMITS.TITLE_GENERATION_MAX_CHARS)}`;
     // Silent fail - title generation is not critical
     console.warn('Title generation failed:', e);
   }
+}
+
+/**
+ * Convert blob to canvas (required for Prompt API image input)
+ * @param {Blob} blob - Image blob
+ * @param {number} maxWidth - Maximum width for resizing
+ * @returns {Promise<HTMLCanvasElement>}
+ */
+async function blobToCanvas(blob, maxWidth) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+
+    img.onload = () => {
+      // Calculate scaled dimensions
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxWidth) {
+        height = (height * maxWidth) / width;
+        width = maxWidth;
+      }
+
+      // Create canvas and draw resized image
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, width, height);
+
+      // Clean up object URL
+      URL.revokeObjectURL(img.src);
+
+      resolve(canvas);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(img.src);
+      reject(new Error('Failed to load image from blob'));
+    };
+
+    img.src = URL.createObjectURL(blob);
+  });
 }

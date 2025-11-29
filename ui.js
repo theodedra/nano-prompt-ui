@@ -2,11 +2,13 @@ import { $, formatTime, formatDate, markdownToHtml } from './utils.js';
 import {
   appState,
   getCurrentSession,
+  getCurrentSessionSync,
   setCurrentSession,
   summarizeSession,
   BLANK_TEMPLATE_ID
 } from './storage.js';
 import { UI_MESSAGES, ICONS } from './constants.js';
+import { VirtualScroller } from './virtual-scroll.js';
 
 let els = {};
 let lastStatus = UI_MESSAGES.CHECKING;
@@ -15,6 +17,9 @@ let renderedSessionId = null;
 
 // UPDATED: Observer for smooth scrolling
 let scrollObserver = null;
+
+// Virtual scrolling instance
+let virtualScroller = null;
 
 const ICON_MIC = ICONS.MIC;
 const ICON_STOP = ICONS.STOP;
@@ -50,6 +55,11 @@ export function initUI() {
     scrollObserver = new ResizeObserver(() => {
        scrollToBottom();
     });
+  }
+
+  // Initialize virtual scroller (will only enable when needed)
+  if (els.log) {
+    virtualScroller = new VirtualScroller(els.log, createMessageElement);
   }
 }
 
@@ -149,8 +159,8 @@ function observeLastMessage() {
 export function renderSessions(confirmingId = null) {
   if (!els.sessionMenu) return;
   els.sessionMenu.innerHTML = '';
-  
-  const current = getCurrentSession();
+
+  const current = getCurrentSessionSync();
   if (els.sessionTrigger && current) {
     els.sessionTrigger.textContent = current.title || 'Untitled Session';
   }
@@ -158,7 +168,8 @@ export function renderSessions(confirmingId = null) {
   const fragment = document.createDocumentFragment();
 
   appState.sessionOrder.forEach(id => {
-    const session = appState.sessions[id];
+    // Use metadata if available (lazy loading), otherwise full session
+    const session = appState.sessions[id] || appState.sessionMeta[id];
     if (!session) return;
     
     const row = document.createElement('li');
@@ -207,11 +218,27 @@ export function toggleMenu(menuName) {
   if (menuName === 'session') {
     menu = els.sessionMenu;
     trigger = els.sessionTrigger;
-    closeMenu('templates'); 
+    closeMenu('templates');
+    closeMenu('language');
+    closeMenu('theme');
   } else if (menuName === 'templates') {
     menu = els.templatesMenu;
     trigger = els.templatesTrigger;
-    closeMenu('session'); 
+    closeMenu('session');
+    closeMenu('language');
+    closeMenu('theme');
+  } else if (menuName === 'language') {
+    menu = document.getElementById('language-menu');
+    trigger = document.getElementById('language-trigger');
+    closeMenu('session');
+    closeMenu('templates');
+    closeMenu('theme');
+  } else if (menuName === 'theme') {
+    menu = document.getElementById('theme-menu');
+    trigger = document.getElementById('theme-trigger');
+    closeMenu('session');
+    closeMenu('templates');
+    closeMenu('language');
   }
 
   if (menu) {
@@ -229,8 +256,14 @@ export function closeMenu(menuName) {
   } else if (menuName === 'templates') {
     menu = els.templatesMenu;
     trigger = els.templatesTrigger;
+  } else if (menuName === 'language') {
+    menu = document.getElementById('language-menu');
+    trigger = document.getElementById('language-trigger');
+  } else if (menuName === 'theme') {
+    menu = document.getElementById('theme-menu');
+    trigger = document.getElementById('theme-trigger');
   }
-  
+
   if (menu) {
     menu.hidden = true;
     trigger?.setAttribute('aria-expanded', 'false');
@@ -318,17 +351,21 @@ function createMessageElement(m, idx) {
 }
 
 export function renderLog() {
-  const session = getCurrentSession();
+  const session = getCurrentSessionSync();
   if (!session || !els.log) return;
 
   // Detect session switch and clear
   if (renderedSessionId !== session.id) {
       els.log.innerHTML = '';
       renderedSessionId = session.id;
+      // Disable virtual scrolling on session switch (will re-enable if needed)
+      if (virtualScroller && virtualScroller.enabled) {
+        virtualScroller.disable();
+      }
   }
-  
+
   const messages = session.messages;
-  
+
   // --- FIX START: Handle Empty State ---
   if (messages.length === 0) {
     els.log.innerHTML = '<div class="msg ai placeholder"><div class="body"><p>Ready to chat.</p></div></div>';
@@ -343,6 +380,19 @@ export function renderLog() {
   }
   // --- FIX END ---
 
+  // VIRTUAL SCROLLING: Enable if message count is high
+  if (virtualScroller && VirtualScroller.shouldEnable(messages.length)) {
+    if (!virtualScroller.enabled) {
+      virtualScroller.enable();
+      // Calibrate item height on first enable
+      setTimeout(() => virtualScroller.calibrateItemHeight(), 100);
+    }
+    virtualScroller.render();
+    setExportAvailability(true);
+    return;
+  }
+
+  // NORMAL RENDERING: For small message counts
   // Incremental Append
   const existingCount = els.log.querySelectorAll('.msg:not(.placeholder)').length;
 
@@ -383,9 +433,7 @@ export function updateLastMessageBubble(markdownText) {
 
       if (body.innerHTML !== newHtml) {
           body.innerHTML = newHtml;
-          // Note: We don't need to call scrollToBottom here anymore.
-          // The ResizeObserver setup in initUI/observeLastMessage will detect
-          // that 'lastMsg' has grown in height and call scrollToBottom automatically.
+          // ResizeObserver will detect growth and scroll automatically
       }
   } else {
     renderLog();
@@ -462,8 +510,17 @@ export function openContextModal() {
   }
 }
 
+export function openSetupGuideModal() {
+  const modal = document.getElementById('setup-guide-modal');
+  if (modal) {
+    modal.removeAttribute('hidden');
+    document.body?.classList.add('modal-open');
+  }
+}
+
 export function closeModal() {
-  [els.settingsModal, els.contextModal].forEach(modal => {
+  const setupModal = document.getElementById('setup-guide-modal');
+  [els.settingsModal, els.contextModal, setupModal].forEach(modal => {
     if (modal) modal.setAttribute('hidden', 'true');
   });
   document.body?.classList.remove('modal-open');
