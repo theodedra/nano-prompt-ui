@@ -1,6 +1,6 @@
 # Nano Prompt UI — Chrome MV3 (Side Panel)
 
-![Nano Prompt UI – Dark](Screenshot-dark.png) ![Nano Prompt UI – Light](Screenshot-light.png)
+![Nano Prompt UI – Dark](Screenshot(dark).png) ![Nano Prompt UI – Light](Screenshot(light).png)
 
 **TL;DR:** A privacy-first Chrome extension that runs entirely on-device using Chrome's built-in **Gemini Nano** language model. Version **1.1.0** builds on the multimodal 1.0.0 release with a **storage + performance overhaul**, **smarter context handling**, **session search**, and **quality-of-life UX upgrades** — while staying 100% local and side-panel based.
 
