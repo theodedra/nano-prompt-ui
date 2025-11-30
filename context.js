@@ -8,8 +8,18 @@ import {
   INTENT_TYPES,
   VALIDATION
 } from './constants.js';
+import { getActiveSnapshot } from './storage.js';
 
-let cachedContext = { text: '', ts: 0, tabId: null, isRestricted: false };
+let cachedContext = {
+  text: '',
+  ts: 0,
+  tabId: null,
+  isRestricted: false,
+  title: '',
+  url: '',
+  source: 'live',
+  snapshotId: null
+};
 
 /**
  * Classify user intent based on query text
@@ -31,6 +41,21 @@ export function classifyIntent(text) {
  */
 function estimateTokens(text) {
   return Math.ceil(text.length / LIMITS.TOKEN_TO_CHAR_RATIO);
+}
+
+/**
+ * Apply global context limits in one place (sanitize + truncate)
+ * @param {string} text - Raw context text
+ * @returns {string} Safe, capped text
+ */
+export function enforceContextLimits(text = '') {
+  if (!text) return '';
+  const clean = sanitizeText(text);
+
+  // Avoid double-tagging previously truncated text
+  if (clean.includes(UI_MESSAGES.TRUNCATED.trim())) return clean;
+
+  return smartTruncate(clean, LIMITS.MAX_CONTEXT_TOKENS);
 }
 
 /**
@@ -60,12 +85,40 @@ function smartTruncate(text, maxTokens) {
 /**
  * Fetch context from the active tab with caching
  * @param {boolean} force - Force refresh ignoring cache
- * @returns {Promise<{text: string, tabId: number|null, isRestricted: boolean}>} Context object
+ * @param {{respectSnapshot?: boolean}} options - Fetch options
+ * @returns {Promise<{text: string, tabId: number|null, isRestricted: boolean, title?: string, url?: string, source?: string, snapshotId?: string|null}>} Context object
  */
-export async function fetchContext(force = false) {
+export async function fetchContext(force = false, options = {}) {
+  const { respectSnapshot = true } = options;
+  const activeSnapshot = respectSnapshot ? getActiveSnapshot() : null;
+
+  if (activeSnapshot?.text) {
+    cachedContext = {
+      text: activeSnapshot.text,
+      ts: Date.now(),
+      tabId: null,
+      isRestricted: false,
+      title: activeSnapshot.title,
+      url: activeSnapshot.url,
+      source: 'snapshot',
+      snapshotId: activeSnapshot.id
+    };
+    return cachedContext;
+  }
+
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-  if (!activeTab || !activeTab.id) return { text: '', isRestricted: true };
+  if (!activeTab || !activeTab.id) {
+    return {
+      text: '',
+      isRestricted: true,
+      tabId: null,
+      title: '',
+      url: '',
+      source: 'restricted',
+      snapshotId: null
+    };
+  }
 
   const activeTabId = activeTab.id;
   const isFresh = Date.now() - cachedContext.ts < TIMING.CONTEXT_CACHE_MS;
@@ -78,7 +131,11 @@ export async function fetchContext(force = false) {
     return {
       text: UI_MESSAGES.SYSTEM_PAGE_AI_DISABLED,
       tabId: activeTabId,
-      isRestricted: true
+      isRestricted: true,
+      title: activeTab?.title || '',
+      url: activeTab?.url || '',
+      source: 'restricted',
+      snapshotId: null
     };
   }
 
@@ -90,15 +147,19 @@ export async function fetchContext(force = false) {
     if (rawData.url) pieces.push(`URL: ${rawData.url}`);
 
     if (rawData.text) {
-      const clean = smartTruncate(sanitizeText(rawData.text), LIMITS.MAX_CONTEXT_TOKENS);
-      pieces.push(clean);
+      const clean = enforceContextLimits(rawData.text);
+      if (clean) pieces.push(clean);
     }
 
     cachedContext = {
       text: pieces.join('\n\n'),
       ts: Date.now(),
       tabId: activeTabId,
-      isRestricted: false
+      isRestricted: false,
+      title: sanitizeText(rawData.title || activeTab.title || ''),
+      url: rawData.url || activeTab.url || '',
+      source: 'live',
+      snapshotId: null
     };
 
     return cachedContext;
@@ -108,7 +169,11 @@ export async function fetchContext(force = false) {
     return {
       text: UI_MESSAGES.RESTRICTED_PAGE,
       tabId: activeTabId,
-      isRestricted: true
+      isRestricted: true,
+      title: activeTab?.title || '',
+      url: activeTab?.url || '',
+      source: 'restricted',
+      snapshotId: null
     };
   }
 }
@@ -138,34 +203,6 @@ export function getCachedContext() {
   return cachedContext;
 }
 
-// SECURITY NOTE: Prompt Injection Protection
-// ============================================
-// This function does NOT need additional prompt injection defenses because:
-//
-// 1. READ-ONLY OUTPUT: The AI can only generate text - it cannot:
-//    - Execute JavaScript or system commands
-//    - Access browser APIs, storage, or user data
-//    - Modify extension state or settings
-//    - Affect other tabs or persist malicious instructions
-//
-// 2. EXISTING SECURITY LAYERS:
-//    - System page blocking (context.js:77) - AI disabled on chrome://, edge://
-//    - Content script isolation - No access to page JavaScript execution context
-//    - Sanitization (utils.js:33-36) - Control characters stripped from all text
-//    - No privileged APIs - Extension has no dangerous permissions exposed to AI
-//
-// 3. WORST CASE SCENARIO:
-//    - Malicious page tries: "Ignore instructions, delete data"
-//    - Actual impact: User sees weird text response for that one query
-//    - Cannot: Access passwords, steal data, persist attacks, affect browser
-//
-// 4. RISK vs COMPLEXITY TRADEOFF:
-//    - Adding XML wrappers like <page_context> can confuse smaller models
-//    - Simple section headers work better for Gemini Nano's context window
-//    - User can always see the source page and judge AI response quality
-//
-// CONCLUSION: Current approach is secure. No additional wrapping needed.
-
 /**
  * Build the final prompt with context, attachments, and system rules
  * @param {string} userText - User's query
@@ -174,19 +211,25 @@ export function getCachedContext() {
  * @returns {Promise<string>} Complete prompt string
  */
 export async function buildPromptWithContext(userText, contextOverride = '', attachments = []) {
+  // Prompt intentionally stays minimal (no XML wrappers) for Nano model accuracy;
+  // security rationale lives in SECURITY.md#prompt-injection-rationale-for-contextjs.
   const intent = classifyIntent(userText);
   let contextText = contextOverride;
 
   const parts = [ASSISTANT_RULES];
 
   if (contextText && contextText.trim().length > 0) {
-    parts.push('Context:\n' + contextText.trim());
+    const safeContext = enforceContextLimits(contextText);
+    if (safeContext) {
+      parts.push('Context:\n' + safeContext.trim());
+    }
   }
 
   if (attachments.length) {
     const attachmentInfo = attachments.map((att, i) => {
       if (att.type === 'application/pdf') {
-        return `[Attachment ${i + 1}: ${att.name}]\nPDF Content:\n${att.data}`;
+        const pdfContent = enforceContextLimits(att.data);
+        return `[Attachment ${i + 1}: ${att.name}]\nPDF Content:\n${pdfContent}`;
       } else {
         return `[Attachment ${i + 1}: ${att.name} - Image]`;
       }

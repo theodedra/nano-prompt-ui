@@ -26,6 +26,63 @@ export function debounce(func, wait) {
 }
 
 /**
+ * Throttle function execution
+ * @param {Function} func - Function to throttle
+ * @param {number} wait - Minimum time between calls (ms)
+ * @returns {Function & {flush: Function, cancel: Function}} Throttled function with controls
+ */
+export function throttle(func, wait) {
+  let timeout = null;
+  let lastCall = 0;
+  let lastArgs = null;
+  let lastThis = null;
+
+  const invoke = () => {
+    lastCall = Date.now();
+    timeout = null;
+    func.apply(lastThis, lastArgs);
+    lastArgs = lastThis = null;
+  };
+
+  function throttled(...args) {
+    const now = Date.now();
+    const remaining = wait - (now - lastCall);
+    lastArgs = args;
+    lastThis = this;
+
+    if (remaining <= 0 || !timeout) {
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+      invoke();
+    } else if (!timeout) {
+      timeout = setTimeout(invoke, remaining);
+    }
+  }
+
+  throttled.flush = () => {
+    if (lastArgs) {
+      if (timeout) {
+        clearTimeout(timeout);
+        timeout = null;
+      }
+      invoke();
+    }
+  };
+
+  throttled.cancel = () => {
+    if (timeout) {
+      clearTimeout(timeout);
+      timeout = null;
+    }
+    lastArgs = lastThis = null;
+  };
+
+  return throttled;
+}
+
+/**
  * Format timestamp to time string
  * @param {number} ts - Timestamp
  * @returns {string} Formatted time (HH:MM)
@@ -178,22 +235,32 @@ function sanitizeHtmlString(dirtyHtml) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(dirtyHtml, 'text/html');
   const allowedTags = VALIDATION.ALLOWED_HTML_TAGS;
+  const blockedEmbedTags = new Set(['IFRAME', 'OBJECT', 'EMBED', 'STYLE']);
 
   const walker = document.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT);
   const nodesToRemove = [];
 
   while (walker.nextNode()) {
     const node = walker.currentNode;
-    if (!allowedTags.has(node.tagName)) {
+    const tagName = node.tagName;
+
+    if (blockedEmbedTags.has(tagName) || !allowedTags.has(tagName)) {
       nodesToRemove.push(node);
       continue;
     }
+
     // Strip attributes (Allow only href/target/rel on A)
     const attrs = Array.from(node.attributes);
     for (const attr of attrs) {
-      if (node.tagName === 'A' && VALIDATION.ALLOWED_LINK_ATTRIBUTES.includes(attr.name)) {
-        if (attr.name === 'href' && attr.value.trim().toLowerCase().startsWith('javascript:')) {
-            node.removeAttribute('href');
+      const attrName = attr.name.toLowerCase();
+      if (attrName.startsWith('on') || attrName === 'style') {
+        node.removeAttribute(attr.name);
+        continue;
+      }
+
+      if (tagName === 'A' && VALIDATION.ALLOWED_LINK_ATTRIBUTES.includes(attrName)) {
+        if (attrName === 'href' && attr.value.trim().toLowerCase().startsWith('javascript:')) {
+          node.removeAttribute('href');
         }
         continue;
       }

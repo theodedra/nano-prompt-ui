@@ -117,10 +117,11 @@ export const STORAGE_KEYS = {
   SYNC: 'nanoPromptUI.settings.v1',      // Chrome sync storage for settings
   SESSION_DRAFT: 'nanoPromptUI.draft',   // Session storage for context draft
   DB_NAME: 'NanoPromptDB',               // IndexedDB database name
-  DB_VERSION: 1,                         // IndexedDB version
+  DB_VERSION: 2,                         // IndexedDB version
   STORES: {
     SESSIONS: 'sessions',
-    META: 'meta'
+    META: 'meta',
+    ATTACHMENTS: 'attachments'
   }
 };
 
@@ -165,40 +166,6 @@ export const UI_MESSAGES = {
   TRUNCATED: '\n\n[...Content truncated due to length...]',
   SYSTEM_PAGE_AI_DISABLED: '[System Page: AI disabled for security.]',
   RESTRICTED_PAGE: '[Error: Could not read page. Refresh the tab.]',
-};
-
-// ============================================================================
-// CONTENT SCRAPING
-// ============================================================================
-
-export const SCRAPING = {
-  // Selectors for main content (in priority order)
-  MAIN_CONTENT_SELECTORS: [
-    'main',
-    '[role="main"]',
-    '#main',
-    '#content',
-    '.jobs-search-results-list',
-    '.job-view-layout',
-    'article',
-    '.feed-shared-update-v2'
-  ],
-
-  // Tags to exclude from content
-  EXCLUDED_TAGS: ['SCRIPT', 'STYLE', 'NOSCRIPT', 'NAV', 'FOOTER', 'BUTTON', 'SVG', 'PATH'],
-
-  // Noise phrases to filter out
-  NOISE_PHRASES: [
-    'Jump to', 'Skip to', 'main content', 'accessibility',
-    'Easy Apply', 'connections work here', 'Actively reviewing',
-    'results', 'Expired', 'ago', 'See more', 'show more',
-    'Keyboard shortcuts', 'opens in a new window', 'verficiation',
-    'Apply now', 'Save', 'Share'
-  ],
-
-  // Minimum content length before fallback
-  MIN_CONTENT_LENGTH: 50,
-  FALLBACK_MAX_LENGTH: 5_000,
 };
 
 // ============================================================================

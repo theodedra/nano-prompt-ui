@@ -1,15 +1,15 @@
 import * as UI from './ui.js';
 import {
   appState,
-  getCurrentSession,
   getCurrentSessionSync,
   upsertMessage,
   updateMessage,
   saveState,
-  renameSession
+  renameSession,
+  searchSessions
 } from './storage.js';
 import { buildPromptWithContext } from './context.js';
-import { dataUrlToBlob, resizeImage } from './utils.js';
+import { dataUrlToBlob, resizeImage, throttle } from './utils.js';
 import { toast } from './toast.js';
 import {
   MODEL_CONFIG,
@@ -25,13 +25,20 @@ import {
   getSettingOrDefault
 } from './constants.js';
 
+const STREAMING_THROTTLE_MS = 75;
+const DIAGNOSTICS_KEY = 'nanoPrompt.diagnostics';
+let diagnosticsCache = null;
+const SMART_REPLY_LIMIT = 3;
+const SMART_REPLY_CONTEXT_CHARS = 600;
+const SMART_REPLY_MAX_LENGTH = 120;
+
 // --- LOCAL AI WRAPPER ---
 /**
  * Wrapper class for Chrome's AI language model API
  */
 class LocalAI {
   constructor() {
-    this.session = null;
+    this.sessions = new Map();
     this.controller = null; // Track active generation controller
   }
 
@@ -58,38 +65,45 @@ class LocalAI {
 
   /**
    * Create a new AI session with configuration
+   * Sessions are scoped to UI session IDs to avoid cross-chat bleed
+   * @param {string} sessionId - UI session ID
    * @param {object} params - Session parameters
    * @returns {Promise<object>} AI session object
    */
-  async createSession(params = {}) {
+  async getOrCreateSession(sessionId, params = {}) {
+    if (!sessionId) throw new Error('Missing session id');
+    if (this.sessions.has(sessionId)) return this.sessions.get(sessionId);
     if (!this.engine) throw new Error('AI not supported');
     const config = { ...MODEL_CONFIG, ...params };
-    this.session = await this.engine.create(config);
-    return this.session;
+    const session = await this.engine.create(config);
+    this.sessions.set(sessionId, session);
+    return session;
   }
 
   /**
    * Non-streaming prompt for faster responses (used for images)
+   * @param {string} sessionId - UI session ID to route to the right LM session
    * @param {string|Array} input - Prompt text or array with text and blobs
    * @param {AbortSignal} signal - Abort signal for cancellation
    * @returns {Promise<string>} Complete response text
    */
-  async prompt(input, signal) {
-    if (!this.session) throw new Error('No active session');
-    return await this.session.prompt(input, { signal });
+  async prompt(sessionId, input, signal, params = {}) {
+    const session = await this.getOrCreateSession(sessionId, params);
+    return await session.prompt(input, { signal });
   }
 
   /**
    * Stream AI response with real-time updates
+   * @param {string} sessionId - UI session ID to route to the right LM session
    * @param {string|Array} input - Prompt text or array with text and blobs
    * @param {AbortSignal} signal - Abort signal for cancellation
    * @param {Function} onUpdate - Callback for each chunk
    * @returns {Promise<string>} Complete response text
    */
-  async promptStreaming(input, signal, onUpdate) {
-    if (!this.session) throw new Error('No active session');
+  async promptStreaming(sessionId, input, signal, onUpdate, params = {}) {
+    const session = await this.getOrCreateSession(sessionId, params);
 
-    const stream = await this.session.promptStreaming(input, { signal });
+    const stream = await session.promptStreaming(input, { signal });
     const reader = stream.getReader();
 
     let fullText = '';
@@ -113,15 +127,143 @@ class LocalAI {
   /**
    * Destroy the current AI session and clean up resources
    */
-  destroy() {
-    if (this.session) {
-      try { this.session.destroy(); } catch(e) {}
-      this.session = null;
+  destroy(sessionId = null) {
+    if (sessionId) {
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        try { session.destroy(); } catch(e) {}
+      }
+      this.sessions.delete(sessionId);
+      if (this.controller) {
+        try { this.controller.abort(); } catch(e) {}
+        this.controller = null;
+      }
+      return;
+    }
+
+    this.sessions.forEach((session) => {
+      try { session.destroy(); } catch(e) {}
+    });
+    this.sessions.clear();
+
+    if (this.controller) {
+      try { this.controller.abort(); } catch(e) {}
+      this.controller = null;
     }
   }
 }
 
 const localAI = new LocalAI();
+
+/**
+ * Load diagnostics state from storage (cached)
+ * @returns {Promise<Object>} Diagnostics state
+ */
+async function getDiagnosticsState() {
+  if (diagnosticsCache) return diagnosticsCache;
+  try {
+    const stored = await chrome.storage.local.get(DIAGNOSTICS_KEY);
+    diagnosticsCache = stored[DIAGNOSTICS_KEY] || {};
+  } catch (e) {
+    diagnosticsCache = {};
+  }
+  return diagnosticsCache;
+}
+
+/**
+ * Persist diagnostics state
+ * @param {Object} partial - Partial update
+ * @returns {Promise<Object>} Updated state
+ */
+async function saveDiagnosticsState(partial = {}) {
+  const current = await getDiagnosticsState();
+  diagnosticsCache = { ...current, ...partial };
+  try {
+    await chrome.storage.local.set({ [DIAGNOSTICS_KEY]: diagnosticsCache });
+  } catch (e) {
+    // Non-critical: ignore storage errors
+  }
+  return diagnosticsCache;
+}
+
+/**
+ * Map availability status to user-friendly label
+ * @param {string} status - Raw availability
+ * @returns {string} Display label
+ */
+function describeAvailability(status) {
+  if (status === 'readily') return UI_MESSAGES.READY;
+  if (status === 'after-download') return 'After download';
+  if (status === 'no') return UI_MESSAGES.PAGE_MODE;
+  if (!status) return 'Unknown';
+  return status;
+}
+
+function hasCachedAvailability() {
+  return Boolean(
+    appState.availability &&
+    appState.availability !== 'unknown' &&
+    appState.availabilityCheckedAt
+  );
+}
+
+function setAvailabilityCache(status, checkedAt) {
+  appState.availability = status || 'unknown';
+  appState.availabilityCheckedAt = checkedAt || null;
+}
+
+function updateAvailabilityUI(rawStatus, checkedAt, diag = {}) {
+  const status = rawStatus || 'unknown';
+  const label = describeAvailability(status);
+  const lastChecked = checkedAt ?? diag.availabilityCheckedAt ?? null;
+
+  setAvailabilityCache(status, lastChecked);
+  UI.setStatusText(label);
+  UI.setHardwareStatus(`Gemini Nano: ${label}`);
+  UI.updateDiagnostics({
+    ...diag,
+    availability: status,
+    availabilityCheckedAt: lastChecked,
+    availabilityLabel: label
+  });
+
+  return label;
+}
+
+/**
+ * Clear page-context AI sessions used by the fallback path
+ * @param {string|null} sessionId - Specific UI session to clear (or all)
+ */
+async function clearPageModelSessions(sessionId = null) {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) return;
+
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      world: 'MAIN',
+      func: (id) => {
+        const store = window.__nanoPageSessions || {};
+        const destroySession = (sess) => {
+          try { sess.destroy(); } catch {}
+        };
+
+        if (id) {
+          if (store[id]) destroySession(store[id]);
+          delete store[id];
+        } else {
+          Object.keys(store).forEach((key) => destroySession(store[key]));
+          for (const key of Object.keys(store)) delete store[key];
+        }
+
+        window.__nanoPageSessions = store;
+      },
+      args: [sessionId]
+    });
+  } catch (e) {
+    console.warn('Page session cleanup failed', e);
+  }
+}
 
 /**
  * Get session configuration from app state
@@ -152,28 +294,91 @@ function getSessionConfig() {
  * @param {object} session - Current session object
  * @returns {string} Formatted history snippet
  */
-function getHistorySnippet(session) {
-  const slice = session.messages.slice(-50);
-  return slice.map(m => `${m.role === 'user' ? 'User' : 'Nano'}: ${m.text}`).join('\n');
+export function resetModel(sessionId = null) {
+  localAI.destroy(sessionId);
+  clearPageModelSessions(sessionId).catch((e) => {
+    console.warn('Failed to clear page model sessions', e);
+  });
 }
-
-// --- EXPORTS ---
-
-/**
- * Reset and destroy the current AI model session
- */
-export function resetModel() { localAI.destroy(); }
 
 /**
  * Check and update AI availability status in UI
  * @returns {Promise<void>}
  */
-export async function refreshAvailability() {
-  let status = await localAI.getAvailability();
-  if (status === 'no') status = UI_MESSAGES.PAGE_MODE;
-  const text = status === 'readily' ? UI_MESSAGES.READY : status;
-  UI.setStatusText(text);
-  UI.setHardwareStatus(`Gemini Nano: ${text}`);
+export async function refreshAvailability({ forceCheck = false } = {}) {
+  let diag = await getDiagnosticsState();
+  let rawStatus = appState.availability;
+  let checkedAt = appState.availabilityCheckedAt;
+
+  const shouldCheck = forceCheck || !hasCachedAvailability();
+  if (shouldCheck) {
+    rawStatus = await localAI.getAvailability();
+    checkedAt = Date.now();
+    diag = await saveDiagnosticsState({
+      availability: rawStatus,
+      availabilityCheckedAt: checkedAt
+    });
+  }
+
+  updateAvailabilityUI(rawStatus, checkedAt, diag);
+}
+
+/**
+ * Get diagnostics snapshot for settings UI
+ * @returns {Promise<Object>} Diagnostics payload
+ */
+export async function getDiagnostics() {
+  const diag = await getDiagnosticsState();
+  const availability = appState.availability || diag.availability;
+  const availabilityCheckedAt = appState.availabilityCheckedAt || diag.availabilityCheckedAt;
+  const availabilityLabel = describeAvailability(availability || diag.availability);
+
+  return {
+    ...diag,
+    availability,
+    availabilityCheckedAt,
+    availabilityLabel
+  };
+}
+
+/**
+ * Trigger an on-demand warmup and record diagnostics
+ * @returns {Promise<Object>} Updated diagnostics
+ */
+export async function warmUpModel() {
+  const now = Date.now();
+  const availability = await localAI.getAvailability();
+  let warmupStatus = 'unavailable';
+  let warmupError = '';
+
+  if (!localAI.engine || availability === 'no') {
+    warmupError = 'Prompt API not available in this Chrome build.';
+  } else if (availability === 'after-download') {
+    warmupStatus = 'awaiting-download';
+    warmupError = 'Model needs to finish downloading before warmup.';
+  } else {
+    warmupStatus = 'success';
+    try {
+      const session = await localAI.engine.create({
+        ...MODEL_CONFIG,
+        systemPrompt: 'Warmup check'
+      });
+      if (session?.destroy) await session.destroy();
+    } catch (e) {
+      warmupStatus = 'error';
+      warmupError = e?.message || e?.toString() || 'Warmup failed';
+    }
+  }
+
+  const diag = await saveDiagnosticsState({
+    availability,
+    availabilityCheckedAt: now,
+    lastWarmupAt: now,
+    lastWarmupStatus: warmupStatus,
+    lastWarmupError: warmupError
+  });
+  const availabilityLabel = updateAvailabilityUI(availability, now, diag);
+  return { ...diag, availabilityLabel };
 }
 
 /**
@@ -247,7 +452,7 @@ export async function runTranslator(text) {
       };
       upsertMessage(session.id, userMessage);
       upsertMessage(session.id, aiMessage);
-      UI.renderLog();
+      UI.renderLog(session);
       UI.setBusy(false);
       UI.setStatusText('Ready to chat.');
       await saveState();
@@ -290,7 +495,7 @@ export async function runTranslator(text) {
 
     upsertMessage(session.id, userMessage);
     upsertMessage(session.id, aiMessage);
-    UI.renderLog();
+    UI.renderLog(session);
     await saveState();
 
     UI.setBusy(false);
@@ -322,6 +527,7 @@ export async function runTranslator(text) {
  */
 export async function runImageDescription(url) {
   UI.setStatusText(UI_MESSAGES.ANALYZING_IMAGE);
+  const session = getCurrentSessionSync();
 
   try {
     // 1. Smart Fetch
@@ -335,7 +541,7 @@ export async function runImageDescription(url) {
     };
 
     // 3. Reset model to clear memory before image task
-    resetModel();
+    resetModel(session.id);
 
     // runPrompt will handle status updates from here
     await runPrompt({
@@ -348,14 +554,13 @@ export async function runImageDescription(url) {
     console.error(e);
     UI.setStatusText(UI_MESSAGES.ERROR);
     toast.error(USER_ERROR_MESSAGES.IMAGE_PROCESSING_FAILED);
-    resetModel();
-    const session = getCurrentSessionSync();
+    resetModel(session.id);
     upsertMessage(session.id, {
       role: 'ai',
       text: `**Image Error:** ${e.message}.`,
       ts: Date.now()
     });
-    UI.renderLog();
+    UI.renderLog(session);
   }
 }
 
@@ -477,11 +682,13 @@ async function fetchImageWithRetry(url) {
  */
 export async function runPrompt({ text, contextOverride, attachments, displayText = null }) {
   const session = getCurrentSessionSync();
+  clearSmartReplies(session.id);
   // Use displayText for chat history if provided, otherwise use text
   const userMessage = { role: 'user', text: displayText || text, ts: Date.now(), attachments };
 
   upsertMessage(session.id, userMessage);
-  UI.renderLog();
+  UI.renderLog(session);
+  UI.renderSmartReplies([]);
   // PERFORMANCE: Don't block on saveState - save in background after streaming
   // await saveState();  // REMOVED - moved to end of function
 
@@ -491,7 +698,7 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
 
   const aiMessageIndex = session.messages.length;
   upsertMessage(session.id, { role: 'ai', text: '', ts: Date.now() });
-  UI.renderLog();
+  UI.renderLog(session);
 
   // RACE CONDITION FIX: Cancel any existing generation before starting new one
   if (localAI.controller) {
@@ -504,11 +711,12 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
 
   const controller = new AbortController();
   localAI.controller = controller;
+  let lastAiText = '';
+  let generationAborted = false;
 
   try {
-    const fullContext = await buildPromptWithContext(text, contextOverride, attachments);
-    const history = getHistorySnippet(session);
-    const finalText = `${fullContext}\n\nConversation History:\n${history}\n\nCurrent User Query:\n${text}`;
+    const sessionConfig = getSessionConfig();
+    const finalText = await buildPromptWithContext(text, contextOverride, attachments);
 
     // Separate images from PDFs (PDFs are already text, included in finalText)
     const imageAttachments = attachments?.filter(att => att.type.startsWith('image/')) || [];
@@ -538,17 +746,29 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
       }
     }
 
-    try {
-        if (!localAI.session) await localAI.createSession(getSessionConfig());
+    const throttledUpdate = throttle((chunk) => {
+      updateMessage(session.id, aiMessageIndex, { text: chunk });
+      UI.updateLastMessageBubble(session, chunk, { streaming: true });
+    }, STREAMING_THROTTLE_MS);
 
+    try {
         UI.setStatusText('Generating response...');
 
-        await localAI.promptStreaming(promptInput, controller.signal, (chunk) => {
-            updateMessage(session.id, aiMessageIndex, { text: chunk });
-            UI.updateLastMessageBubble(chunk);
-        });
+        const streamedText = await localAI.promptStreaming(
+          session.id,
+          promptInput,
+          controller.signal,
+          (chunk) => { throttledUpdate(chunk); },
+          sessionConfig
+        );
+
+        throttledUpdate.flush();
+        updateMessage(session.id, aiMessageIndex, { text: streamedText });
+        UI.updateLastMessageBubble(session, streamedText);
+        lastAiText = streamedText;
 
     } catch (err) {
+        throttledUpdate.flush();
         if (err?.name === 'AbortError') throw err;
         console.error("Side Panel failed with error:", err);
         console.error("Error name:", err?.name, "Message:", err?.message);
@@ -561,22 +781,26 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
 
         // Try fallback for non-image prompts (images don't work in page context)
         if (imageAttachments.length === 0) {
-          const fallback = await runPromptInPage(finalText, attachments);
+          const fallback = await runPromptInPage(finalText, session.id, attachments);
           updateMessage(session.id, aiMessageIndex, { text: fallback });
-          UI.updateLastMessageBubble(fallback);
+          UI.updateLastMessageBubble(session, fallback);
+          lastAiText = fallback;
         } else {
           // Image prompts failed - can't use page fallback
           console.error("Image prompt failed, cannot use fallback. Original error:", err);
           throw new Error(`Image analysis failed: ${err?.message || 'Unknown error'}`);
         }
+    } finally {
+        throttledUpdate.cancel();
     }
 
   } catch (err) {
     cancelGeneration();
-    resetModel();
+    resetModel(session.id);
 
     // STOP FIX: Keep existing text and append stopped message instead of replacing
     if (err?.name === 'AbortError') {
+      generationAborted = true;
       const currentMessage = session.messages[aiMessageIndex];
       const currentText = currentMessage?.text || '';
 
@@ -584,17 +808,17 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
       if (currentText && currentText.trim().length > 0) {
         const stoppedText = currentText + '\n\n' + UI_MESSAGES.STOPPED;
         updateMessage(session.id, aiMessageIndex, { text: stoppedText });
-        UI.updateLastMessageBubble(stoppedText);
+        UI.updateLastMessageBubble(session, stoppedText);
       } else {
         // If no content was generated, show stopped message
         updateMessage(session.id, aiMessageIndex, { text: UI_MESSAGES.STOPPED });
-        UI.updateLastMessageBubble(UI_MESSAGES.STOPPED);
+        UI.updateLastMessageBubble(session, UI_MESSAGES.STOPPED);
       }
     } else {
       // For other errors, show error message
       let msg = err.message || USER_ERROR_MESSAGES.AI_UNAVAILABLE;
       updateMessage(session.id, aiMessageIndex, { text: `Error: ${msg}` });
-      UI.updateLastMessageBubble(`Error: ${msg}`);
+      UI.updateLastMessageBubble(session, `Error: ${msg}`);
       toast.error(msg);
     }
   } finally {
@@ -609,6 +833,11 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
   UI.setStatusText('Ready to chat.');
   await saveState();
 
+  if (!generationAborted && lastAiText) {
+    generateSmartRepliesForMessage(session.id, userMessage.text, lastAiText, aiMessageIndex)
+      .catch((e) => console.warn('Smart reply generation failed', e));
+  }
+
   // AUTO-NAMING: Generate title after first AI response
   // Only trigger if this is the first complete exchange (2 messages: user + ai)
   if (session.messages.length === 2) {
@@ -622,10 +851,11 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
 /**
  * Fallback: Run prompt using window.ai in page context
  * @param {string} prompt - Prompt text
+ * @param {string} sessionId - UI session ID for per-chat isolation
  * @param {Array} attachments - Attached files
  * @returns {Promise<string>} AI response
  */
-async function runPromptInPage(prompt, attachments = []) {
+async function runPromptInPage(prompt, sessionId, attachments = []) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.url.startsWith('http')) {
     toast.error(USER_ERROR_MESSAGES.AI_SYSTEM_PAGE);
@@ -651,15 +881,24 @@ async function runPromptInPage(prompt, attachments = []) {
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     world: 'MAIN',  // DO NOT CHANGE - Required for window.ai API access
-    func: async (p, sys, atts) => {
+    func: async (p, sys, atts, uiSessionId) => {
       try {
         const model = window.ai?.languageModel || self.ai?.languageModel;
         if (!model) return { error: 'AI not found in page' };
 
-        const sess = await model.create({
-          systemPrompt: sys,
-          expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }]
-        });
+        const storeKey = '__nanoPageSessions';
+        const store = window[storeKey] || (window[storeKey] = {});
+
+        if (!uiSessionId) return { error: 'Missing session id' };
+
+        let sess = store[uiSessionId];
+        if (!sess) {
+          sess = await model.create({
+            systemPrompt: sys,
+            expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }]
+          });
+          store[uiSessionId] = sess;
+        }
 
         let input = p;
         if (atts && atts.length > 0) {
@@ -671,11 +910,20 @@ async function runPromptInPage(prompt, attachments = []) {
         }
 
         const r = await sess.prompt(input);
-        sess.destroy();
         return { ok: true, data: r };
-      } catch (e) { return { error: e.toString() }; }
+      } catch (e) {
+        // Clean up failed sessions so future calls can recreate cleanly
+        const storeKey = '__nanoPageSessions';
+        const store = window[storeKey] || {};
+        if (uiSessionId && store[uiSessionId]) {
+          try { store[uiSessionId].destroy(); } catch {}
+          delete store[uiSessionId];
+        }
+        window[storeKey] = store;
+        return { error: e.toString() };
+      }
     },
-    args: [prompt, appState.settings.systemPrompt, attachments]
+    args: [prompt, appState.settings.systemPrompt, attachments, sessionId]
   });
 
   if (result?.error) {
@@ -709,7 +957,7 @@ export function cancelGeneration() {
  * @returns {Promise<void>}
  */
 export async function summarizeActiveTab(contextOverride) {
-  resetModel();
+  resetModel(appState.currentSessionId);
   await runPrompt({ text: 'Summarize the current tab in seven detailed bullet points.', contextOverride, attachments: [] });
 }
 
@@ -838,7 +1086,17 @@ AI: ${aiMsg.text.slice(0, LIMITS.TITLE_GENERATION_MAX_CHARS)}`;
     // Update session title
     renameSession(sessionId, title);
     await saveState();
-    UI.renderSessions();
+    const searchTerm = UI.getSessionSearchTerm();
+    const matches = searchSessions(searchTerm);
+    const current = getCurrentSessionSync();
+    UI.renderSessions({
+      sessions: appState.sessions,
+      sessionMeta: appState.sessionMeta,
+      currentSessionId: appState.currentSessionId,
+      currentTitle: current?.title,
+      matches,
+      searchTerm
+    });
 
   } catch (e) {
     // Silent fail - title generation is not critical
@@ -886,4 +1144,71 @@ async function blobToCanvas(blob, maxWidth) {
 
     img.src = URL.createObjectURL(blob);
   });
+}
+
+function clearSmartReplies(sessionId) {
+  try {
+    const session = appState.sessions[sessionId];
+    if (!session) return;
+    for (let i = session.messages.length - 1; i >= 0; i--) {
+      const msg = session.messages[i];
+      if (msg.role !== 'ai') continue;
+      if (msg.smartReplies?.length) {
+        updateMessage(sessionId, i, { smartReplies: [] });
+      }
+      break;
+    }
+  } catch (e) {
+    console.warn('Failed to clear smart replies', e);
+  } finally {
+    UI.renderSmartReplies([]);
+  }
+}
+
+function normalizeSmartReplies(rawText = '') {
+  if (!rawText) return [];
+  return rawText
+    .split('\n')
+    .map(line => line.replace(/^\s*[-*\d.]+\s*/, '').trim())
+    .filter(Boolean)
+    .slice(0, SMART_REPLY_LIMIT)
+    .map(line => line.slice(0, SMART_REPLY_MAX_LENGTH));
+}
+
+function buildSmartReplyPrompt(userText, aiText) {
+  const trim = (val = '') => val.length > SMART_REPLY_CONTEXT_CHARS
+    ? `${val.slice(0, SMART_REPLY_CONTEXT_CHARS)}...`
+    : val;
+
+  return `Suggest ${SMART_REPLY_LIMIT} concise, actionable follow-up prompts the user might tap next. ` +
+    `Write each as something the user would send to the assistant (commands/questions to the assistant), ` +
+    `not as questions from the assistant to the user. Avoid yes/no confirmations, avoid repeating the last answer, ` +
+    `and keep each under 12 words. Return one suggestion per line with no numbering or bullets.\n\n` +
+    `User: ${trim(userText || '')}\nAssistant: ${trim(aiText || '')}`;
+}
+
+async function generateSmartRepliesForMessage(sessionId, userText, aiText, aiIndex) {
+  if (!localAI.engine) return;
+  const prompt = buildSmartReplyPrompt(userText, aiText);
+  const baseConfig = getSessionConfig();
+  const isCurrentSession = appState.currentSessionId === sessionId;
+  const config = {
+    ...baseConfig,
+    temperature: Math.max(0.3, (baseConfig.temperature || DEFAULT_SETTINGS.temperature) - 0.2),
+    topK: 32,
+    systemPrompt: 'You propose short, helpful follow-up prompts for the user to click.'
+  };
+
+  const suggestionSession = await localAI.engine.create(config);
+  try {
+    const raw = await suggestionSession.prompt(prompt);
+    const replies = normalizeSmartReplies(raw);
+    updateMessage(sessionId, aiIndex, { smartReplies: replies });
+    if (isCurrentSession) {
+      UI.renderSmartReplies(replies);
+    }
+    await saveState();
+  } finally {
+    try { await suggestionSession.destroy(); } catch {}
+  }
 }

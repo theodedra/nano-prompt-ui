@@ -1,5 +1,7 @@
 import * as UI from './ui.js';
-import * as Handlers from './handlers.js';
+import * as ChatHandlers from './chat-handlers.js';
+import * as AttachmentHandlers from './attachment-handlers.js';
+import * as SettingsHandlers from './settings-handlers.js';
 import { refreshAvailability } from './model.js';
 
 function bind(selector, event, handler) {
@@ -9,51 +11,57 @@ function bind(selector, event, handler) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   UI.initUI();
-  await Handlers.bootstrap();
-  await refreshAvailability();
+  await ChatHandlers.bootstrap();
+  await refreshAvailability({ forceCheck: true });
 
   // --- EVENT BINDINGS ---
   const bindings = [
-    { sel: '#ask', ev: 'click', fn: Handlers.handleAskClick },
-    { sel: '#sum', ev: 'click', fn: Handlers.handleSummarizeClick },
-    { sel: '#copy', ev: 'click', fn: Handlers.handleCopyChatClick },
-    { sel: '#save-md', ev: 'click', fn: Handlers.handleSaveMarkdown },
-    { sel: '#log', ev: 'click', fn: Handlers.handleLogClick },
+    { sel: '#ask', ev: 'click', fn: ChatHandlers.handleAskClick },
+    { sel: '#sum', ev: 'click', fn: ChatHandlers.handleSummarizeClick },
+    { sel: '#copy', ev: 'click', fn: ChatHandlers.handleCopyChatClick },
+    { sel: '#save-md', ev: 'click', fn: ChatHandlers.handleSaveMarkdown },
+    { sel: '#log', ev: 'click', fn: ChatHandlers.handleLogClick },
     
     // Dropdown Triggers (Generic)
-    { sel: '#templates-trigger', ev: 'click', fn: (e) => { e.stopPropagation(); UI.toggleMenu('templates'); } },
-    { sel: '#templates-menu', ev: 'click', fn: Handlers.handleTemplateSelect },
-    { sel: '#session-trigger', ev: 'click', fn: (e) => { e.stopPropagation(); UI.toggleMenu('session'); } },
-    { sel: '#session-menu', ev: 'click', fn: Handlers.handleSessionMenuClick },
-    { sel: '#new-session', ev: 'click', fn: Handlers.handleNewSessionClick },
-    { sel: '#language-trigger', ev: 'click', fn: (e) => { e.stopPropagation(); UI.toggleMenu('language'); } },
-    { sel: '#language-menu', ev: 'click', fn: Handlers.handleLanguageSelect },
-    { sel: '#theme-trigger', ev: 'click', fn: (e) => { e.stopPropagation(); UI.toggleMenu('theme'); } },
-    { sel: '#theme-menu', ev: 'click', fn: Handlers.handleThemeSelect },
+    { sel: '#templates-trigger', ev: 'click', fn: ChatHandlers.handleTemplatesTriggerClick },
+    { sel: '#templates-menu', ev: 'click', fn: ChatHandlers.handleTemplateSelect },
+    { sel: '#session-trigger', ev: 'click', fn: ChatHandlers.handleSessionTriggerClick },
+    { sel: '#session-menu', ev: 'click', fn: ChatHandlers.handleSessionMenuClick },
+    { sel: '#session-search', ev: 'input', fn: ChatHandlers.handleSessionSearchInput },
+    { sel: '#new-session', ev: 'click', fn: ChatHandlers.handleNewSessionClick },
+    { sel: '#language-trigger', ev: 'click', fn: SettingsHandlers.handleLanguageTriggerClick },
+    { sel: '#language-menu', ev: 'click', fn: SettingsHandlers.handleLanguageSelect },
+    { sel: '#theme-trigger', ev: 'click', fn: SettingsHandlers.handleThemeTriggerClick },
+    { sel: '#theme-menu', ev: 'click', fn: SettingsHandlers.handleThemeSelect },
 
     // Media & Inputs
-    { sel: '#attach', ev: 'click', fn: Handlers.handleAttachClick },
-    { sel: '#file-input', ev: 'change', fn: Handlers.handleFileInputChange },
-    { sel: '#attachment-list', ev: 'click', fn: Handlers.handleAttachmentListClick },
-    { sel: '#mic', ev: 'click', fn: Handlers.handleMicClick },
-    { sel: '#speak-last', ev: 'click', fn: Handlers.handleSpeakLast },
-    { sel: '#stop', ev: 'click', fn: Handlers.handleStopClick },
+    { sel: '#attach', ev: 'click', fn: AttachmentHandlers.handleAttachClick },
+    { sel: '#file-input', ev: 'change', fn: AttachmentHandlers.handleFileInputChange },
+    { sel: '#attachment-list', ev: 'click', fn: AttachmentHandlers.handleAttachmentListClick },
+    { sel: '#mic', ev: 'click', fn: ChatHandlers.handleMicClick },
+    { sel: '#speak-last', ev: 'click', fn: ChatHandlers.handleSpeakLast },
+    { sel: '#stop', ev: 'click', fn: ChatHandlers.handleStopClick },
     
     // Context
-    { sel: '#toggle-context', ev: 'click', fn: Handlers.handleToggleContext },
-    { sel: '#context-text', ev: 'input', fn: Handlers.handleContextInput },
-    { sel: '#context-text', ev: 'blur', fn: Handlers.handleContextBlur },
-    { sel: '#context-modal', ev: 'click', fn: Handlers.handleModalClick },
+    { sel: '#toggle-context', ev: 'click', fn: ChatHandlers.handleToggleContext },
+    { sel: '#context-text', ev: 'input', fn: ChatHandlers.handleContextInput },
+    { sel: '#context-text', ev: 'blur', fn: ChatHandlers.handleContextBlur },
+    { sel: '#context-modal', ev: 'click', fn: ChatHandlers.handleModalClick },
+    { sel: '#save-context-snapshot', ev: 'click', fn: ChatHandlers.handleSaveSnapshotClick },
+    { sel: '#use-live-context', ev: 'click', fn: ChatHandlers.handleUseLiveContext },
+    { sel: '#context-snapshot-list', ev: 'click', fn: ChatHandlers.handleSnapshotListClick },
 
     // Settings
-    { sel: '#open-settings', ev: 'click', fn: Handlers.handleOpenSettings },
-    { sel: '#close-settings', ev: 'click', fn: Handlers.handleCloseSettings },
-    { sel: '#save-settings', ev: 'click', fn: Handlers.handleSaveSettings },
-    { sel: '#settings-modal', ev: 'click', fn: Handlers.handleModalClick },
+    { sel: '#open-settings', ev: 'click', fn: SettingsHandlers.handleOpenSettings },
+    { sel: '#close-settings', ev: 'click', fn: SettingsHandlers.handleCloseSettings },
+    { sel: '#save-settings', ev: 'click', fn: SettingsHandlers.handleSaveSettings },
+    { sel: '#settings-modal', ev: 'click', fn: ChatHandlers.handleModalClick },
+    { sel: '#refresh-diagnostics', ev: 'click', fn: SettingsHandlers.handleDiagnosticsRefresh },
+    { sel: '#warmup-now', ev: 'click', fn: SettingsHandlers.handleWarmupClick },
 
     // Setup Guide
-    { sel: '#open-setup-guide', ev: 'click', fn: Handlers.handleOpenSetupGuide },
-    { sel: '#setup-guide-modal', ev: 'click', fn: Handlers.handleModalClick }
+    { sel: '#open-setup-guide', ev: 'click', fn: SettingsHandlers.handleOpenSetupGuide },
+    { sel: '#setup-guide-modal', ev: 'click', fn: ChatHandlers.handleModalClick }
   ];
 
   // --- APPLY BINDINGS ---
@@ -61,12 +69,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // --- GLOBAL LISTENERS ---
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('#templates-dropdown')) UI.closeMenu('templates');
-    if (!e.target.closest('#session-dropdown')) UI.closeMenu('session');
-    if (!e.target.closest('#language-dropdown')) UI.closeMenu('language');
-    if (!e.target.closest('#theme-dropdown')) UI.closeMenu('theme');
+    ChatHandlers.handleDocumentClick(e);
+    SettingsHandlers.handleDocumentClick(e);
   });
 
-  document.getElementById('in')?.addEventListener('keydown', Handlers.handleInputKeyDown);
-  document.addEventListener('keydown', Handlers.handleDocumentKeyDown, true);
+  document.getElementById('in')?.addEventListener('keydown', ChatHandlers.handleInputKeyDown);
+  document.addEventListener('keydown', ChatHandlers.handleDocumentKeyDown, true);
 });

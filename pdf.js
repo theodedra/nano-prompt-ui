@@ -3,11 +3,13 @@
 
 import { LIMITS } from './constants.js';
 
+const PDF_CHAR_SAFETY_MARGIN = 2_000;
+
 /**
  * Extract text content from a PDF file
  * Uses Mozilla's pdf.js library loaded from local lib folder
  * @param {File} file - PDF file object
- * @returns {Promise<string>} Extracted text content
+ * @returns {Promise<{ text: string, meta: { truncated: boolean, pagesProcessed: number, totalPagesEstimate: number, charsUsed: number } }>} Extracted text content and truncation metadata
  */
 export async function extractPdfText(file) {
   try {
@@ -33,8 +35,16 @@ export async function extractPdfText(file) {
     // Extract text from all pages
     const textParts = [];
     const numPages = Math.min(pdf.numPages, LIMITS.PDF_MAX_PAGES || 50);
+    let collectedLength = 0;
+    let pagesProcessed = 0;
+    let hitEarlyExit = false;
 
     for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+      if (collectedLength > LIMITS.PDF_MAX_CHARS + PDF_CHAR_SAFETY_MARGIN) {
+        hitEarlyExit = true;
+        break;
+      }
+
       const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
 
@@ -45,18 +55,59 @@ export async function extractPdfText(file) {
         .trim();
 
       if (pageText) {
-        textParts.push(`--- Page ${pageNum} ---\n${pageText}`);
+        const chunk = `--- Page ${pageNum} ---\n${pageText}`;
+        const separatorLength = textParts.length > 0 ? 2 : 0; // account for join '\n\n'
+        const remainingBudget = (LIMITS.PDF_MAX_CHARS + PDF_CHAR_SAFETY_MARGIN) - collectedLength - separatorLength;
+
+        if (remainingBudget <= 0) {
+          hitEarlyExit = true;
+          break;
+        }
+
+        const chunkToAdd = chunk.length > remainingBudget ? chunk.slice(0, Math.max(remainingBudget, 0)) : chunk;
+        if (!chunkToAdd) {
+          hitEarlyExit = true;
+          break;
+        }
+
+        collectedLength += separatorLength + chunkToAdd.length;
+        textParts.push(chunkToAdd);
+        pagesProcessed++;
+
+        if (chunkToAdd.length < chunk.length || collectedLength > LIMITS.PDF_MAX_CHARS + PDF_CHAR_SAFETY_MARGIN) {
+          hitEarlyExit = true;
+          break;
+        }
       }
     }
 
     const fullText = textParts.join('\n\n');
+    const wasClamped = fullText.length > LIMITS.PDF_MAX_CHARS;
+    const clampedText = wasClamped ? fullText.slice(0, LIMITS.PDF_MAX_CHARS) : fullText;
+    const truncated = hitEarlyExit || wasClamped || pdf.numPages > numPages;
 
     // Truncate if too long
-    if (fullText.length > LIMITS.PDF_MAX_CHARS) {
-      return fullText.slice(0, LIMITS.PDF_MAX_CHARS) + '\n\n[...PDF content truncated due to length...]';
+    if (wasClamped) {
+      return {
+        text: clampedText + '\n\n[...PDF content truncated due to length...]',
+        meta: {
+          truncated: true,
+          pagesProcessed,
+          totalPagesEstimate: pdf.numPages,
+          charsUsed: Math.min(clampedText.length, LIMITS.PDF_MAX_CHARS)
+        }
+      };
     }
 
-    return fullText || '[PDF appears to be empty or contains only images]';
+    return {
+      text: fullText || '[PDF appears to be empty or contains only images]',
+      meta: {
+        truncated,
+        pagesProcessed,
+        totalPagesEstimate: pdf.numPages,
+        charsUsed: Math.min((fullText || '').length, LIMITS.PDF_MAX_CHARS)
+      }
+    };
 
   } catch (error) {
     console.error('PDF extraction failed:', error);

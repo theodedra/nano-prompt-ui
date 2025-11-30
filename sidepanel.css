@@ -166,6 +166,33 @@ body {
 }
 .copy1 button:hover { background-color: var(--surface-3); }
 
+.smart-replies {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.smart-replies-label {
+  font-size: 12px;
+  color: var(--on-bg-dim);
+  letter-spacing: 0.2px;
+}
+
+.smart-reply-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.smart-reply-btn {
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
 /* --- LOADING ANIMATION --- */
 .loading-dots {
   display: inline-flex;
@@ -324,12 +351,37 @@ ul.dropdown-menu, ul.attachment-list { list-style: none; padding: 0; margin: 0; 
 .dropdown-item:hover { background-color: var(--surface-3); }
 
 /* Session List */
+.session-search {
+  padding: 4px 6px 8px;
+}
+.session-search input {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: none;
+  background-color: var(--surface-3);
+  color: var(--on-bg);
+  font: inherit;
+}
+.session-search input:focus {
+  outline: none;
+  background-color: var(--surface-hover);
+}
+
 .session-row {
   display: flex; align-items: center; justify-content: space-between; 
   padding: 8px 12px; border-radius: 8px; cursor: pointer; gap: 12px;
 }
 .session-row:hover { background-color: var(--surface-3); }
 .session-row.active { background-color: var(--surface); }
+
+.session-empty {
+  padding: 10px 12px;
+  color: var(--on-bg-dim);
+  font-size: 12px;
+  text-align: center;
+  cursor: default;
+}
 
 .session-info { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
 .session-title { font-size: 13px; font-weight: 500; color: var(--on-bg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -427,6 +479,11 @@ input[type="range"] { accent-color: var(--on-bg); }
   font-size: 11px;
   color: var(--accent);
 }
+
+.diagnostics-block { margin-top: 12px; }
+.diagnostics-block .row { margin-top: 10px; }
+.diag-label { font-weight: 600; color: var(--on-bg); }
+.diag-meta { margin: 4px 0 0; font-size: 12px; color: var(--on-bg-dim); }
 
 #context-modal .modal-card { width: 90%; height: 70vh; }
 #context-modal textarea {

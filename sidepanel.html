@@ -29,7 +29,11 @@
               <button id="session-trigger" class="session-trigger" aria-haspopup="true" aria-expanded="false">
                 Current Session
               </button>
-              <ul id="session-menu" class="dropdown-menu wide" hidden role="menu"></ul>
+              <ul id="session-menu" class="dropdown-menu wide" hidden role="menu">
+                <li class="session-search">
+                  <input type="search" id="session-search" placeholder="Search sessions" aria-label="Search sessions" autocomplete="off" />
+                </li>
+              </ul>
             </div>
             <button id="new-session" class="icon mini-icon" title="New Chat" aria-label="New chat">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
@@ -146,6 +150,21 @@
       <label for="system-prompt">System prompt
         <textarea id="system-prompt"></textarea>
       </label>
+
+      <div class="info-note diagnostics-block" id="diagnostics-block">
+        <svg class="info-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+        <div class="info-text">
+          <strong>Diagnostics</strong>
+          <p><span class="diag-label">Availability:</span> <span id="diag-availability">checking…</span></p>
+          <p class="diag-meta">Last check: <span id="diag-last-checked">Never</span></p>
+          <p><span class="diag-label">Warmup:</span> <span id="diag-warmup">Not run yet</span></p>
+          <p class="diag-meta" id="diag-warmup-note"></p>
+          <div class="row diag-actions">
+            <button id="refresh-diagnostics" class="tonal" type="button">Re-check</button>
+            <button id="warmup-now" class="tonal" type="button">Warm up</button>
+          </div>
+        </div>
+      </div>
 
       <div class="info-note">
         <svg class="info-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>

@@ -2,7 +2,8 @@
 // Note: Content scripts cannot use ES6 imports, so constants are inlined
 
 /**
- * Configuration constants for content scraping
+ * Configuration constants for content scraping (single source of truth;
+ * content scripts can't import shared modules so keep selectors/noise here)
  */
 const SCRAPING_CONSTANTS = {
   MAIN_CONTENT_SELECTORS: [
@@ -23,9 +24,21 @@ const SCRAPING_CONSTANTS = {
     'Keyboard shortcuts', 'opens in a new window', 'verficiation',
     'Apply now', 'Save', 'Share'
   ],
-  MIN_CONTENT_LENGTH: 50,
+ MIN_CONTENT_LENGTH: 50,
   FALLBACK_MAX_LENGTH: 5000,
   MIN_TEXT_LENGTH: 2
+};
+
+// Keep in sync with LIMITS.MAX_CONTEXT_TOKENS * LIMITS.TOKEN_TO_CHAR_RATIO in constants.js (≈12k chars)
+const CONTEXT_MAX_CHARS = 12_000;
+const TREEWALKER_SAFETY_MARGIN = 2_000; // Allows slight overshoot before final clamp upstream
+const MAX_VISITED_TEXT_NODES = 8_000;    // High cap to avoid worst-case pages without trimming usable context
+const SCRAPE_CACHE_TTL_MS = 30_000;      // Cache same-page scrapes briefly to avoid repeated DOM walks
+
+let lastScrapeCache = {
+  url: '',
+  ts: 0,
+  payload: null
 };
 
 // Check if chrome.runtime is available before adding listener
@@ -65,13 +78,26 @@ function scrapePage() {
     // Priority 1: User selection
     const selection = window.getSelection()?.toString();
     if (selection && selection.trim().length > 0) {
+      const currentUrl = window.location.href.split('?')[0];
       return {
         title: document.title,
-        url: window.location.href.split('?')[0],
+        url: currentUrl,
         text: selection.trim(),
         isSelection: true,
         isRestricted: false
       };
+    }
+
+    const currentUrl = window.location.href.split('?')[0];
+    const now = Date.now();
+
+    // Invalidate cache on SPA navigations or hard URL changes
+    if (lastScrapeCache.url && lastScrapeCache.url !== currentUrl) {
+      lastScrapeCache = { url: '', ts: 0, payload: null };
+    }
+
+    if (lastScrapeCache.payload && now - lastScrapeCache.ts < SCRAPE_CACHE_TTL_MS && lastScrapeCache.url === currentUrl) {
+      return { ...lastScrapeCache.payload };
     }
 
     // Priority 2: Main content detection
@@ -111,12 +137,22 @@ function scrapePage() {
 
     const contentParts = [];
     let currentNode;
+    let collectedLength = 0;
+    let visitedTextNodes = 0;
+    const charCollectionLimit = CONTEXT_MAX_CHARS + TREEWALKER_SAFETY_MARGIN;
 
     while (currentNode = walker.nextNode()) {
+      visitedTextNodes += 1;
+      if (visitedTextNodes > MAX_VISITED_TEXT_NODES) break;
+
       const txt = currentNode.textContent.trim();
       const isNoise = SCRAPING_CONSTANTS.NOISE_PHRASES.some(phrase => txt.includes(phrase));
       if (!isNoise) {
         contentParts.push(txt);
+        collectedLength += txt.length;
+        if (collectedLength > charCollectionLimit) {
+          break;
+        }
       }
     }
 
@@ -128,13 +164,21 @@ function scrapePage() {
       cleanText = document.body.innerText.substring(0, SCRAPING_CONSTANTS.FALLBACK_MAX_LENGTH);
     }
 
-    return {
+    const payload = {
       title: document.title,
-      url: window.location.href.split('?')[0],
+      url: currentUrl,
       text: cleanText,
       meta: { description: document.querySelector('meta[name="description"]')?.content || '' },
       isRestricted: false
     };
+
+    lastScrapeCache = {
+      url: currentUrl,
+      ts: now,
+      payload
+    };
+
+    return { ...payload };
 
   } catch (e) {
     return {
