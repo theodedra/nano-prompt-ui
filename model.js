@@ -1,3 +1,4 @@
+import * as UI from './ui.js';
 import {
   appState,
   getCurrentSessionSync,
@@ -30,24 +31,6 @@ let diagnosticsCache = null;
 const SMART_REPLY_LIMIT = 3;
 const SMART_REPLY_CONTEXT_CHARS = 600;
 const SMART_REPLY_MAX_LENGTH = 120;
-const noop = () => {};
-const defaultUIBridge = {
-  setStatusText: noop,
-  setHardwareStatus: noop,
-  updateDiagnostics: noop,
-  renderLog: noop,
-  renderSmartReplies: noop,
-  renderSessions: noop,
-  updateLastMessageBubble: noop,
-  setBusy: noop,
-  setStopEnabled: noop,
-  getSessionSearchTerm: () => ''
-};
-let ui = { ...defaultUIBridge };
-
-export function attachUIBridge(bridge = {}) {
-  ui = { ...defaultUIBridge, ...bridge };
-}
 
 // --- LOCAL AI WRAPPER ---
 /**
@@ -235,9 +218,9 @@ function updateAvailabilityUI(rawStatus, checkedAt, diag = {}) {
   const lastChecked = checkedAt ?? diag.availabilityCheckedAt ?? null;
 
   setAvailabilityCache(status, lastChecked);
-  ui.setStatusText(label);
-  ui.setHardwareStatus(`Gemini Nano: ${label}`);
-  ui.updateDiagnostics({
+  UI.setStatusText(label);
+  UI.setHardwareStatus(`Gemini Nano: ${label}`);
+  UI.updateDiagnostics({
     ...diag,
     availability: status,
     availabilityCheckedAt: lastChecked,
@@ -434,8 +417,8 @@ export async function runTranslator(text) {
   const session = getCurrentSessionSync();
   const targetLang = getSettingOrDefault(appState.settings, 'language');
 
-  ui.setBusy(true);
-  ui.setStatusText('Detecting language...');
+  UI.setBusy(true);
+  UI.setStatusText('Detecting language...');
 
   try {
     // Check if Translation API is available
@@ -469,15 +452,15 @@ export async function runTranslator(text) {
       };
       upsertMessage(session.id, userMessage);
       upsertMessage(session.id, aiMessage);
-      ui.renderLog(session);
-      ui.setBusy(false);
-      ui.setStatusText('Ready to chat.');
+      UI.renderLog(session);
+      UI.setBusy(false);
+      UI.setStatusText('Ready to chat.');
       await saveState();
       return;
     }
 
     // Step 2: Check if translation is available for this language pair
-    ui.setStatusText('Preparing translator...');
+    UI.setStatusText('Preparing translator...');
     const translatorAvailability = await self.Translator.availability({
       sourceLanguage: sourceLang,
       targetLanguage: targetLang
@@ -488,13 +471,13 @@ export async function runTranslator(text) {
     }
 
     // Step 3: Create translator and translate
-    ui.setStatusText('Translating...');
+    UI.setStatusText('Translating...');
     const translator = await self.Translator.create({
       sourceLanguage: sourceLang,
       targetLanguage: targetLang,
       monitor(m) {
         m.addEventListener('downloadprogress', (e) => {
-          ui.setStatusText(`Downloading translation model... ${Math.round(e.loaded * 100)}%`);
+          UI.setStatusText(`Downloading translation model... ${Math.round(e.loaded * 100)}%`);
         });
       }
     });
@@ -512,18 +495,18 @@ export async function runTranslator(text) {
 
     upsertMessage(session.id, userMessage);
     upsertMessage(session.id, aiMessage);
-    ui.renderLog(session);
+    UI.renderLog(session);
     await saveState();
 
-    ui.setBusy(false);
-    ui.setStatusText('Ready to chat.');
+    UI.setBusy(false);
+    UI.setStatusText('Ready to chat.');
     toast.success('Translation complete');
 
   } catch (error) {
     console.error('Translation failed:', error);
 
     // Fallback to Gemini Nano Prompt API
-    ui.setStatusText('Using fallback translation...');
+    UI.setStatusText('Using fallback translation...');
     const langName = LANGUAGE_NAMES[targetLang] || 'English';
 
     await runPrompt({
@@ -543,7 +526,7 @@ export async function runTranslator(text) {
  * @returns {Promise<void>}
  */
 export async function runImageDescription(url) {
-  ui.setStatusText(UI_MESSAGES.ANALYZING_IMAGE);
+  UI.setStatusText(UI_MESSAGES.ANALYZING_IMAGE);
   const session = getCurrentSessionSync();
 
   try {
@@ -569,7 +552,7 @@ export async function runImageDescription(url) {
 
   } catch (e) {
     console.error(e);
-    ui.setStatusText(UI_MESSAGES.ERROR);
+    UI.setStatusText(UI_MESSAGES.ERROR);
     toast.error(USER_ERROR_MESSAGES.IMAGE_PROCESSING_FAILED);
     resetModel(session.id);
     upsertMessage(session.id, {
@@ -577,7 +560,7 @@ export async function runImageDescription(url) {
       text: `**Image Error:** ${e.message}.`,
       ts: Date.now()
     });
-    ui.renderLog(session);
+    UI.renderLog(session);
   }
 }
 
@@ -704,18 +687,18 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
   const userMessage = { role: 'user', text: displayText || text, ts: Date.now(), attachments };
 
   upsertMessage(session.id, userMessage);
-  ui.renderLog(session);
-  ui.renderSmartReplies([]);
+  UI.renderLog(session);
+  UI.renderSmartReplies([]);
   // PERFORMANCE: Don't block on saveState - save in background after streaming
   // await saveState();  // REMOVED - moved to end of function
 
-  ui.setBusy(true);
-  ui.setStopEnabled(true);
-  ui.setStatusText('Thinking...');
+  UI.setBusy(true);
+  UI.setStopEnabled(true);
+  UI.setStatusText('Thinking...');
 
   const aiMessageIndex = session.messages.length;
   upsertMessage(session.id, { role: 'ai', text: '', ts: Date.now() });
-  ui.renderLog(session);
+  UI.renderLog(session);
 
   // RACE CONDITION FIX: Cancel any existing generation before starting new one
   if (localAI.controller) {
@@ -765,11 +748,11 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
 
     const throttledUpdate = throttle((chunk) => {
       updateMessage(session.id, aiMessageIndex, { text: chunk });
-      ui.updateLastMessageBubble(session, chunk, { streaming: true });
+      UI.updateLastMessageBubble(session, chunk, { streaming: true });
     }, STREAMING_THROTTLE_MS);
 
     try {
-        ui.setStatusText('Generating response...');
+        UI.setStatusText('Generating response...');
 
         const streamedText = await localAI.promptStreaming(
           session.id,
@@ -781,7 +764,7 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
 
         throttledUpdate.flush();
         updateMessage(session.id, aiMessageIndex, { text: streamedText });
-        ui.updateLastMessageBubble(session, streamedText);
+        UI.updateLastMessageBubble(session, streamedText);
         lastAiText = streamedText;
 
     } catch (err) {
@@ -800,7 +783,7 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
         if (imageAttachments.length === 0) {
           const fallback = await runPromptInPage(finalText, session.id, attachments);
           updateMessage(session.id, aiMessageIndex, { text: fallback });
-          ui.updateLastMessageBubble(session, fallback);
+          UI.updateLastMessageBubble(session, fallback);
           lastAiText = fallback;
         } else {
           // Image prompts failed - can't use page fallback
@@ -825,17 +808,17 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
       if (currentText && currentText.trim().length > 0) {
         const stoppedText = currentText + '\n\n' + UI_MESSAGES.STOPPED;
         updateMessage(session.id, aiMessageIndex, { text: stoppedText });
-        ui.updateLastMessageBubble(session, stoppedText);
+        UI.updateLastMessageBubble(session, stoppedText);
       } else {
         // If no content was generated, show stopped message
         updateMessage(session.id, aiMessageIndex, { text: UI_MESSAGES.STOPPED });
-        ui.updateLastMessageBubble(session, UI_MESSAGES.STOPPED);
+        UI.updateLastMessageBubble(session, UI_MESSAGES.STOPPED);
       }
     } else {
       // For other errors, show error message
       let msg = err.message || USER_ERROR_MESSAGES.AI_UNAVAILABLE;
       updateMessage(session.id, aiMessageIndex, { text: `Error: ${msg}` });
-      ui.updateLastMessageBubble(session, `Error: ${msg}`);
+      UI.updateLastMessageBubble(session, `Error: ${msg}`);
       toast.error(msg);
     }
   } finally {
@@ -845,9 +828,9 @@ export async function runPrompt({ text, contextOverride, attachments, displayTex
     }
   }
 
-  ui.setBusy(false);
-  ui.setStopEnabled(false);
-  ui.setStatusText('Ready to chat.');
+  UI.setBusy(false);
+  UI.setStopEnabled(false);
+  UI.setStatusText('Ready to chat.');
   await saveState();
 
   if (!generationAborted && lastAiText) {
@@ -965,7 +948,7 @@ export function cancelGeneration() {
     window.speechSynthesis.cancel();
   }
 
-  ui.setStopEnabled(false);
+  UI.setStopEnabled(false);
 }
 
 /**
@@ -1017,7 +1000,7 @@ export function speakText(text) {
     if (SPEECH.EXPECTED_ERROR_TYPES.includes(errorType)) {
       // This is normal behavior when user interacts with speech controls
       // Don't pollute console with expected events
-      ui.setStopEnabled(false);
+      UI.setStopEnabled(false);
       return;
     }
 
@@ -1026,12 +1009,12 @@ export function speakText(text) {
       `Speech synthesis error: ${errorType} (at char ${charIndex}, after ${elapsedTime}ms)`
     );
 
-    ui.setStopEnabled(false);
+    UI.setStopEnabled(false);
   };
 
   // Handle synthesis completion
   utterance.onend = () => {
-    ui.setStopEnabled(false);
+    UI.setStopEnabled(false);
   };
 
   // MULTI-TAB FIX: Handle synthesis interrupt (e.g., tab switch)
@@ -1040,7 +1023,7 @@ export function speakText(text) {
   };
 
   // Enable stop button while speaking
-  ui.setStopEnabled(true);
+  UI.setStopEnabled(true);
   window.speechSynthesis.speak(utterance);
 }
 
@@ -1103,10 +1086,10 @@ AI: ${aiMsg.text.slice(0, LIMITS.TITLE_GENERATION_MAX_CHARS)}`;
     // Update session title
     renameSession(sessionId, title);
     await saveState();
-    const searchTerm = ui.getSessionSearchTerm();
+    const searchTerm = UI.getSessionSearchTerm();
     const matches = searchSessions(searchTerm);
     const current = getCurrentSessionSync();
-    ui.renderSessions({
+    UI.renderSessions({
       sessions: appState.sessions,
       sessionMeta: appState.sessionMeta,
       currentSessionId: appState.currentSessionId,
@@ -1178,7 +1161,7 @@ function clearSmartReplies(sessionId) {
   } catch (e) {
     console.warn('Failed to clear smart replies', e);
   } finally {
-    ui.renderSmartReplies([]);
+    UI.renderSmartReplies([]);
   }
 }
 
@@ -1222,7 +1205,7 @@ async function generateSmartRepliesForMessage(sessionId, userText, aiText, aiInd
     const replies = normalizeSmartReplies(raw);
     updateMessage(sessionId, aiIndex, { smartReplies: replies });
     if (isCurrentSession) {
-      ui.renderSmartReplies(replies);
+      UI.renderSmartReplies(replies);
     }
     await saveState();
   } finally {

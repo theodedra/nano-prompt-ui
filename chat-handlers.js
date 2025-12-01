@@ -18,15 +18,17 @@ import {
   getContextSnapshotById,
   getActiveSnapshot,
   removeContextSnapshot,
-  setActiveSnapshot,
+  setActiveSnapshot
+} from './storage.js';
+import * as UI from './ui.js';
+import {
   runPrompt,
   summarizeActiveTab,
   cancelGeneration,
   speakText,
   resetModel,
   isSomethingRunning
-} from './controller.js';
-import * as UI from './ui.js';
+} from './model.js';
 import { fetchContext, classifyIntent } from './context.js';
 import { debounce } from './utils.js';
 import { toast } from './toast.js';
