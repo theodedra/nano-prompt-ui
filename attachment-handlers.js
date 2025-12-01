@@ -5,9 +5,9 @@
  */
 
 import * as Controller from './controller.js';
-import { extractPdfText, isPdfFile } from './pdf.js';
+import { extractPdfText } from './pdf.js';
 import { toast } from './toast.js';
-import { LIMITS, USER_ERROR_MESSAGES } from './constants.js';
+import { LIMITS, USER_ERROR_MESSAGES, validateAttachment } from './constants.js';
 import * as UI from './ui.js';
 
 /**
@@ -24,10 +24,34 @@ export function handleAttachClick() {
 export function handleFileInputChange(event) {
   const files = Array.from(event.target.files || []);
   files.slice(0, LIMITS.MAX_ATTACHMENTS).forEach(async (file) => {
+    let progressToast = null;
+
+    // Validate attachment before processing
+    const validation = validateAttachment(file);
+    if (!validation.valid) {
+      toast.warning(validation.error);
+      return;
+    }
+
     try {
-      if (isPdfFile(file)) {
-        toast.info(`Processing PDF: ${file.name}...`);
-        const { text: pdfText, meta: pdfMeta } = await extractPdfText(file);
+      if (validation.fileType === 'pdf') {
+        // Create a progress toast for PDF processing
+        progressToast = toast.progress(`Processing: ${file.name}`, 0, 1);
+
+        const { text: pdfText, meta: pdfMeta } = await extractPdfText(file, {
+          onProgress: (currentPage, totalPages) => {
+            if (currentPage === 0) {
+              progressToast.update(`Extracting: ${file.name} (${totalPages} pages)`, 0, totalPages);
+            } else {
+              progressToast.update(`Page ${currentPage} of ${totalPages}`, currentPage, totalPages);
+            }
+          }
+        });
+
+        // Dismiss progress toast before showing success
+        progressToast.dismiss();
+        progressToast = null;
+
         Controller.addAttachment({
           name: file.name,
           type: 'application/pdf',
@@ -35,8 +59,8 @@ export function handleFileInputChange(event) {
           meta: pdfMeta
         });
         Controller.renderAttachments();
-        toast.success('PDF processed successfully');
-      } else if (file.type.startsWith('image/')) {
+        toast.success(`PDF processed (${pdfMeta.pagesProcessed} pages)`);
+      } else if (validation.fileType === 'image') {
         toast.info(`Processing image: ${file.name}...`);
         const canvas = await fileToCanvas(file, LIMITS.IMAGE_MAX_WIDTH);
         const blob = await canvasToBlob(canvas, file.type);
@@ -47,12 +71,15 @@ export function handleFileInputChange(event) {
         });
         Controller.renderAttachments();
         toast.success('Image processed successfully');
-      } else {
-        toast.warning('Unsupported file type. Only images and PDFs are supported.');
       }
     } catch (e) {
+      // Dismiss progress toast on error
+      if (progressToast) {
+        progressToast.dismiss();
+      }
+
       console.error('File processing failed', e);
-      if (isPdfFile(file)) {
+      if (validation.fileType === 'pdf') {
         const errorMsg = e.message || USER_ERROR_MESSAGES.PDF_PROCESSING_FAILED;
         toast.error(`PDF Error: ${errorMsg}`);
       } else {

@@ -632,3 +632,47 @@ input[type="range"] { accent-color: var(--on-bg); }
   color: #f85149;
   border-left: 3px solid #f85149;
 }
+
+/* Progress toast */
+.toast-progress {
+  background: var(--surface-2);
+  color: var(--accent);
+  border-left: 3px solid var(--accent);
+}
+
+.toast-progress-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.toast-progress-bar {
+  height: 4px;
+  background: var(--surface-3);
+  border-radius: 2px;
+  overflow: hidden;
+  min-width: 150px;
+}
+
+.toast-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.15s ease-out;
+}
+
+/* Spinning animation for progress icon */
+.toast-spinner {
+  animation: toast-spin 1s linear infinite;
+}
+
+@keyframes toast-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}

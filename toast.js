@@ -98,6 +98,80 @@ function escapeHtml(unsafe) {
 }
 
 /**
+ * Show a progress toast that can be updated.
+ * Returns an object with update() and dismiss() methods.
+ * @param {string} message - Initial message
+ * @param {number} current - Current progress value (0-100 or page number)
+ * @param {number} total - Total value (100 or total pages)
+ * @returns {{ update: (message: string, current: number, total: number) => void, dismiss: () => void }}
+ */
+export function showProgressToast(message, current = 0, total = 100) {
+  // Remove any existing toasts first
+  const existingToast = document.querySelector('.toast-notification');
+  if (existingToast) {
+    existingToast.remove();
+  }
+
+  const toast = document.createElement('div');
+  toast.className = 'toast-notification toast-progress';
+  toast.setAttribute('role', 'status');
+  toast.setAttribute('aria-live', 'polite');
+
+  const progressPercent = total > 0 ? Math.round((current / total) * 100) : 0;
+
+  toast.innerHTML = `
+    <div class="toast-content">
+      <span class="toast-icon">${getProgressIcon()}</span>
+      <div class="toast-progress-content">
+        <span class="toast-message">${escapeHtml(message)}</span>
+        <div class="toast-progress-bar">
+          <div class="toast-progress-fill" style="width: ${progressPercent}%"></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(toast);
+
+  // Trigger animation
+  requestAnimationFrame(() => {
+    toast.classList.add('toast-show');
+  });
+
+  return {
+    /**
+     * Update the progress toast message and progress
+     */
+    update(newMessage, newCurrent, newTotal) {
+      const messageEl = toast.querySelector('.toast-message');
+      const fillEl = toast.querySelector('.toast-progress-fill');
+      if (messageEl) {
+        messageEl.textContent = newMessage;
+      }
+      if (fillEl && newTotal > 0) {
+        const percent = Math.round((newCurrent / newTotal) * 100);
+        fillEl.style.width = `${percent}%`;
+      }
+    },
+
+    /**
+     * Dismiss the progress toast
+     */
+    dismiss() {
+      hideToast(toast);
+    }
+  };
+}
+
+/**
+ * Get spinning loader icon for progress toast
+ * @returns {string} SVG icon
+ */
+function getProgressIcon() {
+  return `<svg class="toast-spinner" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>`;
+}
+
+/**
  * Convenience methods for different toast types
  */
 export const toast = {
@@ -105,4 +179,5 @@ export const toast = {
   success: (message, duration) => showToast(message, 'success', duration),
   warning: (message, duration) => showToast(message, 'warning', duration),
   error: (message, duration) => showToast(message, 'error', duration),
+  progress: (message, current, total) => showProgressToast(message, current, total),
 };

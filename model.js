@@ -5,7 +5,7 @@
  * All side effects are handled via callbacks passed by the controller.
  */
 
-import { buildPromptWithContext } from './context.js';
+import { buildPromptWithContext, estimateTokens, applySlidingWindow } from './context.js';
 import { throttle } from './utils.js';
 import {
   MODEL_CONFIG,
@@ -21,7 +21,7 @@ import {
   getSettingOrDefault
 } from './constants.js';
 
-const STREAMING_THROTTLE_MS = 75;
+const STREAMING_THROTTLE_MS = 100;
 const DIAGNOSTICS_KEY = 'nanoPrompt.diagnostics';
 const SESSION_WARMUP_KEY = 'nanoPrompt.warmedUp';
 let diagnosticsCache = null;
@@ -665,7 +665,12 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
 
   try {
     const sessionConfig = getSessionConfig(settings);
-    const finalText = await buildPromptWithContext(text, contextOverride, attachments);
+    const { prompt: finalText, tokenEstimate } = await buildPromptWithContext(text, contextOverride, attachments);
+
+    // Log token estimate for debugging long sessions
+    if (tokenEstimate > LIMITS.TOTAL_TOKEN_BUDGET * 0.8) {
+      console.warn(`Nano Prompt: High token usage (${tokenEstimate}/${LIMITS.TOTAL_TOKEN_BUDGET})`);
+    }
 
     // Separate images from PDFs (PDFs are already text, included in finalText)
     const imageAttachments = attachments?.filter(att => att.type.startsWith('image/')) || [];

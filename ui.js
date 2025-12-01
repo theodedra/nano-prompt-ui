@@ -831,11 +831,9 @@ export function updateLastMessageBubble(session, markdownText, { streaming = fal
   }
 
   if (streaming) {
-    const textContent = String(markdownText);
-    if (body.dataset.renderMode !== 'plain' || body.textContent !== textContent) {
-      body.textContent = textContent;
-      body.dataset.renderMode = 'plain';
-    }
+    // Fast path: skip content comparison since throttle limits update frequency
+    body.textContent = markdownText;
+    body.dataset.renderMode = 'plain';
     return;
   }
 

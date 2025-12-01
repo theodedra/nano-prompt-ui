@@ -35,6 +35,14 @@ export const LIMITS = {
   MAX_CONTEXT_TOKENS: 3_000,          // Reserve space for system prompt + user query
   TOKEN_TO_CHAR_RATIO: 4,             // Approximate: 1 token ≈ 4 characters
 
+  // Token budgets for prompt building (Gemini Nano ~32k context)
+  TOTAL_TOKEN_BUDGET: 28_000,         // Leave headroom below 32k limit
+  SYSTEM_PROMPT_BUDGET: 500,          // Budget for system prompt/rules
+  CONTEXT_BUDGET: 6_000,              // Budget for page context
+  HISTORY_BUDGET: 18_000,             // Budget for conversation history (sliding window)
+  USER_QUERY_BUDGET: 2_000,           // Budget for current user query
+  ATTACHMENT_BUDGET: 1_500,           // Budget for attachment text content
+
   // Image processing
   IMAGE_MAX_WIDTH: 1_024,             // Max width for uploaded images
   IMAGE_MAX_WIDTH_DESCRIPTION: 512,   // Max width for image description
@@ -290,6 +298,65 @@ export const ICONS = {
 
   STOP: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect></svg>`,
 };
+
+// ============================================================================
+// ATTACHMENT VALIDATION
+// ============================================================================
+
+export const ATTACHMENT = {
+  // Allowed MIME types
+  ALLOWED_MIME_TYPES: [
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+  ],
+
+  // Maximum file sizes (in bytes)
+  MAX_FILE_SIZE_MB: 10,
+  MAX_FILE_SIZE_BYTES: 10 * 1024 * 1024,  // 10 MB
+  MAX_IMAGE_SIZE_BYTES: 5 * 1024 * 1024,  // 5 MB for images
+  MAX_PDF_SIZE_BYTES: 10 * 1024 * 1024,   // 10 MB for PDFs
+};
+
+/**
+ * Validate an attachment file before processing.
+ * Checks size, MIME type, and extension. Does NOT check page/char limits
+ * (those are enforced during extraction, as they require reading the file).
+ *
+ * @param {File} file - File to validate
+ * @returns {{ valid: boolean, error?: string, fileType?: 'pdf' | 'image' }}
+ */
+export function validateAttachment(file) {
+  if (!file || !(file instanceof File)) {
+    return { valid: false, error: 'Invalid file object.' };
+  }
+
+  // Determine file type from MIME or extension
+  const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp)$/i.test(file.name);
+
+  // Check if file type is supported
+  if (!isPdf && !isImage) {
+    return { valid: false, error: 'Unsupported file type. Only images and PDFs are supported.' };
+  }
+
+  // Validate MIME type is in the allowed list (if provided by browser)
+  if (file.type && !ATTACHMENT.ALLOWED_MIME_TYPES.includes(file.type) && !file.type.startsWith('image/')) {
+    return { valid: false, error: `Unsupported MIME type: ${file.type}` };
+  }
+
+  // Check file size limits
+  const maxSize = isPdf ? ATTACHMENT.MAX_PDF_SIZE_BYTES : ATTACHMENT.MAX_IMAGE_SIZE_BYTES;
+  const maxSizeLabel = isPdf ? '10 MB' : '5 MB';
+  if (file.size > maxSize) {
+    const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+    return { valid: false, error: `File too large (${sizeMB} MB). Maximum ${maxSizeLabel} allowed.` };
+  }
+
+  return { valid: true, fileType: isPdf ? 'pdf' : 'image' };
+}
 
 // ============================================================================
 // ERROR MESSAGES FOR USERS

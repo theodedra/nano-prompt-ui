@@ -1,18 +1,44 @@
 // pdf.js - PDF text extraction using Mozilla's pdf.js library (local)
 // This module handles PDF file processing for attachment support
 
-import { LIMITS } from './constants.js';
+import { LIMITS, validateAttachment } from './constants.js';
 
 const PDF_CHAR_SAFETY_MARGIN = 2_000;
 
 /**
- * Extract text content from a PDF file
- * Uses Mozilla's pdf.js library loaded from local lib folder
- * @param {File} file - PDF file object
- * @returns {Promise<{ text: string, meta: { truncated: boolean, pagesProcessed: number, totalPagesEstimate: number, charsUsed: number } }>} Extracted text content and truncation metadata
+ * Yield control to the browser to prevent UI jank.
+ * Uses requestIdleCallback when available, falls back to setTimeout.
+ * @returns {Promise<void>}
  */
-export async function extractPdfText(file) {
+function yieldToMain() {
+  return new Promise((resolve) => {
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(resolve, { timeout: 50 });
+    } else {
+      setTimeout(resolve, 0);
+    }
+  });
+}
+
+/**
+ * Extract text content from a PDF file with chunked processing.
+ * Yields to the UI between pages to prevent jank.
+ * 
+ * @param {File} file - PDF file object
+ * @param {Object} options - Optional configuration
+ * @param {function(number, number): void} [options.onProgress] - Progress callback (currentPage, totalPages)
+ * @param {AbortSignal} [options.signal] - AbortSignal for cancellation
+ * @returns {Promise<{ text: string, meta: { truncated: boolean, pagesProcessed: number, totalPagesEstimate: number, charsUsed: number } }>}
+ */
+export async function extractPdfText(file, options = {}) {
+  const { onProgress, signal } = options;
+
   try {
+    // Check for cancellation
+    if (signal?.aborted) {
+      throw new DOMException('PDF extraction aborted', 'AbortError');
+    }
+
     // Load pdf.js from local lib folder if not already loaded
     if (!window.pdfjsLib) {
       await loadPdfJs();
@@ -21,30 +47,48 @@ export async function extractPdfText(file) {
     // Read file as ArrayBuffer
     const arrayBuffer = await file.arrayBuffer();
 
+    // Check for cancellation after file read
+    if (signal?.aborted) {
+      throw new DOMException('PDF extraction aborted', 'AbortError');
+    }
+
     // Load PDF document
     const loadingTask = window.pdfjsLib.getDocument({
       data: arrayBuffer,
-      // Use local worker
       useWorkerFetch: false,
       isEvalSupported: false,
       useSystemFonts: true
     });
 
     const pdf = await loadingTask.promise;
+    const totalPages = pdf.numPages;
+    const maxPages = Math.min(totalPages, LIMITS.PDF_MAX_PAGES || 50);
 
-    // Extract text from all pages
+    // Report initial progress
+    onProgress?.(0, maxPages);
+
+    // Extract text from all pages with chunked processing
     const textParts = [];
-    const numPages = Math.min(pdf.numPages, LIMITS.PDF_MAX_PAGES || 50);
     let collectedLength = 0;
     let pagesProcessed = 0;
     let hitEarlyExit = false;
 
-    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
+      // Check for cancellation before each page
+      if (signal?.aborted) {
+        throw new DOMException('PDF extraction aborted', 'AbortError');
+      }
+
+      // Yield to main thread every page to prevent UI jank
+      await yieldToMain();
+
+      // Check for budget exhaustion
       if (collectedLength > LIMITS.PDF_MAX_CHARS + PDF_CHAR_SAFETY_MARGIN) {
         hitEarlyExit = true;
         break;
       }
 
+      // Process page
       const page = await pdf.getPage(pageNum);
       const textContent = await page.getTextContent();
 
@@ -79,12 +123,18 @@ export async function extractPdfText(file) {
           break;
         }
       }
+
+      // Report progress after each page
+      onProgress?.(pageNum, maxPages);
     }
 
     const fullText = textParts.join('\n\n');
     const wasClamped = fullText.length > LIMITS.PDF_MAX_CHARS;
     const clampedText = wasClamped ? fullText.slice(0, LIMITS.PDF_MAX_CHARS) : fullText;
-    const truncated = hitEarlyExit || wasClamped || pdf.numPages > numPages;
+    const truncated = hitEarlyExit || wasClamped || totalPages > maxPages;
+
+    // Final progress report
+    onProgress?.(pagesProcessed, maxPages);
 
     // Truncate if too long
     if (wasClamped) {
@@ -93,7 +143,7 @@ export async function extractPdfText(file) {
         meta: {
           truncated: true,
           pagesProcessed,
-          totalPagesEstimate: pdf.numPages,
+          totalPagesEstimate: totalPages,
           charsUsed: Math.min(clampedText.length, LIMITS.PDF_MAX_CHARS)
         }
       };
@@ -104,17 +154,21 @@ export async function extractPdfText(file) {
       meta: {
         truncated,
         pagesProcessed,
-        totalPagesEstimate: pdf.numPages,
+        totalPagesEstimate: totalPages,
         charsUsed: Math.min((fullText || '').length, LIMITS.PDF_MAX_CHARS)
       }
     };
 
   } catch (error) {
+    // Re-throw abort errors without logging
+    if (error.name === 'AbortError') {
+      throw error;
+    }
     console.error('PDF extraction failed:', error);
     console.error('Error name:', error.name);
     console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
-    throw error; // Re-throw original error for better debugging
+    throw error;
   }
 }
 
@@ -155,12 +209,13 @@ async function loadPdfJs() {
 }
 
 /**
- * Check if a file is a PDF
+ * Check if a file is a PDF (delegates to centralized validation)
  * @param {File} file - File to check
  * @returns {boolean} True if PDF
  */
 export function isPdfFile(file) {
-  return file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+  const result = validateAttachment(file);
+  return result.valid && result.fileType === 'pdf';
 }
 
 /**

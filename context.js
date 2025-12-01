@@ -21,6 +21,27 @@ let cachedContext = {
   snapshotId: null
 };
 
+// ============================================================================
+// PROMPT HEADER CACHE - Avoid rebuilding static prompt parts
+// ============================================================================
+
+const promptHeaderCache = {
+  rules: null,
+  rulesTokens: 0
+};
+
+/**
+ * Get cached prompt header (static rules) with token count
+ * @returns {{text: string, tokens: number}}
+ */
+function getCachedPromptHeader() {
+  if (!promptHeaderCache.rules) {
+    promptHeaderCache.rules = ASSISTANT_RULES;
+    promptHeaderCache.rulesTokens = estimateTokens(ASSISTANT_RULES);
+  }
+  return { text: promptHeaderCache.rules, tokens: promptHeaderCache.rulesTokens };
+}
+
 /**
  * Classify user intent based on query text
  * @param {string} text - User query text
@@ -39,8 +60,70 @@ export function classifyIntent(text) {
  * @param {string} text - Text to estimate
  * @returns {number} Estimated token count
  */
-function estimateTokens(text) {
+export function estimateTokens(text) {
+  if (!text) return 0;
   return Math.ceil(text.length / LIMITS.TOKEN_TO_CHAR_RATIO);
+}
+
+/**
+ * Estimate tokens for an array of messages
+ * @param {Array<{role: string, text: string}>} messages - Conversation messages
+ * @returns {number} Total estimated tokens
+ */
+export function estimateMessagesTokens(messages) {
+  if (!messages || !messages.length) return 0;
+  return messages.reduce((sum, msg) => sum + estimateTokens(msg.text || ''), 0);
+}
+
+/**
+ * Apply sliding window to conversation history based on token budget
+ * Keeps most recent messages that fit within the budget.
+ * Always includes the first message for context if space allows.
+ * @param {Array<{role: string, text: string}>} messages - Full conversation history
+ * @param {number} tokenBudget - Maximum tokens for history
+ * @returns {{messages: Array, tokens: number, trimmed: number}}
+ */
+export function applySlidingWindow(messages, tokenBudget = LIMITS.HISTORY_BUDGET) {
+  if (!messages || !messages.length) {
+    return { messages: [], tokens: 0, trimmed: 0 };
+  }
+
+  // Fast path: if all messages fit, return them all
+  const totalTokens = estimateMessagesTokens(messages);
+  if (totalTokens <= tokenBudget) {
+    return { messages, tokens: totalTokens, trimmed: 0 };
+  }
+
+  // Sliding window: work backwards from most recent
+  const result = [];
+  let usedTokens = 0;
+  let trimmed = 0;
+
+  // Reserve space for first message if we have room (provides initial context)
+  const firstMsgTokens = estimateTokens(messages[0]?.text || '');
+  const reserveFirst = firstMsgTokens < tokenBudget * 0.15; // Only if <15% of budget
+  const effectiveBudget = reserveFirst ? tokenBudget - firstMsgTokens : tokenBudget;
+
+  // Add messages from most recent backwards
+  for (let i = messages.length - 1; i >= (reserveFirst ? 1 : 0); i--) {
+    const msg = messages[i];
+    const msgTokens = estimateTokens(msg.text || '');
+
+    if (usedTokens + msgTokens <= effectiveBudget) {
+      result.unshift(msg);
+      usedTokens += msgTokens;
+    } else {
+      trimmed++;
+    }
+  }
+
+  // Prepend first message if we reserved space for it
+  if (reserveFirst && messages.length > 0) {
+    result.unshift(messages[0]);
+    usedTokens += firstMsgTokens;
+  }
+
+  return { messages: result, tokens: usedTokens, trimmed };
 }
 
 /**
@@ -205,42 +288,136 @@ export function getCachedContext() {
 
 /**
  * Build the final prompt with context, attachments, and system rules
+ * Uses cached headers and efficient string building to reduce churn.
  * @param {string} userText - User's query
  * @param {string} contextOverride - Optional context to use instead of auto-fetched
  * @param {Array<{name: string}>} attachments - Attached files
- * @returns {Promise<string>} Complete prompt string
+ * @returns {Promise<{prompt: string, tokenEstimate: number}>} Complete prompt and token count
  */
 export async function buildPromptWithContext(userText, contextOverride = '', attachments = []) {
   // Prompt intentionally stays minimal (no XML wrappers) for Nano model accuracy;
   // security rationale lives in SECURITY.md#prompt-injection-rationale-for-contextjs.
   const intent = classifyIntent(userText);
-  let contextText = contextOverride;
 
-  const parts = [ASSISTANT_RULES];
+  // Use cached header instead of rebuilding
+  const header = getCachedPromptHeader();
+  let totalTokens = header.tokens;
 
-  if (contextText && contextText.trim().length > 0) {
-    const safeContext = enforceContextLimits(contextText);
+  // Pre-allocate parts array with known capacity to avoid resizing
+  const parts = new Array(5);
+  let partIndex = 0;
+
+  parts[partIndex++] = header.text;
+
+  // Context section (budget-aware)
+  if (contextOverride && contextOverride.length > 0) {
+    const safeContext = enforceContextLimits(contextOverride);
     if (safeContext) {
-      parts.push('Context:\n' + safeContext.trim());
+      const contextPart = `Context:\n${safeContext}`;
+      const contextTokens = estimateTokens(contextPart);
+      if (totalTokens + contextTokens <= LIMITS.TOTAL_TOKEN_BUDGET - LIMITS.USER_QUERY_BUDGET) {
+        parts[partIndex++] = contextPart;
+        totalTokens += contextTokens;
+      }
     }
   }
 
+  // Attachments section (budget-aware)
   if (attachments.length) {
-    const attachmentInfo = attachments.map((att, i) => {
+    const attParts = [];
+    let attTokens = 0;
+
+    for (let i = 0; i < attachments.length; i++) {
+      const att = attachments[i];
+      let attText;
+
       if (att.type === 'application/pdf') {
         const pdfContent = enforceContextLimits(att.data);
-        return `[Attachment ${i + 1}: ${att.name}]\nPDF Content:\n${pdfContent}`;
+        attText = `[Attachment ${i + 1}: ${att.name}]\nPDF Content:\n${pdfContent}`;
       } else {
-        return `[Attachment ${i + 1}: ${att.name} - Image]`;
+        attText = `[Attachment ${i + 1}: ${att.name} - Image]`;
       }
-    }).join('\n\n');
-    parts.push('Attachments:\n' + attachmentInfo);
+
+      const textTokens = estimateTokens(attText);
+      if (attTokens + textTokens <= LIMITS.ATTACHMENT_BUDGET) {
+        attParts.push(attText);
+        attTokens += textTokens;
+      }
+    }
+
+    if (attParts.length) {
+      const attachmentSection = `Attachments:\n${attParts.join('\n\n')}`;
+      parts[partIndex++] = attachmentSection;
+      totalTokens += attTokens;
+    }
   }
 
+  // Time injection (minimal overhead)
   if (intent === INTENT_TYPES.TIME) {
-    parts.push(`Time: ${new Date().toLocaleString()}`);
+    const timePart = `Time: ${new Date().toLocaleString()}`;
+    parts[partIndex++] = timePart;
+    totalTokens += estimateTokens(timePart);
   }
 
-  parts.push('User question:\n' + userText);
-  return parts.filter(Boolean).join('\n\n');
+  // User question (always included)
+  const userPart = `User question:\n${userText}`;
+  parts[partIndex++] = userPart;
+  totalTokens += estimateTokens(userPart);
+
+  // Efficient join - only include filled slots
+  const prompt = parts.slice(0, partIndex).join('\n\n');
+
+  return { prompt, tokenEstimate: totalTokens };
+}
+
+/**
+ * Format conversation history for inclusion in prompts
+ * Applies sliding window and formats messages efficiently.
+ * @param {Array<{role: string, text: string}>} messages - Full conversation history
+ * @param {number} tokenBudget - Max tokens for history (uses LIMITS.HISTORY_BUDGET by default)
+ * @returns {{formatted: string, tokens: number, trimmed: number, included: number}}
+ */
+export function formatConversationHistory(messages, tokenBudget = LIMITS.HISTORY_BUDGET) {
+  if (!messages || !messages.length) {
+    return { formatted: '', tokens: 0, trimmed: 0, included: 0 };
+  }
+
+  const { messages: windowedMsgs, tokens, trimmed } = applySlidingWindow(messages, tokenBudget);
+
+  if (!windowedMsgs.length) {
+    return { formatted: '', tokens: 0, trimmed: messages.length, included: 0 };
+  }
+
+  // Efficient formatting: pre-calculate size and build in one pass
+  const formattedParts = new Array(windowedMsgs.length);
+
+  for (let i = 0; i < windowedMsgs.length; i++) {
+    const msg = windowedMsgs[i];
+    const role = msg.role === 'user' ? 'User' : 'Assistant';
+    formattedParts[i] = `${role}: ${msg.text}`;
+  }
+
+  const formatted = formattedParts.join('\n\n');
+
+  return {
+    formatted,
+    tokens,
+    trimmed,
+    included: windowedMsgs.length
+  };
+}
+
+/**
+ * Get current token budget status for debugging/UI
+ * @returns {{context: number, history: number, query: number, total: number}}
+ */
+export function getTokenBudgets() {
+  return {
+    context: LIMITS.CONTEXT_BUDGET,
+    history: LIMITS.HISTORY_BUDGET,
+    query: LIMITS.USER_QUERY_BUDGET,
+    attachment: LIMITS.ATTACHMENT_BUDGET,
+    system: LIMITS.SYSTEM_PROMPT_BUDGET,
+    total: LIMITS.TOTAL_TOKEN_BUDGET
+  };
 }
