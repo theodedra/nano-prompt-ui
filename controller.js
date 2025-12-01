@@ -141,7 +141,7 @@ export function getSessionSearchTerm() {
   return sessionSearchTerm;
 }
 
-export function renderSessionsList(confirmingId = null) {
+export function renderSessionsList(confirmingId = null, editingId = null) {
   const current = getCurrentSessionSync();
   const matches = searchSessions(sessionSearchTerm);
   UI.renderSessions({
@@ -151,7 +151,8 @@ export function renderSessionsList(confirmingId = null) {
     currentTitle: current?.title,
     matches,
     searchTerm: sessionSearchTerm,
-    confirmingId
+    confirmingId,
+    editingId
   });
 }
 

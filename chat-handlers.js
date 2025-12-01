@@ -454,17 +454,49 @@ async function deleteSessionHandler(btn, id) {
   }
 }
 
+// Track the session currently being edited inline
+let editingSessionId = null;
+
 /**
- * Handle session rename
+ * Start inline rename for a session
  * @param {string} id - Session ID to rename
+ */
+function startInlineRename(id) {
+  editingSessionId = id;
+  Controller.renderSessionsList(null, id);
+}
+
+/**
+ * Cancel inline rename
+ */
+function cancelInlineRename() {
+  editingSessionId = null;
+  Controller.renderSessionsList();
+}
+
+/**
+ * Save inline rename
+ * @param {string} id - Session ID
+ * @param {string} newTitle - New title from input
  * @returns {Promise<void>}
  */
-async function renameSessionHandler(id) {
-  const session = Controller.getSession(id);
-  const newTitle = prompt(UI_MESSAGES.RENAME_CHAT, session.title);
-  if (newTitle) {
-    await Controller.renameSessionById(id, newTitle);
+async function saveInlineRename(id, newTitle) {
+  editingSessionId = null;
+  const trimmed = (newTitle || '').trim();
+  if (trimmed) {
+    await Controller.renameSessionById(id, trimmed);
+  } else {
+    // Empty title - just re-render without saving
+    Controller.renderSessionsList();
   }
+}
+
+/**
+ * Get the current editing session ID
+ * @returns {string|null}
+ */
+export function getEditingSessionId() {
+  return editingSessionId;
 }
 
 /**
@@ -505,19 +537,67 @@ export function handleTemplatesTriggerClick(event) {
 export async function handleSessionMenuClick(event) {
   const btn = event.target.closest('button');
   const row = event.target.closest('.session-row');
+  const input = event.target.closest('.session-rename-input');
+
+  // If clicking on rename input, don't bubble to row switch
+  if (input) {
+    event.stopPropagation();
+    return;
+  }
 
   if (btn && btn.classList.contains('action-btn')) {
     event.stopPropagation();
     const id = btn.dataset.id;
 
+    // Handle inline rename save/cancel
+    if (btn.dataset.action === 'save-rename') {
+      const inputEl = row?.querySelector('.session-rename-input');
+      const newTitle = inputEl?.value || '';
+      await saveInlineRename(id, newTitle);
+      return;
+    }
+    
+    if (btn.dataset.action === 'cancel-rename') {
+      cancelInlineRename();
+      return;
+    }
+
     if (btn.classList.contains('delete')) {
       await deleteSessionHandler(btn, id);
     } else if (btn.classList.contains('edit')) {
-      await renameSessionHandler(id);
+      startInlineRename(id);
     }
     return;
   }
+  
+  // Don't switch session if we're currently editing
+  if (editingSessionId) {
+    return;
+  }
+  
   if (row) await switchSessionHandler(row);
+}
+
+/**
+ * Handle keyboard events on rename input
+ * @param {KeyboardEvent} event - Keyboard event
+ * @returns {Promise<void>}
+ */
+export async function handleRenameInputKeyDown(event) {
+  const input = event.target.closest('.session-rename-input');
+  if (!input) return;
+  
+  const id = input.dataset.id;
+  
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    event.stopPropagation();
+    await saveInlineRename(id, input.value);
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    cancelInlineRename();
+  }
 }
 
 /**
@@ -572,7 +652,13 @@ export function handleDocumentKeyDown(event) {
 
 export function handleDocumentClick(event) {
   if (!event.target.closest('#templates-dropdown')) Controller.closeMenu('templates');
-  if (!event.target.closest('#session-dropdown')) Controller.closeMenu('session');
+  if (!event.target.closest('#session-dropdown')) {
+    Controller.closeMenu('session');
+    // Cancel inline rename when clicking outside session dropdown
+    if (editingSessionId) {
+      cancelInlineRename();
+    }
+  }
 }
 
 /**
@@ -891,3 +977,4 @@ export async function refreshAvailability({ forceCheck = false } = {}) {
     console.warn('Failed to get model status summary:', e);
   }
 }
+

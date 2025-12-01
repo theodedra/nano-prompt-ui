@@ -89,4 +89,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('in')?.addEventListener('keydown', ChatHandlers.handleInputKeyDown);
   document.addEventListener('keydown', ChatHandlers.handleDocumentKeyDown, true);
+  
+  // Handle keyboard events for inline session rename
+  document.getElementById('session-menu')?.addEventListener('keydown', ChatHandlers.handleRenameInputKeyDown);
 });

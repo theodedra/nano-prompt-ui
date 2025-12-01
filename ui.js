@@ -429,6 +429,10 @@ function observeLastMessage() {
   scrollToBottom();
 }
 
+// Track which session is currently being renamed
+let editingSessionId = null;
+let editingInputRef = null;
+
 export function renderSessions({
   sessions = {},
   sessionMeta = {},
@@ -436,7 +440,8 @@ export function renderSessions({
   matches = [],
   searchTerm = '',
   currentTitle = '',
-  confirmingId = null
+  confirmingId = null,
+  editingId = null
 } = {}) {
   if (!els.sessionMenu) return;
 
@@ -468,48 +473,132 @@ export function renderSessions({
     const session = sessions[id] || sessionMeta[id];
     if (!session) return;
     
+    const isEditing = id === editingId;
+    
     const row = document.createElement('li');
     row.className = 'session-row';
     if (id === currentSessionId) row.classList.add('active');
+    if (isEditing) row.classList.add('editing');
     row.dataset.id = id;
 
     const info = document.createElement('div');
     info.className = 'session-info';
-    const titleDiv = document.createElement('div');
-    titleDiv.className = 'session-title';
-    titleDiv.textContent = session.title || 'Untitled';
-    info.appendChild(titleDiv);
+    
+    if (isEditing) {
+      // Inline rename input
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'session-rename-input';
+      input.value = session.title || '';
+      input.dataset.id = id;
+      input.setAttribute('aria-label', 'Rename session');
+      input.setAttribute('autocomplete', 'off');
+      info.appendChild(input);
+      
+      // Store reference for focus
+      editingInputRef = input;
+      
+      // Also add hidden title for structure
+      const titleDiv = document.createElement('div');
+      titleDiv.className = 'session-title';
+      titleDiv.textContent = session.title || 'Untitled';
+      info.appendChild(titleDiv);
+    } else {
+      const titleDiv = document.createElement('div');
+      titleDiv.className = 'session-title';
+      titleDiv.textContent = session.title || 'Untitled';
+      info.appendChild(titleDiv);
+    }
+    
     row.appendChild(info);
 
     const actions = document.createElement('div');
-    actions.className = 'session-actions';
+    actions.className = isEditing ? 'session-rename-actions' : 'session-actions';
     
-    const editBtn = document.createElement('button');
-    editBtn.className = 'action-btn edit';
-    editBtn.textContent = '✎';
-    editBtn.title = 'Rename';
-    editBtn.dataset.id = id;
-    actions.appendChild(editBtn);
-
-    const delBtn = document.createElement('button');
-    delBtn.className = 'action-btn delete';
-    delBtn.dataset.id = id;
-
-    if (id === confirmingId) {
-      delBtn.classList.add('confirming');
-      delBtn.textContent = '✓';
-      delBtn.title = 'Confirm Delete';
+    if (isEditing) {
+      // Save button
+      const saveBtn = document.createElement('button');
+      saveBtn.className = 'action-btn save';
+      saveBtn.textContent = '✓';
+      saveBtn.title = 'Save';
+      saveBtn.dataset.id = id;
+      saveBtn.dataset.action = 'save-rename';
+      actions.appendChild(saveBtn);
+      
+      // Cancel button
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'action-btn cancel';
+      cancelBtn.textContent = '✕';
+      cancelBtn.title = 'Cancel';
+      cancelBtn.dataset.id = id;
+      cancelBtn.dataset.action = 'cancel-rename';
+      actions.appendChild(cancelBtn);
     } else {
-      delBtn.textContent = '✕';
-      delBtn.title = 'Delete';
+      const editBtn = document.createElement('button');
+      editBtn.className = 'action-btn edit';
+      editBtn.textContent = '✎';
+      editBtn.title = 'Rename';
+      editBtn.dataset.id = id;
+      actions.appendChild(editBtn);
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'action-btn delete';
+      delBtn.dataset.id = id;
+
+      if (id === confirmingId) {
+        delBtn.classList.add('confirming');
+        delBtn.textContent = '✓';
+        delBtn.title = 'Confirm Delete';
+      } else {
+        delBtn.textContent = '✕';
+        delBtn.title = 'Delete';
+      }
+      actions.appendChild(delBtn);
     }
-    actions.appendChild(delBtn);
 
     row.appendChild(actions);
     fragment.appendChild(row);
   });
 
   els.sessionMenu.appendChild(fragment);
+  
+  // Focus the input after DOM is updated
+  if (editingInputRef && editingId) {
+    requestAnimationFrame(() => {
+      if (editingInputRef) {
+        editingInputRef.focus();
+        editingInputRef.select();
+      }
+    });
+  }
+}
+
+/**
+ * Get the current value from the rename input
+ * @returns {string|null} The input value or null if not editing
+ */
+export function getRenameInputValue() {
+  if (!editingInputRef) return null;
+  return editingInputRef.value.trim();
+}
+
+/**
+ * Get the editing session ID
+ * @returns {string|null}
+ */
+export function getEditingSessionId() {
+  return editingSessionId;
+}
+
+/**
+ * Set the editing session ID
+ * @param {string|null} id
+ */
+export function setEditingSessionId(id) {
+  editingSessionId = id;
+  if (!id) {
+    editingInputRef = null;
+  }
 }
 
 export function setSessionSearchTerm(value) {
