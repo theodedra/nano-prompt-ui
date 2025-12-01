@@ -1,6 +1,6 @@
 // utils.js - General utility functions
 
-import { VALIDATION, LIMITS } from './constants.js';
+import { VALIDATION } from './constants.js';
 
 /**
  * Query selector helper
@@ -134,48 +134,6 @@ export function nanoid(size = 10) {
   return id;
 }
 
-/**
- * Resize image file to max width while maintaining aspect ratio
- * @param {File} file - Image file to resize
- * @param {number} maxWidth - Maximum width in pixels
- * @returns {Promise<string>} Base64 encoded image data URL
- */
-export function resizeImage(file, maxWidth = LIMITS.IMAGE_DEFAULT_MAX_WIDTH) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-        if (width > maxWidth) {
-          height = Math.round(height * (maxWidth / width));
-          width = maxWidth;
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-/**
- * Convert data URL to Blob for AI model input
- * @param {string} dataUrl - Data URL string
- * @returns {Promise<Blob>} Image blob
- */
-export async function dataUrlToBlob(dataUrl) {
-  const res = await fetch(dataUrl);
-  return await res.blob();
-}
 
 /**
  * PRODUCTION READY MARKDOWN SANITIZER

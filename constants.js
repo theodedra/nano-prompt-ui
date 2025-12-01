@@ -46,7 +46,6 @@ export const LIMITS = {
   // Image processing
   IMAGE_MAX_WIDTH: 1_024,             // Max width for uploaded images
   IMAGE_MAX_WIDTH_DESCRIPTION: 512,   // Max width for image description
-  IMAGE_DEFAULT_MAX_WIDTH: 800,       // Default max width for resizeImage function
   IMAGE_QUALITY: 0.7,                 // JPEG compression quality (0-1)
   MAX_ATTACHMENTS: 3,                 // Max number of attachments per message
 
