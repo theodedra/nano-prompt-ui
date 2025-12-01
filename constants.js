@@ -8,6 +8,7 @@ export const TIMING = {
   // Context caching and refresh
   CONTEXT_CACHE_MS: 15_000,           // How long to cache context before refresh
   TAB_UPDATE_DEBOUNCE_MS: 300,        // Debounce for tab switch/update events
+  STATE_SAVE_DEBOUNCE_MS: 200,        // Debounce for IndexedDB + sync writes
 
   // Network timeouts
   IMAGE_FETCH_TIMEOUT_MS: 5_000,      // Timeout for image download

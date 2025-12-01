@@ -7,7 +7,8 @@ import {
   BLANK_TEMPLATE_ID,
   DEFAULT_SETTINGS,
   VALIDATION,
-  USER_ERROR_MESSAGES
+  USER_ERROR_MESSAGES,
+  TIMING
 } from './constants.js';
 
 const { DB_NAME, DB_VERSION, STORES } = STORAGE_KEYS;
@@ -42,6 +43,9 @@ const dirtySessions = new Set();
 const markMetaDirty = () => { metaDirty = true; };
 let metaDirty = false;
 const MAX_CONTEXT_SNAPSHOTS = 15;
+const saveWaiters = [];
+let saveTimerId = null;
+let inFlightSave = null;
 
 /**
  * IndexedDB connection promise
@@ -492,11 +496,27 @@ export function renameSession(sessionId, title) {
   dirtySessions.add(sessionId);
 }
 
+const registerSaveWaiter = () => new Promise((resolve, reject) => {
+  saveWaiters.push({ resolve, reject });
+});
+
+const settleSaveWaiters = (result, isError = false) => {
+  if (!saveWaiters.length) return;
+  const pending = saveWaiters.splice(0, saveWaiters.length);
+  pending.forEach(({ resolve, reject }) => {
+    if (isError) {
+      reject(result);
+    } else {
+      resolve(result);
+    }
+  });
+};
+
 /**
- * Save state to IndexedDB and chrome.storage.sync
+ * Internal: save state to IndexedDB and chrome.storage.sync
  * @returns {Promise<void>}
  */
-export async function saveState() {
+async function persistStateToStorage() {
   ensureDefaultSession();
 
   try {
@@ -518,11 +538,12 @@ export async function saveState() {
 
       if (hasSessionChanges) {
         const sessionStore = tx.objectStore(STORES.SESSIONS);
-        dirtySessions.forEach(id => {
+        const sessionsToSave = Array.from(dirtySessions);
+        sessionsToSave.forEach(id => {
           const s = appState.sessions[id];
           if (s) sessionStore.put(s);
         });
-        dirtySessions.clear();
+        sessionsToSave.forEach(id => dirtySessions.delete(id));
       }
     }
 
@@ -536,6 +557,57 @@ export async function saveState() {
     settings: appState.settings
   };
   chrome.storage.sync.set({ [SYNC_KEY]: settingsPayload });
+}
+
+async function startStateSave() {
+  if (inFlightSave) {
+    try { await inFlightSave; } catch { /* Previous failure already surfaced */ }
+  }
+
+  const savePromise = persistStateToStorage();
+  inFlightSave = savePromise;
+
+  savePromise
+    .then((res) => settleSaveWaiters(res, false))
+    .catch((err) => settleSaveWaiters(err, true))
+    .finally(() => {
+      if (inFlightSave === savePromise) inFlightSave = null;
+    });
+
+  return savePromise;
+}
+
+function queueStateSave() {
+  const waiter = registerSaveWaiter();
+  if (saveTimerId) clearTimeout(saveTimerId);
+
+  saveTimerId = setTimeout(() => {
+    saveTimerId = null;
+    startStateSave();
+  }, TIMING.STATE_SAVE_DEBOUNCE_MS);
+
+  return waiter;
+}
+
+function flushQueuedStateSave() {
+  if (saveTimerId) {
+    clearTimeout(saveTimerId);
+    saveTimerId = null;
+  }
+  const waiter = registerSaveWaiter();
+  startStateSave();
+  return waiter;
+}
+
+/**
+ * Debounced state persistence. Uses dirtySessions/metaDirty to coalesce writes.
+ * Pass { flush: true } to force immediate persistence.
+ * @param {{flush?: boolean}} options
+ * @returns {Promise<void>}
+ */
+export function saveState(options = {}) {
+  const { flush = false } = options;
+  return flush ? flushQueuedStateSave() : queueStateSave();
 }
 
 /**
