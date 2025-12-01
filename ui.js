@@ -180,7 +180,7 @@ export function renderContextSnapshots(
     const row = document.createElement('li');
     row.className = 'snapshot-row';
     row.dataset.id = snap.id;
-    if (snap.id === activeId) row.classList.add('active');
+    if (snap.id === activeId) row.classList.add('is-active');
 
     const info = document.createElement('div');
     info.className = 'snapshot-info';
@@ -274,10 +274,10 @@ export function setBusy(isBusy) {
   if (els.avail) {
     if (isBusy) {
       els.avail.textContent = UI_MESSAGES.THINKING;
-      els.avail.classList.add('pulse');
+      els.avail.classList.add('is-streaming');
     } else {
       els.avail.textContent = lastStatus;
-      els.avail.classList.remove('pulse');
+      els.avail.classList.remove('is-streaming');
     }
   }
 }
@@ -477,8 +477,8 @@ export function renderSessions({
     
     const row = document.createElement('li');
     row.className = 'session-row';
-    if (id === currentSessionId) row.classList.add('active');
-    if (isEditing) row.classList.add('editing');
+    if (id === currentSessionId) row.classList.add('is-active');
+    if (isEditing) row.classList.add('is-editing');
     row.dataset.id = id;
 
     const info = document.createElement('div');
@@ -546,7 +546,7 @@ export function renderSessions({
       delBtn.dataset.id = id;
 
       if (id === confirmingId) {
-        delBtn.classList.add('confirming');
+        delBtn.classList.add('is-confirming');
         delBtn.textContent = '✓';
         delBtn.title = 'Confirm Delete';
       } else {
@@ -1007,7 +1007,7 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     
     const item = document.createElement('li');
     item.className = 'template-row';
-    if (isEditing) item.classList.add('editing');
+    if (isEditing) item.classList.add('is-editing');
     item.dataset.id = t.id;
     
     if (isEditing) {
@@ -1114,7 +1114,7 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
   // Add "New Template" form if adding
   if (isAddingNewTemplate) {
     const addFormRow = document.createElement('li');
-    addFormRow.className = 'template-row editing new-template';
+    addFormRow.className = 'template-row is-editing new-template';
     
     const editContainer = document.createElement('div');
     editContainer.className = 'template-edit-form';
@@ -1244,8 +1244,8 @@ export function setMicState(active) {
   if (els.mic) {
     els.mic.setAttribute('aria-pressed', active ? 'true' : 'false');
     els.mic.innerHTML = active ? ICON_STOP : ICON_MIC;
-    if (active) els.mic.classList.add('recording');
-    else els.mic.classList.remove('recording');
+    if (active) els.mic.classList.add('is-recording');
+    else els.mic.classList.remove('is-recording');
   }
 }
 

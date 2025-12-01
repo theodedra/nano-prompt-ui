@@ -21,7 +21,7 @@ export function showToast(message, type = 'info', duration = TIMING.TOAST_DURATI
   }
 
   const toast = document.createElement('div');
-  toast.className = `toast-notification toast-${type}`;
+  toast.className = `toast-notification is-${type}`;
   toast.setAttribute('role', 'alert');
   toast.setAttribute('aria-live', 'polite');
 
@@ -39,7 +39,7 @@ export function showToast(message, type = 'info', duration = TIMING.TOAST_DURATI
 
   // Trigger animation
   requestAnimationFrame(() => {
-    toast.classList.add('toast-show');
+    toast.classList.add('is-visible');
   });
 
   // Auto-dismiss after duration
@@ -55,8 +55,8 @@ export function showToast(message, type = 'info', duration = TIMING.TOAST_DURATI
 function hideToast(toast) {
   if (!toast) return;
 
-  toast.classList.remove('toast-show');
-  toast.classList.add('toast-hide');
+  toast.classList.remove('is-visible');
+  toast.classList.add('is-hiding');
 
   // Remove from DOM after animation completes
   setTimeout(() => {
@@ -113,7 +113,7 @@ export function showProgressToast(message, current = 0, total = 100) {
   }
 
   const toast = document.createElement('div');
-  toast.className = 'toast-notification toast-progress';
+  toast.className = 'toast-notification is-progress';
   toast.setAttribute('role', 'status');
   toast.setAttribute('aria-live', 'polite');
 
@@ -135,7 +135,7 @@ export function showProgressToast(message, current = 0, total = 100) {
 
   // Trigger animation
   requestAnimationFrame(() => {
-    toast.classList.add('toast-show');
+    toast.classList.add('is-visible');
   });
 
   return {
