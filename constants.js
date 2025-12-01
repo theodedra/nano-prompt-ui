@@ -21,6 +21,9 @@ export const TIMING = {
 
   // Model warmup
   WARMUP_DELAY_MS: 0,                 // Delay before model warmup (0 = immediate)
+
+  // Storage persistence
+  SAVE_STATE_DEBOUNCE_MS: 500,        // Debounce for IndexedDB writes to avoid thrash
 };
 
 // ============================================================================

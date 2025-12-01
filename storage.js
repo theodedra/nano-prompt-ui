@@ -7,7 +7,8 @@ import {
   BLANK_TEMPLATE_ID,
   DEFAULT_SETTINGS,
   VALIDATION,
-  USER_ERROR_MESSAGES
+  USER_ERROR_MESSAGES,
+  TIMING
 } from './constants.js';
 
 const { DB_NAME, DB_VERSION, STORES } = STORAGE_KEYS;
@@ -536,6 +537,43 @@ export async function saveState() {
     settings: appState.settings
   };
   chrome.storage.sync.set({ [SYNC_KEY]: settingsPayload });
+}
+
+/**
+ * Debounced save state - coalesces rapid writes into a single IndexedDB transaction
+ * Uses dirtySessions tracking to batch all pending changes
+ */
+let saveTimeout = null;
+let savePromise = null;
+
+export function scheduleSaveState() {
+  if (saveTimeout) return; // Already scheduled
+  
+  saveTimeout = setTimeout(async () => {
+    saveTimeout = null;
+    savePromise = saveState();
+    await savePromise;
+    savePromise = null;
+  }, TIMING.SAVE_STATE_DEBOUNCE_MS);
+}
+
+/**
+ * Flush any pending debounced save immediately
+ * Call this before critical operations or page unload
+ * @returns {Promise<void>}
+ */
+export async function flushSaveState() {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout);
+    saveTimeout = null;
+  }
+  if (savePromise) {
+    await savePromise;
+  }
+  // Always save to ensure any dirty state is persisted
+  if (dirtySessions.size > 0 || metaDirty) {
+    await saveState();
+  }
 }
 
 /**

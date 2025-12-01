@@ -1,4 +1,4 @@
-import { $, formatTime, formatDate, markdownToHtml } from './utils.js';
+import { $, formatTime, formatDate, markdownToHtml, escapeHtml } from './utils.js';
 import { UI_MESSAGES, ICONS } from './constants.js';
 import { VirtualScroller } from './virtual-scroll.js';
 
@@ -424,7 +424,10 @@ export function renderSessions({
 
     const info = document.createElement('div');
     info.className = 'session-info';
-    info.innerHTML = `<div class="session-title">${session.title || 'Untitled'}</div>`;
+    const titleDiv = document.createElement('div');
+    titleDiv.className = 'session-title';
+    titleDiv.textContent = session.title || 'Untitled';
+    info.appendChild(titleDiv);
     row.appendChild(info);
 
     const actions = document.createElement('div');
@@ -1035,7 +1038,7 @@ export function renderSetupGuide(status) {
     html += `<div class="setup-section error">
       <h3>❌ Unsupported Browser</h3>
       <p>Chrome Built-in AI APIs are only available in Google Chrome.</p>
-      <p><strong>Your browser:</strong> ${navigator.userAgent}</p>
+      <p><strong>Your browser:</strong> ${escapeHtml(navigator.userAgent)}</p>
     </div>`;
     setSetupGuideContent(html);
     return;
@@ -1073,7 +1076,7 @@ export function renderSetupGuide(status) {
         <span class="api-icon">${statusIcon}</span>
         <div style="flex: 1;">
           <div class="api-name">${getAPIName(api)}</div>
-          <div class="api-status">${api.message}</div>
+          <div class="api-status">${escapeHtml(api.message)}</div>
         </div>
       </div>`;
 
@@ -1081,9 +1084,9 @@ export function renderSetupGuide(status) {
       html += `<div class="api-instructions">
         <p><strong>To enable:</strong></p>
         <ol>
-          <li>Copy this flag: <code class="flag-url">${api.flag}</code></li>
+          <li>Copy this flag: <code class="flag-url">${escapeHtml(api.flag)}</code></li>
           <li>Paste it into your Chrome address bar</li>
-          <li>Set to: <strong>${api.flagValue}</strong></li>
+          <li>Set to: <strong>${escapeHtml(api.flagValue)}</strong></li>
           <li>Click "Relaunch" button</li>
         </ol>
       </div>`;
@@ -1110,13 +1113,13 @@ export function renderSetupGuide(status) {
         <span class="api-icon">${statusIcon}</span>
         <div style="flex: 1;">
           <div class="api-name">${getAPIName(api)}</div>
-          <div class="api-status">${api.message}</div>
+          <div class="api-status">${escapeHtml(api.message)}</div>
         </div>
       </div>`;
 
     if (!api.available && api.fallback) {
       html += `<div class="api-info">
-        <p><strong>Fallback:</strong> ${api.fallback}</p>
+        <p><strong>Fallback:</strong> ${escapeHtml(api.fallback)}</p>
       </div>`;
     }
 
@@ -1124,8 +1127,8 @@ export function renderSetupGuide(status) {
       html += `<div class="api-instructions collapsed">
         <p><strong>To enable (optional):</strong></p>
         <ol>
-          <li>Flag: <code class="flag-url">${api.flag}</code></li>
-          <li>Set to: <strong>${api.flagValue}</strong></li>
+          <li>Flag: <code class="flag-url">${escapeHtml(api.flag)}</code></li>
+          <li>Set to: <strong>${escapeHtml(api.flagValue)}</strong></li>
         </ol>
       </div>`;
     }

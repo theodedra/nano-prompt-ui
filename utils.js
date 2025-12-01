@@ -217,7 +217,7 @@ export function markdownToHtml(md) {
  * @param {string} unsafe - Unsafe HTML string
  * @returns {string} Escaped HTML
  */
-function escapeHtml(unsafe) {
+export function escapeHtml(unsafe) {
   return unsafe
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")

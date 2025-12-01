@@ -1,5 +1,7 @@
 // setup-guide.js - API availability detection and setup guide
 
+import { escapeHtml } from './utils.js';
+
 /**
  * Helper to get the AI language model API reference
  * In Chrome extensions, the API is exposed as a global LanguageModel class
@@ -150,7 +152,7 @@ async function checkPromptAPI() {
     return {
       available: false,
       status: 'error',
-      message: `Error: ${e.message}`,
+      message: `Error: ${escapeHtml(e.message)}`,
       flag: 'chrome://flags/#prompt-api-for-gemini-nano',
       flagValue: 'Enabled, Enabled multilingual, or Enabled Bypass',
       required: true

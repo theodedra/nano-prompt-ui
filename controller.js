@@ -13,7 +13,8 @@ import {
   getCurrentSessionSync,
   upsertMessage,
   updateMessage,
-  saveState,
+  scheduleSaveState,
+  flushSaveState,
   renameSession,
   searchSessions,
   setCurrentSession,
@@ -58,7 +59,7 @@ export function getCurrentSession() {
  */
 export async function switchSession(sessionId) {
   await setCurrentSession(sessionId);
-  await saveState();
+  await flushSaveState(); // Immediate save for user action
   renderSessionsList();
   renderCurrentLog();
   UI.closeMenu('session');
@@ -70,7 +71,7 @@ export async function switchSession(sessionId) {
 export async function createNewSession() {
   const session = createSessionFrom();
   await setCurrentSession(session.id);
-  await saveState();
+  await flushSaveState(); // Immediate save for user action
   renderSessionsList();
   renderCurrentLog();
   UI.closeMenu('session');
@@ -83,7 +84,7 @@ export async function createNewSession() {
  */
 export async function removeSession(sessionId) {
   deleteSession(sessionId);
-  await saveState();
+  await flushSaveState(); // Immediate save for destructive action
   renderSessionsList();
   renderCurrentLog();
   toast.success('Chat deleted');
@@ -96,7 +97,7 @@ export async function removeSession(sessionId) {
  */
 export async function renameSessionById(sessionId, newTitle) {
   renameSession(sessionId, newTitle);
-  await saveState();
+  await flushSaveState(); // Immediate save for user action
   renderSessionsList();
   toast.success('Chat renamed');
 }
@@ -167,10 +168,15 @@ export function patchMessage(sessionId, index, patch) {
 }
 
 /**
- * Persist current state
+ * Persist current state (debounced by default)
+ * @param {{immediate?: boolean}} options - Set immediate: true for critical saves
  */
-export async function persistState() {
-  await saveState();
+export async function persistState({ immediate = false } = {}) {
+  if (immediate) {
+    await flushSaveState();
+  } else {
+    scheduleSaveState();
+  }
 }
 
 // --- STATUS & BUSY STATE ---
@@ -409,7 +415,7 @@ export function trapFocus(event, container) {
  */
 export async function updateSessionTitle(sessionId, title) {
   renameSession(sessionId, title);
-  await saveState();
+  scheduleSaveState(); // Debounced save for background operation
   renderSessionsList();
 }
 

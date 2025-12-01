@@ -10,6 +10,7 @@ import { getSettingOrDefault, LANGUAGE_LABELS, THEME_LABELS } from './constants.
 import { getSetupStatus } from './setup-guide.js';
 import { toast } from './toast.js';
 import * as UI from './ui.js';
+import { escapeHtml } from './utils.js';
 
 /**
  * Handle settings button click - open settings modal
@@ -196,6 +197,6 @@ export async function handleOpenSetupGuide() {
     const status = await getSetupStatus();
     UI.renderSetupGuide(status);
   } catch (e) {
-    UI.setSetupGuideContent(`<p class="error">Error checking API status: ${e.message}</p>`);
+    UI.setSetupGuideContent(`<p class="error">Error checking API status: ${escapeHtml(e.message)}</p>`);
   }
 }

@@ -104,7 +104,7 @@ async function applySnapshot(snapshot, { announce = false } = {}) {
   await Controller.persistContextDraft(snapshot.text);
   Controller.setRestrictedState(false);
   Controller.renderContextUI();
-  await Controller.persistState();
+  await Controller.persistState({ immediate: true }); // User action
   if (announce) Controller.showToast('success', 'Using saved context');
 }
 
@@ -132,7 +132,7 @@ async function handleDeleteSnapshot(id) {
     }
   } else {
     Controller.renderContextUI();
-    await Controller.persistState();
+    await Controller.persistState({ immediate: true }); // Destructive action
   }
   Controller.showToast('success', 'Snapshot deleted');
 }
@@ -151,7 +151,7 @@ async function useLiveContext({ quiet = false } = {}) {
     await Controller.persistContextDraft(liveText);
     Controller.setRestrictedState(Boolean(liveCtx?.isRestricted));
 
-    await Controller.persistState();
+    await Controller.persistState({ immediate: true }); // User action
     if (!quiet) Controller.showToast('success', 'Live tab context restored');
   } catch (e) {
     console.warn('Failed to refresh live context', e);
