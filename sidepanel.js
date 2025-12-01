@@ -1,8 +1,13 @@
+/**
+ * Side Panel Entry Point
+ * 
+ * Wires up UI event bindings and bootstraps the application.
+ */
+
 import * as UI from './ui.js';
 import * as ChatHandlers from './chat-handlers.js';
 import * as AttachmentHandlers from './attachment-handlers.js';
 import * as SettingsHandlers from './settings-handlers.js';
-import { refreshAvailability } from './model.js';
 
 function bind(selector, event, handler) {
   const el = document.querySelector(selector);
@@ -12,7 +17,7 @@ function bind(selector, event, handler) {
 document.addEventListener('DOMContentLoaded', async () => {
   UI.initUI();
   await ChatHandlers.bootstrap();
-  await refreshAvailability({ forceCheck: true });
+  await ChatHandlers.refreshAvailability({ forceCheck: true });
 
   // --- EVENT BINDINGS ---
   const bindings = [

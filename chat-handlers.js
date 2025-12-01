@@ -1,37 +1,14 @@
-import {
-  appState,
-  loadState,
-  saveState,
-  createSessionFrom,
-  deleteSession,
-  setCurrentSession,
-  getCurrentSessionSync,
-  clearPendingAttachments,
-  getPendingAttachments,
-  updateContextDraft,
-  saveContextDraft,
-  renameSession,
-  searchSessions,
-  summarizeSession,
-  BLANK_TEMPLATE_ID,
-  addContextSnapshot,
-  getContextSnapshotById,
-  getActiveSnapshot,
-  removeContextSnapshot,
-  setActiveSnapshot
-} from './storage.js';
-import * as UI from './ui.js';
-import {
-  runPrompt,
-  summarizeActiveTab,
-  cancelGeneration,
-  speakText,
-  resetModel,
-  isSomethingRunning
-} from './model.js';
+/**
+ * Chat Handlers - UI Event Handlers
+ * 
+ * Handles user interactions and dispatches to controller.
+ * Does NOT directly access storage or model - only through controller.
+ */
+
+import * as Controller from './controller.js';
+import * as Model from './model.js';
 import { fetchContext, classifyIntent } from './context.js';
 import { debounce } from './utils.js';
-import { toast } from './toast.js';
 import {
   TIMING,
   LIMITS,
@@ -46,7 +23,6 @@ let recognition;
 let recognizing = false;
 let tabListenersAttached = false;
 let confirmingDeleteId = null;
-let sessionSearchTerm = '';
 let isSnapshotBusy = false;
 
 /**
@@ -60,21 +36,19 @@ async function refreshContextDraft(force = false, shouldSave = true) {
     const ctx = await fetchContext(force);
     const text = ctx?.text || '';
 
-    UI.setRestrictedState(Boolean(ctx?.isRestricted));
-
-    UI.restoreStopButtonState(isSomethingRunning());
-
-    updateContextDraft(text);
+    Controller.setRestrictedState(Boolean(ctx?.isRestricted));
+    Controller.restoreStopButtonState(Model.isSomethingRunning());
+    Controller.setContextDraft(text);
 
     if (shouldSave) {
-      await saveContextDraft(text);
+      await Controller.persistContextDraft(text);
     }
 
-    UI.setContextText(text);
+    Controller.setContextText(text);
     return text;
   } catch (e) {
     console.warn('Context refresh failed', e);
-    toast.error(USER_ERROR_MESSAGES.CONTEXT_FETCH_FAILED);
+    Controller.showToast('error', USER_ERROR_MESSAGES.CONTEXT_FETCH_FAILED);
     return '';
   }
 }
@@ -97,29 +71,6 @@ function ensureTabContextSync() {
   tabListenersAttached = true;
 }
 
-function renderSessionsList(confirmingId = null) {
-  const current = getCurrentSessionSync();
-  const matches = searchSessions(sessionSearchTerm);
-  UI.renderSessions({
-    sessions: appState.sessions,
-    sessionMeta: appState.sessionMeta,
-    currentSessionId: appState.currentSessionId,
-    currentTitle: current?.title,
-    matches,
-    searchTerm: sessionSearchTerm,
-    confirmingId
-  });
-}
-
-function renderLogForCurrent() {
-  UI.renderLog(getCurrentSessionSync());
-}
-
-function renderContextUI() {
-  UI.renderContextSnapshots(appState.contextSnapshots, appState.activeSnapshotId);
-  UI.setContextSourceLabel(getActiveSnapshot());
-}
-
 function getSnapshotHost(url = '') {
   try {
     return url ? new URL(url).hostname : '';
@@ -134,73 +85,77 @@ function clampLabel(text = '', max = 80) {
 }
 
 function getSessionMarkdown(sessionId) {
-  const session = appState.sessions[sessionId];
+  const session = Controller.getSession(sessionId);
   if (!session) return '';
   return session.messages.map(m => `### ${m.role === 'user' ? 'User' : 'Nano'}\n${m.text}`).join('\n\n');
 }
 
 function getSessionPlaintext(sessionId) {
-  return summarizeSession(sessionId);
+  const session = Controller.getSession(sessionId);
+  if (!session) return '';
+  return session.messages.map(m => `${m.role === 'user' ? 'User' : 'Nano'}: ${m.text}`).join('\n\n');
 }
 
 async function applySnapshot(snapshot, { announce = false } = {}) {
   if (!snapshot) return;
-  setActiveSnapshot(snapshot.id);
-  UI.setContextText(snapshot.text);
-  updateContextDraft(snapshot.text);
-  await saveContextDraft(snapshot.text);
-  UI.setRestrictedState(false);
-  renderContextUI();
-  await saveState();
-  if (announce) toast.success('Using saved context');
+  Controller.activateSnapshot(snapshot.id);
+  Controller.setContextText(snapshot.text);
+  Controller.setContextDraft(snapshot.text);
+  await Controller.persistContextDraft(snapshot.text);
+  Controller.setRestrictedState(false);
+  Controller.renderContextUI();
+  await Controller.persistState();
+  if (announce) Controller.showToast('success', 'Using saved context');
 }
 
 async function applySnapshotById(id) {
   if (!id) return;
-  const snapshot = getContextSnapshotById(id);
+  const snapshot = Controller.getSnapshotById(id);
   if (!snapshot) return;
   await applySnapshot(snapshot, { announce: true });
 }
 
 async function handleDeleteSnapshot(id) {
   if (!id) return;
-  const wasActive = appState.activeSnapshotId === id;
-  const removed = removeContextSnapshot(id);
+  const activeSnapshotId = Controller.getActiveContextSnapshot()?.id;
+  const wasActive = activeSnapshotId === id;
+  const removed = Controller.deleteSnapshot(id);
   if (!removed) return;
 
   if (wasActive) {
-    const fallback = appState.contextSnapshots[0];
-    if (fallback) {
-      await applySnapshot(fallback);
+    // Get first remaining snapshot
+    const snapshots = Controller.getSession(Controller.getCurrentSessionId())?.contextSnapshots || [];
+    if (snapshots[0]) {
+      await applySnapshot(snapshots[0]);
     } else {
       await useLiveContext({ quiet: true });
     }
   } else {
-    renderContextUI();
-    await saveState();
+    Controller.renderContextUI();
+    await Controller.persistState();
   }
-  toast.success('Snapshot deleted');
+  Controller.showToast('success', 'Snapshot deleted');
 }
 
 async function useLiveContext({ quiet = false } = {}) {
   if (isSnapshotBusy) return;
   isSnapshotBusy = true;
   try {
-    setActiveSnapshot(null);
-    renderContextUI();
+    Controller.activateSnapshot(null);
+    Controller.renderContextUI();
 
     const liveCtx = await fetchContext(true, { respectSnapshot: false });
     const liveText = liveCtx?.text || '';
-    UI.setContextText(liveText);
-    updateContextDraft(liveText);
-    await saveContextDraft(liveText);
-    UI.setRestrictedState(Boolean(liveCtx?.isRestricted));
+    Controller.setContextText(liveText);
+    Controller.setContextDraft(liveText);
+    await Controller.persistContextDraft(liveText);
+    Controller.setRestrictedState(Boolean(liveCtx?.isRestricted));
 
-    await saveState();
-    if (!quiet) toast.success('Live tab context restored');
+    await Controller.persistState();
+    if (!quiet) Controller.showToast('success', 'Live tab context restored');
   } catch (e) {
     console.warn('Failed to refresh live context', e);
-    toast.error('Could not refresh live context.');
+    Controller.showToast('error', 'Could not refresh live context.');
   } finally {
     isSnapshotBusy = false;
   }
@@ -212,11 +167,11 @@ export async function handleSaveSnapshotClick() {
   try {
     const ctx = await fetchContext(true, { respectSnapshot: false });
     if (ctx?.isRestricted || !ctx?.text) {
-      toast.error('Context not available on this page.');
+      Controller.showToast('error', 'Context not available on this page.');
       return;
     }
 
-    const snapshot = addContextSnapshot({
+    const snapshot = Controller.saveSnapshot({
       title: clampLabel(ctx.title || getSnapshotHost(ctx.url)),
       url: ctx.url || '',
       text: ctx.text,
@@ -226,11 +181,11 @@ export async function handleSaveSnapshotClick() {
     if (snapshot) {
       await applySnapshot(snapshot, { announce: true });
     } else {
-      toast.error('Could not save context snapshot.');
+      Controller.showToast('error', 'Could not save context snapshot.');
     }
   } catch (e) {
     console.warn('Snapshot save failed', e);
-    toast.error('Failed to save context snapshot.');
+    Controller.showToast('error', 'Failed to save context snapshot.');
   } finally {
     isSnapshotBusy = false;
   }
@@ -263,18 +218,24 @@ export async function handleSnapshotListClick(event) {
  */
 export async function bootstrap() {
   registerContextMenuHandlers();
+  
+  // Load state is handled by storage module import
+  const { loadState, appState, getPendingAttachments, BLANK_TEMPLATE_ID } = await import('./storage.js');
   await loadState();
 
-  UI.applyTheme(getSettingOrDefault(appState.settings, 'theme'));
+  Controller.applyTheme(getSettingOrDefault(appState.settings, 'theme'));
 
-  sessionSearchTerm = UI.getSessionSearchValue();
-
+  Controller.setSessionSearchTerm(Controller.getSessionSearchTerm());
+  
+  // Import UI for template initialization
+  const UI = await import('./ui.js');
   UI.updateTemplates(appState.templates, BLANK_TEMPLATE_ID);
-  renderSessionsList();
-  UI.setContextText(appState.contextDraft);
+  
+  Controller.renderSessionsList();
+  Controller.setContextText(appState.contextDraft);
   UI.renderPendingAttachments(getPendingAttachments());
-  renderLogForCurrent();
-  renderContextUI();
+  Controller.renderCurrentLog();
+  Controller.renderContextUI();
 
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('mic_setup') === 'true') {
@@ -289,21 +250,142 @@ export async function bootstrap() {
 }
 
 /**
+ * Run a prompt through the AI
+ * @param {string} text - Prompt text
+ * @param {string} contextOverride - Context to use
+ * @param {Array} attachments - Attachments
+ * @param {string} displayText - Text to show in chat (optional)
+ */
+async function executePrompt(text, contextOverride, attachments, displayText = null) {
+  const session = Controller.getCurrentSession();
+  const settings = Controller.getSettings();
+  
+  // Clear smart replies
+  Controller.renderSmartReplies([]);
+  
+  // Add user message
+  const userMessage = { 
+    role: 'user', 
+    text: displayText || text, 
+    ts: Date.now(), 
+    attachments 
+  };
+  Controller.addMessage(session.id, userMessage);
+  Controller.refreshLog();
+  
+  // Set up AI message placeholder
+  Controller.setBusy(true);
+  Controller.setStopEnabled(true);
+  Controller.setStatus('Thinking...');
+  
+  const aiMessageIndex = session.messages.length;
+  Controller.addMessage(session.id, { role: 'ai', text: '', ts: Date.now() });
+  Controller.refreshLog();
+  
+  let lastAiText = '';
+  
+  const result = await Model.runPrompt({
+    sessionId: session.id,
+    text,
+    contextOverride,
+    attachments,
+    settings
+  }, {
+    onChunk: (chunk) => {
+      Controller.patchMessage(session.id, aiMessageIndex, { text: chunk });
+      Controller.updateLastBubble(chunk, { streaming: true });
+    },
+    onComplete: (finalText) => {
+      Controller.patchMessage(session.id, aiMessageIndex, { text: finalText });
+      Controller.updateLastBubble(finalText);
+      lastAiText = finalText;
+    },
+    onError: (err) => {
+      const msg = err.message || USER_ERROR_MESSAGES.AI_UNAVAILABLE;
+      Controller.patchMessage(session.id, aiMessageIndex, { text: `Error: ${msg}` });
+      Controller.updateLastBubble(`Error: ${msg}`);
+      Controller.showToast('error', msg);
+    },
+    onAbort: () => {
+      const currentMessage = session.messages[aiMessageIndex];
+      const currentText = currentMessage?.text || '';
+      
+      if (currentText && currentText.trim().length > 0) {
+        const stoppedText = currentText + '\n\n' + UI_MESSAGES.STOPPED;
+        Controller.patchMessage(session.id, aiMessageIndex, { text: stoppedText });
+        Controller.updateLastBubble(stoppedText);
+      } else {
+        Controller.patchMessage(session.id, aiMessageIndex, { text: UI_MESSAGES.STOPPED });
+        Controller.updateLastBubble(UI_MESSAGES.STOPPED);
+      }
+    }
+  });
+  
+  Controller.setBusy(false);
+  Controller.setStopEnabled(false);
+  Controller.setStatus('Ready to chat.');
+  await Controller.persistState();
+  
+  // Generate smart replies in background
+  if (!result.aborted && lastAiText) {
+    generateSmartRepliesBackground(session.id, userMessage.text, lastAiText, aiMessageIndex);
+  }
+  
+  // Auto-generate title for first exchange
+  if (session.messages.length === 2) {
+    generateTitleBackground(session.id);
+  }
+}
+
+async function generateSmartRepliesBackground(sessionId, userText, aiText, aiIndex) {
+  try {
+    const settings = Controller.getSettings();
+    const replies = await Model.generateSmartReplies(userText, aiText, settings);
+    Controller.patchMessage(sessionId, aiIndex, { smartReplies: replies });
+    
+    if (Controller.getCurrentSessionId() === sessionId) {
+      Controller.renderSmartReplies(replies);
+    }
+    await Controller.persistState();
+  } catch (e) {
+    console.warn('Smart reply generation failed', e);
+  }
+}
+
+async function generateTitleBackground(sessionId) {
+  try {
+    const session = Controller.getSession(sessionId);
+    if (!session || session.messages.length < 2) return;
+    if (session.title !== 'New chat' && !session.title.endsWith('copy')) return;
+    
+    const userMsg = session.messages.find(m => m.role === 'user');
+    const aiMsg = session.messages.find(m => m.role === 'ai');
+    if (!userMsg || !aiMsg) return;
+    
+    const title = await Model.generateTitle(userMsg.text, aiMsg.text);
+    if (title) {
+      await Controller.updateSessionTitle(sessionId, title);
+    }
+  } catch (e) {
+    console.warn('Background title generation failed:', e);
+  }
+}
+
+/**
  * Handle Ask button click - send prompt to AI
  * @returns {Promise<void>}
  */
 export async function handleAskClick(overrideText = null) {
   if (overrideText?.preventDefault) overrideText.preventDefault();
 
-  const rawInput = typeof overrideText === 'string' ? overrideText : UI.getInputValue();
+  const rawInput = typeof overrideText === 'string' ? overrideText : Controller.getInputValue();
   const text = (rawInput || '').trim() || 'Hello';
-  const attachments = getPendingAttachments().slice();
+  const attachments = Controller.getAttachments();
 
-  UI.setInputValue('');
-  clearPendingAttachments();
-  UI.renderPendingAttachments(getPendingAttachments());
+  Controller.setInputValue('');
+  Controller.clearAttachments();
 
-  let contextOverride = UI.getContextText();
+  let contextOverride = Controller.getContextText();
   const intent = classifyIntent(text);
 
   if (text.length < LIMITS.SHORT_QUERY_THRESHOLD && intent === INTENT_TYPES.NONE) {
@@ -317,11 +399,11 @@ export async function handleAskClick(overrideText = null) {
   }
 
   try {
-    await runPrompt({ text, contextOverride, attachments });
+    await executePrompt(text, contextOverride, attachments);
   } catch (e) {
     console.error('Prompt Execution Failed:', e);
-    UI.setStatusText(UI_MESSAGES.ERROR);
-    toast.error(USER_ERROR_MESSAGES.AI_SESSION_FAILED);
+    Controller.setStatus(UI_MESSAGES.ERROR);
+    Controller.showToast('error', USER_ERROR_MESSAGES.AI_SESSION_FAILED);
   }
 }
 
@@ -330,9 +412,11 @@ export async function handleAskClick(overrideText = null) {
  * @returns {Promise<void>}
  */
 export async function handleSummarizeClick() {
-  UI.setStatusText(UI_MESSAGES.READING_TAB);
+  Controller.setStatus(UI_MESSAGES.READING_TAB);
+  const session = Controller.getCurrentSession();
+  Model.resetModel(session.id);
   const freshText = await refreshContextDraft(true);
-  await summarizeActiveTab(freshText);
+  await executePrompt('Summarize the current tab in seven detailed bullet points.', freshText, []);
 }
 
 /**
@@ -340,15 +424,9 @@ export async function handleSummarizeClick() {
  * @returns {Promise<void>}
  */
 export async function handleNewSessionClick() {
-  const session = createSessionFrom();
-  setCurrentSession(session.id);
-  await saveState();
-
-  cancelGeneration();
-  resetModel(session.id);
-  renderSessionsList();
-  renderLogForCurrent();
-  UI.closeMenu('session');
+  const session = await Controller.createNewSession();
+  Model.cancelGeneration();
+  Model.resetModel(session.id);
 }
 
 /**
@@ -359,21 +437,17 @@ export async function handleNewSessionClick() {
  */
 async function deleteSessionHandler(btn, id) {
   if (id === confirmingDeleteId) {
-    deleteSession(id);
+    Model.cancelGeneration();
+    Model.resetModel(id);
+    await Controller.removeSession(id);
     confirmingDeleteId = null;
-    await saveState();
-    renderSessionsList();
-    renderLogForCurrent();
-    cancelGeneration();
-    resetModel(id);
-    toast.success('Chat deleted');
   } else {
     confirmingDeleteId = id;
-    renderSessionsList(confirmingDeleteId);
+    Controller.renderSessionsList(confirmingDeleteId);
     setTimeout(() => {
         if (confirmingDeleteId === id) {
            confirmingDeleteId = null;
-           renderSessionsList();
+           Controller.renderSessionsList();
         }
     }, TIMING.DELETE_CONFIRM_TIMEOUT_MS);
   }
@@ -385,13 +459,10 @@ async function deleteSessionHandler(btn, id) {
  * @returns {Promise<void>}
  */
 async function renameSessionHandler(id) {
-  const session = appState.sessions[id];
+  const session = Controller.getSession(id);
   const newTitle = prompt(UI_MESSAGES.RENAME_CHAT, session.title);
   if (newTitle) {
-      renameSession(id, newTitle);
-      await saveState();
-      renderSessionsList();
-      toast.success('Chat renamed');
+    await Controller.renameSessionById(id, newTitle);
   }
 }
 
@@ -402,12 +473,8 @@ async function renameSessionHandler(id) {
  */
 async function switchSessionHandler(row) {
   const id = row.dataset.id;
-  setCurrentSession(id);
-  await saveState();
-  cancelGeneration();
-  renderSessionsList();
-  renderLogForCurrent();
-  UI.closeMenu('session');
+  Model.cancelGeneration();
+  await Controller.switchSession(id);
 }
 
 /**
@@ -415,19 +482,18 @@ async function switchSessionHandler(row) {
  * @param {InputEvent} event - Input event
  */
 export function handleSessionSearchInput(event) {
-  sessionSearchTerm = event.target.value || '';
-  UI.setSessionSearchTerm(sessionSearchTerm);
-  renderSessionsList();
+  Controller.setSessionSearchTerm(event.target.value || '');
+  Controller.renderSessionsList();
 }
 
 export function handleSessionTriggerClick(event) {
   event.stopPropagation();
-  UI.toggleMenu('session');
+  Controller.toggleMenu('session');
 }
 
 export function handleTemplatesTriggerClick(event) {
   event.stopPropagation();
-  UI.toggleMenu('templates');
+  Controller.toggleMenu('templates');
 }
 
 /**
@@ -458,23 +524,23 @@ export async function handleSessionMenuClick(event) {
  * @returns {Promise<void>}
  */
 export async function handleCopyChatClick() {
-  const text = getSessionPlaintext(appState.currentSessionId);
+  const text = getSessionPlaintext(Controller.getCurrentSessionId());
   if (!text) return;
   await navigator.clipboard.writeText(text);
-  UI.setStatusText(UI_MESSAGES.COPIED);
-  toast.success(UI_MESSAGES.COPIED);
-  setTimeout(() => UI.setStatusText(UI_MESSAGES.READY), 1500);
+  Controller.setStatus(UI_MESSAGES.COPIED);
+  Controller.showToast('success', UI_MESSAGES.COPIED);
+  setTimeout(() => Controller.setStatus(UI_MESSAGES.READY), 1500);
 }
 
 /**
  * Handle Save Markdown button click
  */
 export function handleSaveMarkdown() {
-  const md = getSessionMarkdown(appState.currentSessionId);
+  const md = getSessionMarkdown(Controller.getCurrentSessionId());
   if (!md) return;
   const blob = new Blob([md], { type: 'text/markdown' });
-  UI.downloadBlob(blob, `chat-export-${Date.now()}.md`);
-  toast.success('Chat exported');
+  Controller.downloadBlob(blob, `chat-export-${Date.now()}.md`);
+  Controller.showToast('success', 'Chat exported');
 }
 
 /**
@@ -494,18 +560,18 @@ export function handleInputKeyDown(event) {
  */
 export function handleDocumentKeyDown(event) {
   if (event.key === 'Escape') {
-    if (UI.isModalOpen()) UI.closeModal();
+    if (Controller.isModalOpen()) Controller.closeModal();
     return;
   }
   if (event.key === 'Tab') {
-    const container = UI.getTrapContainer();
-    UI.trapFocus(event, container);
+    const container = Controller.getTrapContainer();
+    Controller.trapFocus(event, container);
   }
 }
 
 export function handleDocumentClick(event) {
-  if (!event.target.closest('#templates-dropdown')) UI.closeMenu('templates');
-  if (!event.target.closest('#session-dropdown')) UI.closeMenu('session');
+  if (!event.target.closest('#templates-dropdown')) Controller.closeMenu('templates');
+  if (!event.target.closest('#session-dropdown')) Controller.closeMenu('session');
 }
 
 /**
@@ -515,7 +581,7 @@ export function handleDocumentClick(event) {
 export function handleModalClick(event) {
   const btn = event.target.closest('[data-dismiss="modal"]');
   const backdrop = event.target.classList.contains('modal-backdrop');
-  if (btn || backdrop) UI.closeModal();
+  if (btn || backdrop) Controller.closeModal();
 }
 
 /**
@@ -528,21 +594,29 @@ export async function handleLogClick(event) {
   if (!btn) return;
 
   const idx = btn.dataset.idx;
+  const session = Controller.getCurrentSession();
+  
   if (btn.classList.contains('bubble-copy')) {
-      const msg = getCurrentSessionSync().messages[idx];
-      if(msg) {
-        await navigator.clipboard.writeText(msg.text);
-        toast.success('Message copied');
-      }
+    const msg = session.messages[idx];
+    if(msg) {
+      await navigator.clipboard.writeText(msg.text);
+      Controller.showToast('success', 'Message copied');
+    }
   } else if (btn.classList.contains('speak')) {
-      const msg = getCurrentSessionSync().messages[idx];
-      if(msg) speakText(msg.text);
+    const msg = session.messages[idx];
+    if(msg) {
+      Model.speakText(msg.text, {
+        onStart: () => Controller.setStopEnabled(true),
+        onEnd: () => Controller.setStopEnabled(false),
+        onError: () => Controller.setStopEnabled(false)
+      });
+    }
   } else if (btn.classList.contains('smart-reply-btn')) {
-      const reply = btn.dataset.reply;
-      if (reply) {
-        event.preventDefault();
-        await handleAskClick(reply);
-      }
+    const reply = btn.dataset.reply;
+    if (reply) {
+      event.preventDefault();
+      await handleAskClick(reply);
+    }
   }
 }
 
@@ -554,9 +628,9 @@ export function handleTemplateSelect(event) {
   const target = event.target.closest('.dropdown-item');
   if (!target) return;
   const text = target.dataset.text;
-  UI.setInputValue(UI.getInputValue() + text);
-  UI.closeMenu('templates');
-  UI.focusInput();
+  Controller.setInputValue(Controller.getInputValue() + text);
+  Controller.closeMenu('templates');
+  Controller.focusInput();
 }
 
 /**
@@ -565,7 +639,7 @@ export function handleTemplateSelect(event) {
 export function handleMicClick() {
     const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!Speech) {
-      toast.error(USER_ERROR_MESSAGES.SPEECH_NOT_SUPPORTED);
+      Controller.showToast('error', USER_ERROR_MESSAGES.SPEECH_NOT_SUPPORTED);
       return;
     }
 
@@ -581,23 +655,23 @@ export function handleMicClick() {
     recognition.continuous = true;
     recognition.interimResults = true;
 
-    recognition.onstart = () => { recognizing = true; UI.setMicState(true); };
+    recognition.onstart = () => { recognizing = true; Controller.setMicState(true); };
     recognition.onend = () => {
       recognizing = false;
-      UI.setMicState(false);
+      Controller.setMicState(false);
       recognition = null;
     };
     recognition.onerror = (event) => {
       console.error('Speech recognition error:', event.error);
       recognizing = false;
-      UI.setMicState(false);
+      Controller.setMicState(false);
       recognition = null;
-      toast.error(USER_ERROR_MESSAGES.SPEECH_FAILED);
+      Controller.showToast('error', USER_ERROR_MESSAGES.SPEECH_FAILED);
     };
     recognition.onresult = (e) => {
         let t = '';
         for (let i = 0; i < e.results.length; ++i) t += e.results[i][0].transcript;
-        UI.setInputValue(t);
+        Controller.setInputValue(t);
     };
 
     try {
@@ -606,8 +680,8 @@ export function handleMicClick() {
       console.error('Failed to start speech recognition:', e);
       recognition = null;
       recognizing = false;
-      UI.setMicState(false);
-      toast.error(USER_ERROR_MESSAGES.SPEECH_FAILED);
+      Controller.setMicState(false);
+      Controller.showToast('error', USER_ERROR_MESSAGES.SPEECH_FAILED);
     }
 }
 
@@ -615,16 +689,24 @@ export function handleMicClick() {
  * Handle speak last AI response button click
  */
 export function handleSpeakLast() {
-    const msgs = getCurrentSessionSync().messages;
-    const last = [...msgs].reverse().find(m => m.role === 'ai');
-    if (last) speakText(last.text);
+    const session = Controller.getCurrentSession();
+    const last = [...session.messages].reverse().find(m => m.role === 'ai');
+    if (last) {
+      Model.speakText(last.text, {
+        onStart: () => Controller.setStopEnabled(true),
+        onEnd: () => Controller.setStopEnabled(false),
+        onError: () => Controller.setStopEnabled(false)
+      });
+    }
 }
 
 /**
  * Handle stop button click - cancel generation/speech
  */
 export function handleStopClick() {
-  cancelGeneration();
+  Model.cancelGeneration();
+  Model.stopSpeech();
+  Controller.setStopEnabled(false);
 }
 
 /**
@@ -632,8 +714,8 @@ export function handleStopClick() {
  * @returns {Promise<void>}
  */
 export async function handleToggleContext() {
-  renderContextUI();
-  UI.openContextModal();
+  Controller.renderContextUI();
+  Controller.openContextModal();
   await refreshContextDraft(false);
 }
 
@@ -643,7 +725,7 @@ export async function handleToggleContext() {
  */
 export function handleContextInput(event) {
   const text = event.target.value;
-  updateContextDraft(text);
+  Controller.setContextDraft(text);
 }
 
 /**
@@ -653,5 +735,150 @@ export function handleContextInput(event) {
  */
 export async function handleContextBlur(event) {
   const text = event.target.value;
-  await saveContextDraft(text);
+  await Controller.persistContextDraft(text);
+}
+
+// --- TRANSLATION & SUMMARIZER (using model via controller) ---
+
+/**
+ * Run summarizer on provided text
+ * @param {string} text - Text to summarize
+ */
+export async function runSummarizer(text) {
+  await executePrompt(
+    `Summarize the following content into key bullet points:\n\n${text}`,
+    '',
+    []
+  );
+}
+
+/**
+ * Rewrite text with specified tone
+ * @param {string} text - Text to rewrite
+ * @param {string} tone - Desired tone (default: 'professional')
+ */
+export async function runRewriter(text, tone = 'professional') {
+  await executePrompt(
+    `Rewrite the following text to be more ${tone}:\n\n${text}`,
+    '',
+    []
+  );
+}
+
+/**
+ * Translate text to user's selected language
+ * @param {string} text - Text to translate
+ */
+export async function runTranslator(text) {
+  const settings = Controller.getSettings();
+  const targetLang = getSettingOrDefault(settings, 'language');
+  const session = Controller.getCurrentSession();
+
+  Controller.setBusy(true);
+  Controller.setStatus('Detecting language...');
+
+  try {
+    const result = await Model.translateText(text, targetLang, {
+      onStatusUpdate: (status) => Controller.setStatus(status)
+    });
+
+    if (result.sameLanguage) {
+      // Same language - show message
+      const userMessage = { role: 'user', text: `Translate: ${text}`, ts: Date.now() };
+      const aiMessage = {
+        role: 'ai',
+        text: `The text is already in the target language (${targetLang.toUpperCase()}). No translation needed:\n\n${text}`,
+        ts: Date.now()
+      };
+      Controller.addMessage(session.id, userMessage);
+      Controller.addMessage(session.id, aiMessage);
+      Controller.refreshLog();
+    } else {
+      // Show translated result
+      const userMessage = {
+        role: 'user',
+        text: `Translate (${result.sourceLang} → ${result.targetLang}): ${text}`,
+        ts: Date.now()
+      };
+      const aiMessage = { role: 'ai', text: result.translatedText, ts: Date.now() };
+
+      Controller.addMessage(session.id, userMessage);
+      Controller.addMessage(session.id, aiMessage);
+      Controller.refreshLog();
+      Controller.showToast('success', 'Translation complete');
+    }
+
+    Controller.setBusy(false);
+    Controller.setStatus('Ready to chat.');
+    await Controller.persistState();
+
+  } catch (error) {
+    console.error('Translation failed:', error);
+
+    // Fallback to Gemini Nano Prompt API
+    Controller.setStatus('Using fallback translation...');
+    const langName = Model.LANGUAGE_NAMES[targetLang] || 'English';
+
+    await executePrompt(
+      `Translate the following text to ${langName}:\n\n${text}`,
+      '',
+      []
+    );
+
+    Controller.showToast('warning', 'Used Gemini Nano fallback (Translation API unavailable)');
+  }
+}
+
+/**
+ * Analyze and describe an image from URL
+ * @param {string} url - Image URL to analyze
+ */
+export async function runImageDescription(url) {
+  Controller.setStatus(UI_MESSAGES.ANALYZING_IMAGE);
+  const session = Controller.getCurrentSession();
+
+  try {
+    // Fetch and prepare image
+    const blob = await Model.fetchImage(url);
+
+    const attachment = {
+      name: "Analyzed Image",
+      type: "image/jpeg",
+      data: blob
+    };
+
+    // Reset model before image task
+    Model.resetModel(session.id);
+
+    await executePrompt("Describe this image in detail.", '', [attachment]);
+
+  } catch (e) {
+    console.error(e);
+    Controller.setStatus(UI_MESSAGES.ERROR);
+    Controller.showToast('error', USER_ERROR_MESSAGES.IMAGE_PROCESSING_FAILED);
+    Model.resetModel(session.id);
+    
+    Controller.addMessage(session.id, {
+      role: 'ai',
+      text: `**Image Error:** ${e.message}.`,
+      ts: Date.now()
+    });
+    Controller.refreshLog();
+  }
+}
+
+// --- AVAILABILITY (called from sidepanel.js) ---
+
+/**
+ * Refresh AI availability status
+ * @param {{forceCheck?: boolean}} options
+ */
+export async function refreshAvailability({ forceCheck = false } = {}) {
+  const result = await Model.checkAvailability({
+    forceCheck,
+    cachedAvailability: Controller.getAvailability(),
+    cachedCheckedAt: Controller.getAvailabilityCheckedAt()
+  });
+  
+  Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
 }

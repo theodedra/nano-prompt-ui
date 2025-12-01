@@ -1,9 +1,16 @@
+/**
+ * Context Menu Handlers
+ * 
+ * Handles context menu actions from background script.
+ * Routes to chat-handlers for prompt execution.
+ */
+
 import {
-  runPrompt,
+  runSummarizer,
   runRewriter,
   runTranslator,
   runImageDescription
-} from './model.js';
+} from './chat-handlers.js';
 
 let contextMenuRegistered = false;
 
@@ -15,7 +22,7 @@ export function registerContextMenuHandlers() {
 
   chrome.runtime.onMessage.addListener((req) => {
     if (req.action === 'CMD_SUMMARIZE') {
-      runPrompt({ text: `Summarize this:\n${req.text}`, contextOverride: '', attachments: [] });
+      runSummarizer(req.text);
     } else if (req.action === 'CMD_REWRITE') {
       runRewriter(req.text, 'more-formal');
     } else if (req.action === 'CMD_TRANSLATE') {

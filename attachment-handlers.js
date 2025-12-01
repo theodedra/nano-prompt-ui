@@ -1,8 +1,10 @@
-import {
-  addPendingAttachment,
-  getPendingAttachments,
-  removePendingAttachment
-} from './storage.js';
+/**
+ * Attachment Handlers
+ * 
+ * Handles file attachment UI interactions via controller layer.
+ */
+
+import * as Controller from './controller.js';
 import { extractPdfText, isPdfFile } from './pdf.js';
 import { toast } from './toast.js';
 import { LIMITS, USER_ERROR_MESSAGES } from './constants.js';
@@ -26,24 +28,24 @@ export function handleFileInputChange(event) {
       if (isPdfFile(file)) {
         toast.info(`Processing PDF: ${file.name}...`);
         const { text: pdfText, meta: pdfMeta } = await extractPdfText(file);
-        addPendingAttachment({
+        Controller.addAttachment({
           name: file.name,
           type: 'application/pdf',
           data: pdfText,
           meta: pdfMeta
         });
-        UI.renderPendingAttachments(getPendingAttachments());
+        Controller.renderAttachments();
         toast.success('PDF processed successfully');
       } else if (file.type.startsWith('image/')) {
         toast.info(`Processing image: ${file.name}...`);
         const canvas = await fileToCanvas(file, LIMITS.IMAGE_MAX_WIDTH);
         const blob = await canvasToBlob(canvas, file.type);
-        addPendingAttachment({
+        Controller.addAttachment({
           name: file.name,
           type: file.type,
           data: blob
         });
-        UI.renderPendingAttachments(getPendingAttachments());
+        Controller.renderAttachments();
         toast.success('Image processed successfully');
       } else {
         toast.warning('Unsupported file type. Only images and PDFs are supported.');
@@ -127,7 +129,7 @@ export function handleAttachmentListClick(event) {
   const target = event.target.closest('.attachment-chip');
   if (target) {
     const idx = Number(target.dataset.idx);
-    removePendingAttachment(Number.isFinite(idx) ? idx : -1);
-    UI.renderPendingAttachments(getPendingAttachments());
+    Controller.removeAttachment(Number.isFinite(idx) ? idx : -1);
+    Controller.renderAttachments();
   }
 }

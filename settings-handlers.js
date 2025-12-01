@@ -1,10 +1,12 @@
-import {
-  appState,
-  saveState,
-  updateSettings
-} from './storage.js';
+/**
+ * Settings Handlers
+ * 
+ * Handles settings UI interactions via controller layer.
+ */
+
+import * as Controller from './controller.js';
+import * as Model from './model.js';
 import { getSettingOrDefault, LANGUAGE_LABELS, THEME_LABELS } from './constants.js';
-import { refreshAvailability, resetModel, warmUpModel, getDiagnostics } from './model.js';
 import { getSetupStatus } from './setup-guide.js';
 import { toast } from './toast.js';
 import * as UI from './ui.js';
@@ -14,13 +16,14 @@ import * as UI from './ui.js';
  */
 export function handleOpenSettings() {
   UI.openSettingsModal();
-  const currentLang = getSettingOrDefault(appState.settings, 'language');
-  const currentTheme = getSettingOrDefault(appState.settings, 'theme');
+  const settings = Controller.getSettings();
+  const currentLang = getSettingOrDefault(settings, 'language');
+  const currentTheme = getSettingOrDefault(settings, 'theme');
 
   UI.syncSettingsForm({
-    temperature: appState.settings.temperature,
-    topK: appState.settings.topK,
-    systemPrompt: appState.settings.systemPrompt,
+    temperature: settings.temperature,
+    topK: settings.topK,
+    systemPrompt: settings.systemPrompt,
     language: currentLang,
     languageLabel: LANGUAGE_LABELS[currentLang] || LANGUAGE_LABELS.en,
     theme: currentTheme,
@@ -32,7 +35,10 @@ export function handleOpenSettings() {
 
 async function renderDiagnosticsPanel() {
   try {
-    const diag = await getDiagnostics();
+    const diag = await Model.getDiagnostics({
+      availability: Controller.getAvailability(),
+      availabilityCheckedAt: Controller.getAvailabilityCheckedAt()
+    });
     UI.updateDiagnostics(diag);
   } catch (e) {
     UI.updateDiagnostics({ availabilityLabel: 'Unknown' });
@@ -82,8 +88,19 @@ export async function handleDiagnosticsRefresh() {
   UI.setDiagnosticsBusy('availability', true);
   try {
     UI.updateDiagnostics({ availabilityLabel: 'checking…' });
-    await refreshAvailability({ forceCheck: true });
-    const diag = await getDiagnostics();
+    
+    const result = await Model.checkAvailability({
+      forceCheck: true,
+      cachedAvailability: Controller.getAvailability(),
+      cachedCheckedAt: Controller.getAvailabilityCheckedAt()
+    });
+    
+    Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
+    
+    const diag = await Model.getDiagnostics({
+      availability: result.status,
+      availabilityCheckedAt: result.checkedAt
+    });
     UI.updateDiagnostics(diag);
   } finally {
     UI.setDiagnosticsBusy('availability', false);
@@ -94,13 +111,16 @@ export async function handleWarmupClick() {
   UI.setDiagnosticsBusy('warmup', true);
   try {
     UI.updateDiagnostics({ lastWarmupStatus: 'running' });
-    const diag = await warmUpModel();
-    UI.updateDiagnostics(diag);
-    if (diag.lastWarmupStatus === 'success') {
+    const result = await Model.warmUpModel();
+    
+    Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
+    UI.updateDiagnostics(result.diag);
+    
+    if (result.warmupStatus === 'success') {
       toast.success('Warmup completed');
-    } else if (diag.lastWarmupStatus === 'awaiting-download') {
+    } else if (result.warmupStatus === 'awaiting-download') {
       toast.info('Warmup skipped until model download finishes');
-    } else if (diag.lastWarmupStatus === 'unavailable') {
+    } else if (result.warmupStatus === 'unavailable') {
       toast.info('Prompt API is not available in this Chrome build');
     } else {
       toast.error('Warmup failed');
@@ -129,29 +149,38 @@ export function handleDocumentClick(event) {
  * @returns {Promise<void>}
  */
 export async function handleSaveSettings() {
+  const settings = Controller.getSettings();
   const defaults = {
-    temperature: appState.settings.temperature,
-    topK: appState.settings.topK,
-    systemPrompt: appState.settings.systemPrompt,
-    language: getSettingOrDefault(appState.settings, 'language'),
-    theme: getSettingOrDefault(appState.settings, 'theme')
+    temperature: settings.temperature,
+    topK: settings.topK,
+    systemPrompt: settings.systemPrompt,
+    language: getSettingOrDefault(settings, 'language'),
+    theme: getSettingOrDefault(settings, 'theme')
   };
   const { temperature, topK, systemPrompt, language, theme } = UI.getSettingsFormValues(defaults);
 
-  updateSettings({
+  Controller.patchSettings({
     temperature,
     topK,
     systemPrompt,
     language,
     theme
   });
-  await saveState();
+  await Controller.persistState();
 
-  UI.applyTheme(theme);
-  resetModel();
+  Controller.applyTheme(theme);
+  Model.resetModel();
 
   UI.closeModal();
-  await refreshAvailability();
+  
+  // Refresh availability
+  const result = await Model.checkAvailability({
+    forceCheck: false,
+    cachedAvailability: Controller.getAvailability(),
+    cachedCheckedAt: Controller.getAvailabilityCheckedAt()
+  });
+  Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
+  
   toast.success('Settings saved');
 }
 
