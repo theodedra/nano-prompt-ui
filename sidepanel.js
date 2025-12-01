@@ -2,7 +2,7 @@ import * as UI from './ui.js';
 import * as ChatHandlers from './chat-handlers.js';
 import * as AttachmentHandlers from './attachment-handlers.js';
 import * as SettingsHandlers from './settings-handlers.js';
-import { refreshAvailability } from './model.js';
+import { initController, refreshAvailability } from './controller.js';
 
 function bind(selector, event, handler) {
   const el = document.querySelector(selector);
@@ -11,6 +11,7 @@ function bind(selector, event, handler) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   UI.initUI();
+  initController();
   await ChatHandlers.bootstrap();
   await refreshAvailability({ forceCheck: true });
 
