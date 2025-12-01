@@ -8,6 +8,11 @@ let isSystemBusy = false;
 let renderedSessionId = null;
 let sessionSearchTerm = '';
 
+// Container elements for centralized state
+let wrapEl = null;
+let chatCardEl = null;
+let inputCardEl = null;
+
 // UPDATED: Observer for smooth scrolling
 let scrollObserver = null;
 
@@ -63,6 +68,11 @@ export function initUI() {
     diagRefreshBtn: $('#refresh-diagnostics'),
     diagWarmupBtn: $('#warmup-now')
   };
+
+  // Cache container elements for centralized state management
+  wrapEl = $('.wrap');
+  chatCardEl = $('.card.chat');
+  inputCardEl = $('.input-card');
 
   // UPDATED: Initialize ResizeObserver for smooth auto-scrolling
   // We observe the last message element. When it grows (streaming), we scroll.
@@ -267,18 +277,20 @@ export function getTrapContainer() {
 
 export function setBusy(isBusy) {
   isSystemBusy = isBusy;
+  
+  // Centralized state: toggle on containers
+  if (wrapEl) wrapEl.classList.toggle('is-busy', isBusy);
+  if (chatCardEl) chatCardEl.classList.toggle('is-streaming', isBusy);
+  if (inputCardEl) inputCardEl.classList.toggle('is-busy', isBusy);
+
+  // Button states still need explicit toggling for accessibility
   if (els.askBtn) els.askBtn.disabled = isBusy;
   if (els.sumBtn) els.sumBtn.disabled = isBusy;
   if (els.stop) els.stop.disabled = !isBusy;
 
+  // Status text updates
   if (els.avail) {
-    if (isBusy) {
-      els.avail.textContent = UI_MESSAGES.THINKING;
-      els.avail.classList.add('is-streaming');
-    } else {
-      els.avail.textContent = lastStatus;
-      els.avail.classList.remove('is-streaming');
-    }
+    els.avail.textContent = isBusy ? UI_MESSAGES.THINKING : lastStatus;
   }
 }
 
@@ -798,6 +810,19 @@ function createMessageElement(m, idx) {
     return div;
 }
 
+/**
+ * Render the full chat log for a session.
+ * NOT used during streaming - use updateLastMessageBubble() for that.
+ * 
+ * Called on:
+ * - Session switch (full re-render)
+ * - Initial load
+ * - Message deletion/reset
+ * - When virtual scroller needs full refresh
+ * 
+ * For virtual scrolling mode: delegates to VirtualScroller.render()
+ * which uses cached nodes (no re-parsing markdown on each call).
+ */
 export function renderLog(session) {
   if (!session || !els.log) return;
 
@@ -816,6 +841,9 @@ export function renderLog(session) {
   }
 
   const messages = session.messages || [];
+
+  // Centralized state: toggle is-empty on chat card container
+  if (chatCardEl) chatCardEl.classList.toggle('is-empty', messages.length === 0);
 
   // --- FIX START: Handle Empty State ---
   if (messages.length === 0) {
@@ -887,6 +915,19 @@ export function renderSmartReplies(replies = []) {
   observeLastMessage();
 }
 
+/**
+ * Update the last AI message bubble with new content.
+ * Used for streaming updates - does NOT re-render the full log.
+ * 
+ * Architecture:
+ * - When streaming=true: uses fast textContent path (no markdown parsing)
+ * - When streaming=false: parses markdown once at completion
+ * - Always finds the last node via VirtualScroller when enabled (no DOM scan)
+ * 
+ * @param {Object} session - Current session
+ * @param {string} markdownText - Text content to display
+ * @param {{streaming?: boolean}} options - If streaming, skip markdown parsing
+ */
 export function updateLastMessageBubble(session, markdownText, { streaming = false } = {}) {
   if (!els.log || !session || !session.messages?.length) return;
 
@@ -894,9 +935,11 @@ export function updateLastMessageBubble(session, markdownText, { streaming = fal
   const lastMessage = session.messages[lastIdx];
   let lastMsg = null;
 
+  // VirtualScroller path: O(1) lookup via cached node map
   if (virtualScroller && virtualScroller.enabled) {
     lastMsg = virtualScroller.getMessageNode(lastMessage, lastIdx);
   } else {
+    // Fallback: DOM query (only for small sessions where virtual scroll is disabled)
     const messages = els.log.querySelectorAll('.msg:not(.placeholder)');
     lastMsg = messages[messages.length - 1];
   }
@@ -1241,12 +1284,21 @@ export function setEditingTemplateId(id) {
 }
 
 export function setMicState(active) {
+  // Centralized state: toggle on input-card container
+  if (inputCardEl) inputCardEl.classList.toggle('is-recording', active);
+  
   if (els.mic) {
     els.mic.setAttribute('aria-pressed', active ? 'true' : 'false');
     els.mic.innerHTML = active ? ICON_STOP : ICON_MIC;
-    if (active) els.mic.classList.add('is-recording');
-    else els.mic.classList.remove('is-recording');
   }
+}
+
+/**
+ * Set error state on the input card container
+ * @param {boolean} hasError - Whether there's an input error
+ */
+export function setInputError(hasError) {
+  if (inputCardEl) inputCardEl.classList.toggle('has-error', hasError);
 }
 
 export function openSettingsModal() {

@@ -31,6 +31,19 @@
   --state-warning: #d29922;
   --state-info: #58a6ff;
   --state-recording: #ff6b6b;
+  
+  /* Spacing scale (density dial) */
+  --space-0: 2px;
+  --space-1: 4px;
+  --space-2: 6px;
+  --space-3: 8px;
+  --space-4: 10px;
+  --space-5: 12px;
+  
+  /* Font scale */
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-md: 13px;
 }
 
 /* Light Theme */
@@ -66,8 +79,8 @@ body {
 }
 
 /* Scrollbars */
-*::-webkit-scrollbar { width: 4px; height: 4px; }
-*::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 4px; }
+*::-webkit-scrollbar { width: var(--space-1); height: var(--space-1); }
+*::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: var(--space-1); }
 *::-webkit-scrollbar-track { background: transparent; }
 
 /* Focus states */
@@ -79,17 +92,91 @@ body {
 }
 
 /* ============================================================================
-   3. SHARED STATE MODIFIERS
+   3. CENTRALIZED STATE CONTAINERS
    ============================================================================
-   Use these on any component for consistent state representation.
+   State classes are toggled on containers, CSS cascades to children.
+   
+   Containers:
+   - .wrap             → App-level: .is-busy
+   - .card.chat        → Chat-level: .is-streaming, .is-empty  
+   - .input-card       → Input-level: .is-busy, .is-recording, .has-error
    ============================================================================ */
+
+/* --------------------------------------------------------------------------
+   3.1 APP-LEVEL STATE (.wrap)
+   -------------------------------------------------------------------------- */
+
+/* App busy state - overlay effect during critical operations */
+.wrap.is-busy::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: transparent;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* --------------------------------------------------------------------------
+   3.2 CHAT-LEVEL STATE (.card.chat)
+   -------------------------------------------------------------------------- */
+
+/* Chat streaming - status chip pulses */
+.card.chat.is-streaming .chip {
+  animation: pulse-opacity 1.5s ease-in-out infinite;
+}
+
+/* Chat empty - subtle styling for placeholder state */
+.card.chat.is-empty .log {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --------------------------------------------------------------------------
+   3.3 INPUT-LEVEL STATE (.input-card)
+   -------------------------------------------------------------------------- */
+
+/* Input busy - disable interactions visually */
+.input-card.is-busy .field {
+  opacity: 0.7;
+}
+
+.input-card.is-busy textarea {
+  pointer-events: none;
+}
+
+/* Input recording - highlight mic button and field */
+.input-card.is-recording #mic {
+  color: var(--state-recording);
+  background-color: rgba(255, 107, 107, 0.15);
+  animation: pulse-opacity 1.5s ease-in-out infinite;
+}
+
+.input-card.is-recording .field {
+  border: 1px solid var(--state-recording);
+  background-color: rgba(255, 107, 107, 0.05);
+}
+
+/* Input error - highlight field with error styling */
+.input-card.has-error .field {
+  border: 1px solid var(--state-error);
+  background-color: rgba(248, 81, 73, 0.05);
+}
+
+.input-card.has-error textarea::placeholder {
+  color: var(--state-error);
+}
+
+/* --------------------------------------------------------------------------
+   3.4 SHARED STATE MODIFIERS (for direct element use)
+   -------------------------------------------------------------------------- */
 
 /* Active/Selected state */
 .is-active {
   background-color: var(--surface) !important;
 }
 
-/* Error state */
+/* Error state (direct element) */
 .is-error {
   color: var(--state-error) !important;
   border-left-color: var(--state-error) !important;
@@ -99,28 +186,6 @@ body {
 .is-warning {
   color: var(--state-warning) !important;
   border-left-color: var(--state-warning) !important;
-}
-
-/* Busy/Loading state */
-.is-busy {
-  opacity: 0.6;
-  pointer-events: none;
-}
-
-/* Streaming/Pulsing state */
-.is-streaming {
-  animation: pulse-opacity 1.5s ease-in-out infinite;
-}
-
-@keyframes pulse-opacity {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.6; }
-}
-
-/* Recording state (for mic button, etc.) */
-.is-recording {
-  color: var(--state-recording) !important;
-  background-color: rgba(255, 107, 107, 0.1) !important;
 }
 
 /* Confirming destructive action */
@@ -139,6 +204,11 @@ body {
 .is-success {
   color: var(--state-success) !important;
   border-left-color: var(--state-success) !important;
+}
+
+@keyframes pulse-opacity {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 /* ============================================================================
@@ -182,15 +252,16 @@ body {
   pointer-events: auto; 
 }
 
+/* Modal card header - matches section-header pattern */
 .modal-card header { 
   display: flex; 
   justify-content: space-between; 
-  align-items: center; 
+  align-items: center;
 }
 
 .modal-card h2 { 
   margin: 0; 
-  font-size: 16px; 
+  font-size: 14px; 
   font-weight: 600; 
   color: var(--on-bg); 
 }
@@ -209,8 +280,8 @@ body {
 
 .row { 
   display: flex; 
-  gap: 10px; 
-  margin-top: 12px; 
+  gap: var(--space-4); 
+  margin-top: var(--space-5); 
 }
 
 .row button { 
@@ -222,10 +293,10 @@ body {
   display: flex; 
   align-items: center; 
   justify-content: space-between; 
-  padding: 8px 12px; 
-  border-radius: 8px; 
+  padding: var(--space-3) var(--space-5); 
+  border-radius: var(--space-3); 
   cursor: pointer; 
-  gap: 12px;
+  gap: var(--space-5);
 }
 
 .session-row:hover { 
@@ -249,9 +320,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 8px;
-  border-radius: 8px;
-  gap: 8px;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--space-3);
+  gap: var(--space-3);
 }
 
 .template-row:hover {
@@ -262,13 +333,13 @@ body {
   background-color: var(--surface);
   flex-direction: column;
   align-items: stretch;
-  padding: 12px;
+  padding: var(--space-5);
 }
 
 .template-row.new-template {
   border-top: 1px solid var(--surface-3);
-  margin-top: 4px;
-  padding-top: 12px;
+  margin-top: var(--space-1);
+  padding-top: var(--space-5);
 }
 
 /* Snapshot row */
@@ -276,9 +347,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  border-radius: 8px;
-  gap: 12px;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--space-3);
+  gap: var(--space-5);
 }
 
 .snapshot-row:hover {
@@ -296,11 +367,11 @@ body {
    ============================================================================ */
 
 .chip {
-  padding: 2px 8px; 
-  border-radius: 6px;
+  padding: var(--space-0) var(--space-3); 
+  border-radius: var(--space-2);
   background-color: var(--surface-2); 
   color: var(--on-bg-dim); 
-  font-size: 11px;
+  font-size: var(--font-xs);
   transition: opacity 0.15s ease;
   position: relative;
   border: none;
@@ -311,17 +382,14 @@ body {
   cursor: pointer;
 }
 
-/* Chip streaming state (pulsing) - replaces .pulse */
-.chip.is-streaming {
-  animation: pulse-opacity 1.5s ease-in-out infinite;
-}
+/* Chip streaming state - now handled by .card.chat.is-streaming .chip */
 
 /* Attachment chip */
 .attachment-chip { 
   background-color: var(--surface-3); 
-  border-radius: 6px; 
-  padding: 4px 10px; 
-  font-size: 12px; 
+  border-radius: var(--space-2); 
+  padding: var(--space-1) var(--space-4); 
+  font-size: var(--font-sm); 
   color: var(--on-bg); 
   border: none; 
   max-width: 200px; 
@@ -346,7 +414,7 @@ body {
 .field {
   background-color: var(--surface-2); 
   border-radius: 16px; 
-  padding: 10px 14px;
+  padding: var(--space-4) 14px;
   transition: background-color 0.2s;
   border: none;
 }
@@ -371,12 +439,12 @@ textarea {
 /* Session rename input */
 .session-rename-input {
   width: 100%;
-  padding: 4px 8px;
+  padding: var(--space-1) var(--space-3);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--space-2);
   background-color: var(--surface-3);
   color: var(--on-bg);
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 500;
   font-family: inherit;
   outline: none;
@@ -389,12 +457,12 @@ textarea {
 /* Template edit inputs */
 .template-edit-label {
   width: 100%;
-  padding: 8px 10px;
+  padding: var(--space-3) var(--space-4);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--space-2);
   background-color: var(--surface-3);
   color: var(--on-bg);
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 500;
   font-family: inherit;
   outline: none;
@@ -406,12 +474,12 @@ textarea {
 
 .template-edit-text {
   width: 100%;
-  padding: 8px 10px;
+  padding: var(--space-3) var(--space-4);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--space-2);
   background-color: var(--surface-3);
   color: var(--on-bg);
-  font-size: 12px;
+  font-size: var(--font-sm);
   font-family: inherit;
   outline: none;
   resize: vertical;
@@ -425,13 +493,13 @@ textarea {
 
 /* Session search input */
 .session-search {
-  padding: 4px 6px 8px;
+  padding: var(--space-1) var(--space-2) var(--space-3);
 }
 
 .session-search input {
   width: 100%;
-  padding: 8px 10px;
-  border-radius: 8px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--space-3);
   border: none;
   background-color: var(--surface-3);
   color: var(--on-bg);
@@ -451,10 +519,10 @@ textarea {
 
 .icon-button,
 .icon {
-  padding: 6px; 
+  padding: var(--space-2); 
   background-color: transparent; 
   color: var(--on-bg); 
-  border-radius: 8px;
+  border-radius: var(--space-3);
   display: inline-flex; 
   align-items: center; 
   justify-content: center;
@@ -487,22 +555,17 @@ textarea {
   height: 18px; 
 }
 
-/* Icon button recording state - replaces .recording */
-.icon-button.is-recording,
-.icon.is-recording { 
-  color: var(--state-recording); 
-  background-color: rgba(255, 107, 107, 0.1); 
-}
+/* Icon button recording state - now handled by .input-card.is-recording #mic */
 
 /* Action buttons (edit, delete, save, cancel) */
 .action-btn {
   background-color: transparent; 
   border: none; 
   color: var(--on-bg); 
-  padding: 6px; 
-  border-radius: 6px; 
+  padding: var(--space-2); 
+  border-radius: var(--space-2); 
   cursor: pointer; 
-  font-size: 12px;
+  font-size: var(--font-sm);
   opacity: 0.6; 
   transition: opacity 0.2s, background-color 0.2s;
 }
@@ -562,9 +625,9 @@ textarea {
 
   background: var(--surface-2);
   color: var(--on-bg);
-  padding: 12px 20px;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  padding: var(--space-5) 20px;
+  border-radius: var(--space-5);
+  box-shadow: 0 var(--space-3) 24px rgba(0, 0, 0, 0.6);
   border-left: 3px solid transparent;
 
   opacity: 0;
@@ -632,7 +695,7 @@ textarea {
 .toast-content {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-5);
 }
 
 .toast-icon {
@@ -658,15 +721,15 @@ textarea {
 .toast-progress-content {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-3);
   flex: 1;
   min-width: 0;
 }
 
 .toast-progress-bar {
-  height: 4px;
+  height: var(--space-1);
   background: var(--surface-3);
-  border-radius: 2px;
+  border-radius: var(--space-0);
   overflow: hidden;
   min-width: 150px;
 }
@@ -674,7 +737,7 @@ textarea {
 .toast-progress-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 2px;
+  border-radius: var(--space-0);
   transition: width 0.15s ease-out;
 }
 
@@ -693,8 +756,8 @@ textarea {
 
 button {
   border: none; 
-  border-radius: 10px; 
-  padding: 10px 16px;
+  border-radius: var(--space-4); 
+  padding: var(--space-4) 16px;
   background-color: var(--surface-2); 
   color: var(--on-bg); 
   cursor: pointer;
@@ -760,14 +823,39 @@ textarea:disabled {
 }
 
 /* ============================================================================
-   11. LAYOUT: HEADER (Appbar)
+   11. SECTION HEADERS (Standardized)
+   ============================================================================
+   
+   Unified header pattern:
+   - Vertical padding:   var(--space-4) = 10px
+   - Horizontal padding: 16px
+   - Font size:          14px (primary) / var(--font-sm) for labels
+   - Font weight:        600
+   - Chip alignment:     Centered vertically via align-items: center
    ============================================================================ */
 
+/* Base section header pattern */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) 16px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--on-bg);
+}
+
+.section-header .chip {
+  font-weight: 400;
+}
+
+/* Appbar - main application header */
 .appbar {
   display: flex; 
   align-items: center; 
-  gap: 8px; 
-  padding: 12px 16px;
+  gap: var(--space-3); 
+  padding: var(--space-4) 16px;
   background: var(--bg); 
   z-index: 20;
   border-bottom: none; 
@@ -776,14 +864,14 @@ textarea:disabled {
 .title { 
   font-weight: 600; 
   letter-spacing: -0.3px; 
-  font-size: 15px; 
+  font-size: 14px; 
 }
 
 .header-actions, 
 .session-controls { 
   display: flex; 
   align-items: center; 
-  gap: 6px; 
+  gap: var(--space-2); 
 }
 
 /* Model status chip in header */
@@ -811,11 +899,12 @@ textarea:disabled {
   min-height: 0; 
 }
 
+/* Session/log header - matches section-header pattern */
 .log-header {
   display: flex; 
   justify-content: space-between; 
   align-items: center;
-  padding: 8px 16px; 
+  padding: var(--space-4) 16px; 
   background: var(--bg); 
   flex-shrink: 0;
 }
@@ -826,7 +915,7 @@ textarea:disabled {
   padding: 24px 16px 16px 16px; 
   display: flex; 
   flex-direction: column; 
-  gap: 12px;
+  gap: var(--space-5);
   scroll-behavior: smooth;
 }
 
@@ -835,7 +924,7 @@ textarea:disabled {
    ============================================================================ */
 
 .msg {
-  padding: 10px 16px; 
+  padding: var(--space-4) 16px; 
   border-radius: 16px; 
   max-width: 96%; 
   width: fit-content; 
@@ -849,14 +938,14 @@ textarea:disabled {
   align-self: flex-end; 
   background-color: var(--surface-3); 
   color: var(--on-bg);
-  border-bottom-right-radius: 2px;
+  border-bottom-right-radius: var(--space-0);
 }
 
 .msg.ai {
   align-self: flex-start; 
   background-color: var(--surface); 
   color: var(--on-bg);
-  border-bottom-left-radius: 2px;
+  border-bottom-left-radius: var(--space-0);
   width: 100%;
 }
 
@@ -873,22 +962,22 @@ textarea:disabled {
 /* Message actions (copy, speak) */
 .msg .copy1 {
   position: absolute;
-  top: -12px;
-  right: 12px;
+  top: calc(-1 * var(--space-5));
+  right: var(--space-5);
   display: flex; 
-  gap: 4px;
+  gap: var(--space-1);
   opacity: 0; 
   transition: opacity 0.2s ease;
   background-color: var(--surface-2);
-  box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-  padding: 2px; 
-  border-radius: 6px;
+  box-shadow: 0 var(--space-0) 5px rgba(0,0,0,0.3);
+  padding: var(--space-0); 
+  border-radius: var(--space-2);
   z-index: 10;
 }
 
 .msg .copy1.bottom {
   top: auto;
-  bottom: -12px;
+  bottom: calc(-1 * var(--space-5));
 }
 
 .msg:hover .copy1, 
@@ -897,8 +986,8 @@ textarea:disabled {
 } 
 
 .copy1 button, .speak {
-  padding: 4px; 
-  font-size: 11px;
+  padding: var(--space-1); 
+  font-size: var(--font-xs);
   height: auto;
   min-width: 0;
   background-color: transparent;
@@ -912,28 +1001,30 @@ textarea:disabled {
 
 /* Smart replies */
 .smart-replies {
-  margin-top: 12px;
+  margin-top: var(--space-5);
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-2);
 }
 
+/* Smart replies section label - matches section label pattern */
 .smart-replies-label {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--on-bg-dim);
+  font-weight: 600;
   letter-spacing: 0.2px;
 }
 
 .smart-reply-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-3);
 }
 
 .smart-reply-btn {
-  padding: 8px 12px;
+  padding: var(--space-3) var(--space-5);
   border-radius: 999px;
-  font-size: 12px;
+  font-size: var(--font-sm);
   line-height: 1.2;
   white-space: nowrap;
 }
@@ -942,13 +1033,13 @@ textarea:disabled {
 .loading-dots {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 0;
+  gap: var(--space-2);
+  padding: var(--space-3) 0;
 }
 
 .loading-dots span {
-  width: 8px;
-  height: 8px;
+  width: var(--space-3);
+  height: var(--space-3);
   border-radius: 50%;
   background-color: var(--on-bg-dim);
   animation: loading-pulse 1.4s infinite ease-in-out both;
@@ -975,8 +1066,8 @@ textarea:disabled {
 .input-toolbar { 
   display: flex; 
   align-items: center; 
-  gap: 12px; 
-  margin-top: 12px; 
+  gap: var(--space-5); 
+  margin-top: var(--space-5); 
 }
 
 /* ============================================================================
@@ -990,19 +1081,19 @@ textarea:disabled {
 .dropdown-trigger, 
 .session-trigger {
   background-color: transparent; 
-  padding: 6px 24px 6px 8px;
+  padding: var(--space-2) 24px var(--space-2) var(--space-3);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23ededf0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
   background-repeat: no-repeat; 
-  background-position: right 8px center; 
+  background-position: right var(--space-3) center; 
   background-size: 14px;
   color: var(--on-bg); 
-  border-radius: 6px;
+  border-radius: var(--space-2);
   border: none;
 }
 
 .dropdown-trigger { 
-  padding: 6px 28px 6px 8px; 
-  font-size: 13px; 
+  padding: var(--space-2) 28px var(--space-2) var(--space-3); 
+  font-size: var(--font-md); 
 }
 
 .dropdown-trigger:hover { 
@@ -1033,22 +1124,22 @@ ul.attachment-list {
   position: absolute; 
   background-color: var(--surface-2); 
   border: none; 
-  border-radius: 12px; 
-  box-shadow: 0 10px 40px rgba(0,0,0,0.6); 
-  padding: 6px; 
+  border-radius: var(--space-5); 
+  box-shadow: 0 var(--space-4) 40px rgba(0,0,0,0.6); 
+  padding: var(--space-2); 
   display: flex; 
   flex-direction: column; 
-  gap: 4px; 
+  gap: var(--space-1); 
   z-index: 200;
   min-width: 240px; 
   max-width: 260px; 
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 
 .input-card .dropdown-menu { 
   top: auto; 
   bottom: 100%; 
-  margin-bottom: 8px; 
+  margin-bottom: var(--space-3); 
 }
 
 .dropdown-menu[hidden] { 
@@ -1056,9 +1147,9 @@ ul.attachment-list {
 }
 
 .dropdown-item {
-  padding: 8px 12px; 
-  border-radius: 8px; 
-  font-size: 13px; 
+  padding: var(--space-3) var(--space-5); 
+  border-radius: var(--space-3); 
+  font-size: var(--font-md); 
   text-align: left; 
   background-color: transparent; 
   color: var(--on-bg); 
@@ -1083,7 +1174,7 @@ ul.attachment-list {
 }
 
 .session-title { 
-  font-size: 13px; 
+  font-size: var(--font-md); 
   font-weight: 500; 
   color: var(--on-bg); 
   white-space: nowrap; 
@@ -1093,21 +1184,21 @@ ul.attachment-list {
 
 .session-actions { 
   display: flex; 
-  gap: 4px; 
+  gap: var(--space-1); 
   flex-shrink: 0; 
 }
 
 .session-empty {
-  padding: 10px 12px;
+  padding: var(--space-4) var(--space-5);
   color: var(--on-bg-dim);
-  font-size: 12px;
+  font-size: var(--font-sm);
   text-align: center;
   cursor: default;
 }
 
 .session-rename-actions {
   display: flex;
-  gap: 4px;
+  gap: var(--space-1);
   flex-shrink: 0;
 }
 
@@ -1131,7 +1222,7 @@ ul.attachment-list {
 
 .template-actions {
   display: flex;
-  gap: 2px;
+  gap: var(--space-0);
   flex-shrink: 0;
   opacity: 0;
   transition: opacity 0.15s ease;
@@ -1142,27 +1233,27 @@ ul.attachment-list {
 }
 
 .template-actions .action-btn {
-  padding: 4px 6px;
-  font-size: 11px;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--font-xs);
 }
 
 .template-edit-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: var(--space-4);
   width: 100%;
 }
 
 .template-edit-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-3);
   justify-content: flex-end;
 }
 
 .template-edit-actions .action-btn {
-  padding: 6px 12px;
-  font-size: 12px;
-  border-radius: 6px;
+  padding: var(--space-2) var(--space-5);
+  font-size: var(--font-sm);
+  border-radius: var(--space-2);
 }
 
 .template-edit-actions .action-btn.save {
@@ -1182,17 +1273,17 @@ ul.attachment-list {
 }
 
 .template-add-row {
-  padding: 4px 8px;
+  padding: var(--space-1) var(--space-3);
   border-top: 1px solid var(--surface-3);
-  margin-top: 4px;
+  margin-top: var(--space-1);
 }
 
 .template-add {
   width: 100%;
   text-align: center;
   color: var(--on-bg-dim);
-  font-size: 12px;
-  padding: 8px 12px;
+  font-size: var(--font-sm);
+  padding: var(--space-3) var(--space-5);
 }
 
 .template-add:hover {
@@ -1232,20 +1323,20 @@ ul.attachment-list {
    ============================================================================ */
 
 label { 
-  font-size: 12px; 
+  font-size: var(--font-sm); 
   color: var(--on-bg-dim); 
   font-weight: 500; 
   display: flex; 
   flex-direction: column; 
-  gap: 8px; 
+  gap: var(--space-3); 
 }
 
 input[type="number"] {
   background-color: var(--bg); 
   border: none; 
   color: var(--on-bg); 
-  padding: 8px; 
-  border-radius: 8px; 
+  padding: var(--space-3); 
+  border-radius: var(--space-3); 
   font-family: inherit; 
   width: 60px;
 }
@@ -1267,17 +1358,17 @@ input[type="range"] {
   accent-color: var(--on-bg); 
 }
 
-/* Info note */
+/* Info note - section card pattern */
 .info-note {
   background: var(--surface-2);
-  padding: 12px;
-  border-radius: 8px;
-  font-size: 12px;
+  padding: var(--space-4) 16px;
+  border-radius: var(--space-3);
+  font-size: var(--font-sm);
   line-height: 1.6;
   color: var(--on-bg-dim);
   border-left: 3px solid var(--accent);
   display: flex;
-  gap: 10px;
+  gap: var(--space-4);
   align-items: flex-start;
 }
 
@@ -1286,36 +1377,38 @@ input[type="range"] {
   height: 18px;
   flex-shrink: 0;
   stroke: var(--accent);
-  margin-top: 2px;
+  margin-top: var(--space-0);
 }
 
 .info-text {
   flex: 1;
 }
 
+/* Info note title - matches section header font pattern */
 .info-text strong {
   color: var(--on-bg);
   display: block;
-  margin-bottom: 4px;
-  font-size: 13px;
+  margin-bottom: var(--space-1);
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .info-text code {
   background: var(--surface-3);
-  padding: 2px 6px;
-  border-radius: 4px;
+  padding: var(--space-0) var(--space-2);
+  border-radius: var(--space-1);
   font-family: monospace;
-  font-size: 11px;
+  font-size: var(--font-xs);
   color: var(--accent);
 }
 
 /* Diagnostics */
 .diagnostics-block { 
-  margin-top: 12px; 
+  margin-top: var(--space-4); 
 }
 
 .diagnostics-block .row { 
-  margin-top: 10px; 
+  margin-top: var(--space-4); 
 }
 
 .diag-label { 
@@ -1324,8 +1417,8 @@ input[type="range"] {
 }
 
 .diag-meta { 
-  margin: 4px 0 0; 
-  font-size: 12px; 
+  margin: var(--space-1) 0 0; 
+  font-size: var(--font-sm); 
   color: var(--on-bg-dim); 
 }
 
@@ -1340,10 +1433,10 @@ input[type="range"] {
   width: 100%; 
   background-color: var(--bg); 
   border: none;
-  padding: 12px; 
-  border-radius: 8px; 
+  padding: var(--space-5); 
+  border-radius: var(--space-3); 
   font-family: monospace; 
-  font-size: 13px; 
+  font-size: var(--font-md); 
   color: var(--on-bg-dim); 
   resize: none;
   outline: none;
@@ -1374,22 +1467,24 @@ input[type="range"] {
   padding: 20px; 
 }
 
+/* Setup section - inner card pattern */
 .setup-section { 
-  padding: 12px; 
-  border-radius: 8px; 
+  padding: var(--space-4) 16px; 
+  border-radius: var(--space-3); 
   background: var(--surface-2); 
 }
 
+/* Setup section header - matches section-header font pattern */
 .setup-section h3 { 
-  margin: 0 0 12px 0; 
+  margin: 0 0 var(--space-4) 0; 
   font-size: 14px; 
   font-weight: 600; 
   color: var(--on-bg); 
 }
 
 .setup-section p { 
-  margin: 8px 0; 
-  font-size: 13px; 
+  margin: var(--space-3) 0; 
+  font-size: var(--font-md); 
   line-height: 1.5; 
   color: var(--on-bg-dim); 
 }
@@ -1410,16 +1505,16 @@ input[type="range"] {
 }
 
 .section-desc { 
-  font-size: 12px; 
+  font-size: var(--font-sm); 
   font-style: italic; 
 }
 
-/* API items in setup guide */
+/* API items in setup guide - section card pattern */
 .api-item { 
-  padding: 12px; 
-  border-radius: 8px; 
+  padding: var(--space-4) 16px; 
+  border-radius: var(--space-3); 
   background: var(--surface-3); 
-  margin-bottom: 12px; 
+  margin-bottom: var(--space-4); 
 }
 
 .api-item.success,
@@ -1440,50 +1535,51 @@ input[type="range"] {
 .api-header { 
   display: flex; 
   align-items: flex-start; 
-  gap: 8px; 
-  margin-bottom: 8px; 
+  gap: var(--space-3); 
+  margin-bottom: var(--space-3); 
 }
 
 .api-icon { 
   font-size: 16px; 
   min-width: 24px; 
-  margin-top: 2px; 
+  margin-top: var(--space-0); 
 }
 
+/* API name - matches section header font pattern */
 .api-name { 
   font-weight: 600; 
-  font-size: 13px; 
+  font-size: 14px; 
   color: var(--on-bg); 
-  margin-bottom: 4px; 
+  margin-bottom: var(--space-1); 
 }
 
 .api-status { 
-  font-size: 12px; 
+  font-size: var(--font-sm); 
   color: var(--on-bg-dim); 
 }
 
 .api-instructions, 
 .api-info { 
-  margin-top: 12px; 
-  padding: 12px; 
+  margin-top: var(--space-4); 
+  padding: var(--space-4) 16px; 
   background: var(--bg); 
-  border-radius: 6px; 
+  border-radius: var(--space-2); 
 }
 
 .api-instructions p, 
 .api-info p { 
-  margin: 4px 0; 
-  font-size: 12px; 
+  margin: var(--space-1) 0; 
+  font-size: var(--font-sm); 
 }
 
 .api-instructions ol { 
-  margin: 8px 0 0 20px; 
+  margin: var(--space-3) 0 0 20px; 
   padding: 0; 
 }
 
 .api-instructions li { 
-  margin: 4px 0; 
-  font-size: 12px; 
+  margin: var(--space-1) 0; 
+  font-size: var(--font-sm); 
   line-height: 1.6; 
 }
 
@@ -1493,35 +1589,38 @@ input[type="range"] {
 
 .flag-url {
   background: var(--surface-3); 
-  padding: 3px 8px; 
-  border-radius: 4px;
+  padding: 3px var(--space-3); 
+  border-radius: var(--space-1);
   font-family: monospace; 
-  font-size: 11px; 
+  font-size: var(--font-xs); 
   color: var(--accent);
   cursor: pointer; 
   user-select: all;
 }
 
+/* Setup footer - section card pattern */
 .setup-footer { 
-  padding: 12px; 
+  padding: var(--space-4) 16px; 
   background: var(--surface-2); 
-  border-radius: 8px; 
-  font-size: 12px; 
+  border-radius: var(--space-3); 
+  font-size: var(--font-sm); 
 }
 
+/* Setup footer title - matches section header font pattern */
 .setup-footer strong { 
   color: var(--on-bg); 
   display: block; 
-  margin-bottom: 8px; 
+  margin-bottom: var(--space-3); 
+  font-size: 14px;
 }
 
 .setup-footer ul { 
-  margin: 8px 0 0 20px; 
+  margin: var(--space-3) 0 0 20px; 
   padding: 0; 
 }
 
 .setup-footer li { 
-  margin: 4px 0; 
+  margin: var(--space-1) 0; 
   color: var(--on-bg-dim); 
 }
 
@@ -1532,9 +1631,9 @@ input[type="range"] {
 .attachment-list { 
   display: flex; 
   flex-wrap: wrap; 
-  gap: 8px; 
-  margin-bottom: 8px; 
-  padding: 0 4px; 
+  gap: var(--space-3); 
+  margin-bottom: var(--space-3); 
+  padding: 0 var(--space-1); 
 }
 
 .attachment-list:empty { 
@@ -1548,37 +1647,39 @@ input[type="range"] {
 .context-snapshots {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: var(--space-4);
+  margin-bottom: var(--space-4);
 }
 
+/* Context section label - matches section label pattern */
 .context-source-label {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--on-bg-dim);
-  font-weight: 500;
+  font-weight: 600;
+  padding: var(--space-4) 0;
 }
 
 .context-snapshot-hint {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--on-bg-dim);
   margin: 0;
 }
 
 .context-snapshot-actions {
-  margin-top: 8px;
+  margin-top: var(--space-3);
 }
 
 .context-snapshot-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--space-3);
 }
 
 .context-snapshot-empty {
-  font-size: 12px;
+  font-size: var(--font-sm);
   color: var(--on-bg-dim);
   text-align: center;
-  padding: 12px;
+  padding: var(--space-5);
 }
 
 .snapshot-info {
@@ -1586,11 +1687,11 @@ input[type="range"] {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--space-0);
 }
 
 .snapshot-title {
-  font-size: 13px;
+  font-size: var(--font-md);
   font-weight: 500;
   color: var(--on-bg);
   white-space: nowrap;
@@ -1599,12 +1700,12 @@ input[type="range"] {
 }
 
 .snapshot-meta {
-  font-size: 11px;
+  font-size: var(--font-xs);
   color: var(--on-bg-dim);
 }
 
 .snapshot-actions {
   display: flex;
-  gap: 8px;
+  gap: var(--space-3);
   flex-shrink: 0;
 }

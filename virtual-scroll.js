@@ -7,20 +7,22 @@
 export class VirtualScroller {
   constructor(container, renderItemCallback) {
     this.container = container;
+    // NOTE: renderItem is called ONCE per message and cached in messageNodes.
+    // It should do full markdown parsing/sanitisation since it's a one-time cost.
     this.renderItem = renderItemCallback;
     this.messages = [];
     this.itemHeight = 100; // Estimated average message height
     this.buffer = 5; // Number of items to render above/below viewport
     this.enabled = false;
     this.lastScrollTop = 0;
-    this.scrollTimeout = null;
-    this.messageNodes = new Map(); // messageId -> DOM node cache
+    this.rafId = null; // requestAnimationFrame ID for scroll handling
+    this.messageNodes = new Map(); // messageId -> DOM node cache (avoids re-render on scroll)
     this.topSpacer = null;
     this.bottomSpacer = null;
     this.lastMessageCount = 0;
     this.currentRange = { start: 0, end: 0 };
 
-    // Scroll handler with debouncing
+    // Scroll handler bound once
     this.handleScroll = this.handleScroll.bind(this);
   }
 
@@ -42,17 +44,39 @@ export class VirtualScroller {
     if (!this.enabled) return;
     this.enabled = false;
     this.container.removeEventListener('scroll', this.handleScroll);
+    if (this.rafId) {
+      cancelAnimationFrame(this.rafId);
+      this.rafId = null;
+    }
     this.reset();
   }
 
   /**
-   * Handle scroll events with debouncing
+   * Handle scroll events with requestAnimationFrame for smooth updates.
+   * Uses rAF instead of setTimeout to sync with browser paint cycles.
+   * This keeps per-scroll work minimal: just schedule a rAF, no heavy logic.
    */
   handleScroll() {
-    clearTimeout(this.scrollTimeout);
-    this.scrollTimeout = setTimeout(() => {
-      this.render();
-    }, 100); // Debounce scroll events
+    if (this.rafId) return; // Already scheduled, skip
+    this.rafId = requestAnimationFrame(() => {
+      this.rafId = null;
+      this.updateRange();
+    });
+  }
+
+  /**
+   * Update visible range - the lean core of scroll handling.
+   * Only performs DOM updates when the visible range actually changes.
+   */
+  updateRange() {
+    const { start, end } = this.getVisibleRange(this.messages.length);
+    
+    // Skip if range hasn't changed (common during micro-scrolls)
+    if (start === this.currentRange.start && end === this.currentRange.end) {
+      return;
+    }
+    
+    this.render();
   }
 
   /**
@@ -114,12 +138,15 @@ export class VirtualScroller {
       nodes.push(this.topSpacer);
     }
 
-    // Render visible items
+    // Render visible items from cache (NO re-parsing on scroll)
+    // Each message is rendered once via renderItem and cached in messageNodes.
+    // Subsequent scrolls just retrieve the cached DOM node.
     for (let i = start; i < end; i++) {
       const message = messages[i];
       const key = this.getMessageId(message, i);
       let element = this.messageNodes.get(key);
       if (!element) {
+        // One-time render: markdown parsing + sanitisation happens here only
         element = this.renderItem(message, i);
         element.style.position = 'relative';
         element.dataset.messageId = key;
@@ -188,13 +215,18 @@ export class VirtualScroller {
   }
 
   /**
-   * Retrieve or create a DOM node for a message without forcing a rerender
-   * Useful for streaming updates on the last message
+   * Retrieve or create a DOM node for a message without forcing a full rerender.
+   * Used by updateLastMessageBubble() for streaming updates - avoids DOM scanning.
+   * Returns cached node if exists, otherwise creates and caches it.
+   * @param {Object} message - Message object
+   * @param {number} index - Message index
+   * @returns {HTMLElement} The DOM node for this message
    */
   getMessageNode(message, index) {
     const key = this.getMessageId(message, index);
     let node = this.messageNodes.get(key);
     if (node) return node;
+    // Create node on first access (streaming may start before render range includes it)
     node = this.renderItem(message, index);
     node.style.position = 'relative';
     node.dataset.messageId = key;
