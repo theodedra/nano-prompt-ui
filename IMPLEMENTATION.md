@@ -6,20 +6,272 @@ Complete technical documentation for NanoPromptUI Chrome extension features and 
 
 ## Table of Contents
 
-1. [Chrome AI APIs](#chrome-ai-apis)
-2. [API Detection Logic](#api-detection-logic)
-3. [Multilingual Support](#multilingual-support)
-4. [Translation Implementation](#translation-implementation)
-5. [Multimodal Support (Images)](#multimodal-support-images)
-6. [PDF Support](#pdf-support)
-7. [Virtual Scrolling](#virtual-scrolling)
-8. [Lazy Session Loading](#lazy-session-loading)
-9. [Storage Architecture](#storage-architecture)
-10. [Smart Replies](#smart-replies)
-11. [Session Warmup](#session-warmup)
-12. [Context Snapshots](#context-snapshots)
-13. [Speech Synthesis](#speech-synthesis)
-14. [Setup Guide](#setup-guide)
+1. [Component Vocabulary](#component-vocabulary)
+2. [Chrome AI APIs](#chrome-ai-apis)
+3. [API Detection Logic](#api-detection-logic)
+4. [Multilingual Support](#multilingual-support)
+5. [Translation Implementation](#translation-implementation)
+6. [Multimodal Support (Images)](#multimodal-support-images)
+7. [PDF Support](#pdf-support)
+8. [Virtual Scrolling](#virtual-scrolling)
+9. [Lazy Session Loading](#lazy-session-loading)
+10. [Storage Architecture](#storage-architecture)
+11. [Smart Replies](#smart-replies)
+12. [Session Warmup](#session-warmup)
+13. [Context Snapshots](#context-snapshots)
+14. [Speech Synthesis](#speech-synthesis)
+15. [Setup Guide](#setup-guide)
+
+---
+
+## Component Vocabulary
+
+This section documents the UI primitives used throughout NanoPromptUI. Use these patterns consistently when building new features.
+
+**File:** `sidepanel.css`
+
+### Cards
+
+Base surface containers with rounded corners and background.
+
+| Class | Purpose | Example |
+|-------|---------|---------|
+| `.card` | Base card with surface background | Generic container |
+| `.card.chat` | Chat area container | Main message log area |
+| `.input-card` | Input area at bottom | Message composer area |
+| `.modal-card` | Modal dialog container | Settings, context modals |
+| `.setup-guide-card` | Extended modal (500px, scrollable) | Setup guide dialog |
+
+```css
+/* Base pattern */
+.card {
+  background-color: var(--surface);
+  border-radius: var(--rad);
+  border: none;
+}
+```
+
+### Rows
+
+Horizontal flex containers for list items with consistent padding and hover states.
+
+| Class | Purpose | States |
+|-------|---------|--------|
+| `.row` | Base row with gap, for button groups | — |
+| `.session-row` | Session list item | `.is-active`, `.is-editing` |
+| `.template-row` | Template list item | `.is-editing`, `.new-template` |
+| `.snapshot-row` | Context snapshot list item | `.is-active` |
+
+```css
+/* Pattern: all rows share this structure */
+.session-row, .template-row, .snapshot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--space-3);
+  gap: var(--space-5);
+}
+
+/* Hover and active states */
+.session-row:hover { background-color: var(--surface-3); }
+.session-row.is-active { background-color: var(--surface); }
+```
+
+### Chips
+
+Small inline elements for tags, status indicators, and badges.
+
+| Class | Purpose | Example |
+|-------|---------|---------|
+| `.chip` | Base chip (neutral) | Token count display |
+| `.chip--success` | Success state (green border) | "Ready" status |
+| `.chip--error` | Error state (red border) | "Error" status |
+| `.chip--warning` | Warning state (yellow border) | "Downloading" status |
+| `.chip--info` | Info state (blue border) | Informational badge |
+| `.chip--progress` | Progress/accent state | Active operation |
+| `.attachment-chip` | File attachment badge | "image.png" chip |
+| `.toast-chip` | Toast notification content | Toast message body |
+
+```css
+/* Base chip */
+.chip {
+  padding: var(--space-0) var(--space-3);
+  border-radius: var(--space-2);
+  background-color: var(--surface-2);
+  color: var(--on-bg-dim);
+  font-size: var(--font-xs);
+  border-left: 3px solid transparent;
+}
+
+/* State variants add colored left border */
+.chip--success {
+  color: var(--state-success);
+  border-left-color: var(--state-success);
+}
+```
+
+### Buttons
+
+#### Icon Buttons
+
+Square buttons containing only an icon.
+
+| Class | Purpose | Size |
+|-------|---------|------|
+| `.icon-button` / `.icon` | Standard icon button | 20px icon |
+| `.icon-button.mini` / `.mini-icon` | Compact icon button | 18px icon, 32px container |
+
+```css
+.icon-button {
+  padding: var(--space-2);
+  background-color: transparent;
+  color: var(--on-bg);
+  border-radius: var(--space-3);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+```
+
+#### Action Buttons
+
+Text/icon buttons for CRUD operations.
+
+| Class | Purpose | Hover Effect |
+|-------|---------|--------------|
+| `.action-btn` | Base action button | Opacity increase |
+| `.action-btn.save` | Save action (green) | Green tint background |
+| `.action-btn.cancel` | Cancel action (dim) | Surface background |
+| `.action-btn.delete` | Delete action (red on hover) | Red tint background |
+| `.action-btn.delete.is-confirming` | Confirming delete | Solid red background |
+
+#### Button Variants
+
+| Class | Purpose |
+|-------|---------|
+| `.filled` | High-emphasis button (inverted colors) |
+| `.tonal` | Medium-emphasis button (surface background) |
+
+### Inputs
+
+Text input fields with consistent styling.
+
+| Class | Purpose | Example |
+|-------|---------|---------|
+| `.input-pill` / `.field` | Base text input (pill shape) | Main message textarea |
+| `.session-rename-input` | Inline rename input | Session title edit |
+| `.template-edit-label` | Template label input | Template name field |
+| `.template-edit-text` | Template content textarea | Template body field |
+| `.session-search input` | Search input | Session filter |
+
+```css
+/* Base input pattern */
+.input-pill, .field {
+  background-color: var(--surface-2);
+  border-radius: 16px;
+  padding: var(--space-4) 14px;
+  border: none;
+}
+
+/* Focus state lightens background */
+.input-pill:focus-within { background-color: var(--surface); }
+```
+
+### State Classes
+
+#### Container States
+
+Applied to parent containers; CSS cascades to children.
+
+| Class | Container | Effect |
+|-------|-----------|--------|
+| `.is-busy` | `.wrap` | Overlay effect during operations |
+| `.is-streaming` | `.card.chat` | Pulses status chip |
+| `.is-empty` | `.card.chat` | Centers log content |
+| `.is-recording` | `.input-card` | Highlights mic button, red border |
+| `.has-error` | `.input-card` | Red border, error placeholder |
+
+#### Element States
+
+Applied directly to individual elements.
+
+| Class | Purpose |
+|-------|---------|
+| `.is-active` | Selected/current item |
+| `.is-editing` | Item in edit mode |
+| `.is-error` | Error state (red) |
+| `.is-warning` | Warning state (yellow) |
+| `.is-success` | Success state (green) |
+| `.is-confirming` | Confirming destructive action |
+
+#### Visibility States
+
+| Class | Purpose |
+|-------|---------|
+| `.is-open` | Display block |
+| `.is-closed` | Display none |
+| `.is-collapsed` | Height 0, opacity 0 (animated) |
+| `.is-expanded` | Full height, opacity 1 (animated) |
+| `.is-hidden` | Opacity 0, no pointer events |
+| `.is-visible` | Opacity 1, pointer events enabled |
+
+### Other Components
+
+| Component | Classes | Purpose |
+|-----------|---------|---------|
+| **Toast** | `.toast-notification`, `.toast-chip` | Floating notifications |
+| **Dropdown** | `.dropdown`, `.dropdown-menu`, `.dropdown-item`, `.dropdown-trigger` | Menu system |
+| **Section Header** | `.section-header`, `.log-header`, `.appbar` | Consistent header pattern |
+| **Messages** | `.msg`, `.msg.user`, `.msg.ai` | Chat bubbles |
+| **Info Note** | `.info-note` | Callout boxes with accent border |
+| **Setup Section** | `.setup-section`, `.api-item` | Setup guide cards |
+
+### CSS Variables
+
+All components use these shared variables for consistency:
+
+```css
+/* Surfaces (background layers) */
+--bg: #0a0a0a;           /* App background */
+--surface: #141414;       /* Card background */
+--surface-2: #1e1e1e;     /* Input background */
+--surface-3: #282828;     /* Hover/nested background */
+
+/* Text */
+--on-bg: #e8e8e8;         /* Primary text */
+--on-bg-dim: #a0a0a0;     /* Secondary text */
+--accent: #4a9eff;        /* Links, highlights */
+
+/* State colors */
+--state-success: #3fb950;
+--state-error: #f85149;
+--state-warning: #d29922;
+--state-info: #58a6ff;
+
+/* Spacing scale */
+--space-0: 2px;  --space-1: 4px;  --space-2: 6px;
+--space-3: 8px;  --space-4: 10px; --space-5: 12px;
+
+/* Typography */
+--font-xs: 11px;  --font-sm: 12px;  --font-md: 13px;
+```
+
+### Quick Reference: "What pattern should I use?"
+
+| Building... | Use |
+|-------------|-----|
+| A new modal dialog | `.modal-card` |
+| A list of selectable items | `.session-row` or `.snapshot-row` pattern |
+| A status indicator | `.chip` + state variant (`.chip--success`, etc.) |
+| An icon-only button | `.icon-button` or `.mini-icon` |
+| A text action button | `.action-btn` + role (`.save`, `.delete`, etc.) |
+| A text input field | `.input-pill` or specific variant |
+| A section with header | `.section-header` pattern |
+| A callout/notice | `.info-note` |
+| Showing/hiding content | `.is-open`/`.is-closed` or `.is-collapsed`/`.is-expanded` |
+| Indicating selection | `.is-active` |
+| Indicating an error | `.is-error` or `.chip--error` |
 
 ---
 

@@ -21,15 +21,16 @@ export function showToast(message, type = 'info', duration = TIMING.TOAST_DURATI
   }
 
   const toast = document.createElement('div');
-  toast.className = `toast-notification is-${type}`;
+  toast.className = 'toast-notification';
   toast.setAttribute('role', 'alert');
   toast.setAttribute('aria-live', 'polite');
 
   // Add icon based on type
   const icon = getIconForType(type);
 
+  // Use chip styling internally for unified look
   toast.innerHTML = `
-    <div class="toast-content">
+    <div class="chip chip--${type} toast-chip">
       <span class="toast-icon">${icon}</span>
       <span class="toast-message">${escapeHtml(message)}</span>
     </div>
@@ -113,14 +114,15 @@ export function showProgressToast(message, current = 0, total = 100) {
   }
 
   const toast = document.createElement('div');
-  toast.className = 'toast-notification is-progress';
+  toast.className = 'toast-notification';
   toast.setAttribute('role', 'status');
   toast.setAttribute('aria-live', 'polite');
 
   const progressPercent = total > 0 ? Math.round((current / total) * 100) : 0;
 
+  // Use chip styling internally for unified look
   toast.innerHTML = `
-    <div class="toast-content">
+    <div class="chip chip--progress toast-chip">
       <span class="toast-icon">${getProgressIcon()}</span>
       <div class="toast-progress-content">
         <span class="toast-message">${escapeHtml(message)}</span>

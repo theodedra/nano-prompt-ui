@@ -4,6 +4,7 @@
    
    Components:  .card, .row, .chip, .input-pill, .icon-button, .toast-notification
    States:      .is-active, .is-error, .is-warning, .is-busy, .is-streaming
+   Visibility:  .is-open, .is-closed, .is-collapsed, .is-expanded, .is-hidden, .is-visible
    
    ============================================================================ */
 
@@ -168,7 +169,51 @@ body {
 }
 
 /* --------------------------------------------------------------------------
-   3.4 SHARED STATE MODIFIERS (for direct element use)
+   3.4 VISIBILITY STATE CLASSES
+   --------------------------------------------------------------------------
+   Use these instead of inline style.display manipulation.
+   Dropdowns/modals use [hidden] attribute; these provide alternatives.
+   -------------------------------------------------------------------------- */
+
+/* Open/Closed - for dropdowns, accordions, panels */
+.is-open {
+  display: block;
+}
+
+.is-closed {
+  display: none;
+}
+
+/* Collapsed/Expanded - for elements with height transitions */
+.is-collapsed {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height 0.25s ease-out, opacity 0.2s ease-out;
+}
+
+.is-expanded {
+  max-height: 500px; /* Arbitrary max; adjust per use case or use JS */
+  overflow: visible;
+  opacity: 1;
+  transition: max-height 0.3s ease-in, opacity 0.2s ease-in;
+}
+
+/* Fade variants - for opacity-only transitions */
+.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease-out;
+}
+
+.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity 0.2s ease-in;
+}
+
+/* --------------------------------------------------------------------------
+   3.5 SHARED STATE MODIFIERS (for direct element use)
    -------------------------------------------------------------------------- */
 
 /* Active/Selected state */
@@ -364,6 +409,7 @@ body {
    6. COMPONENT: CHIP
    ============================================================================
    Small inline element for tags, status indicators, file badges.
+   Modifier variants: --success, --error, --warning, --info, --progress
    ============================================================================ */
 
 .chip {
@@ -375,11 +421,41 @@ body {
   transition: opacity 0.15s ease;
   position: relative;
   border: none;
+  border-left: 3px solid transparent;
+}
+
+.chip[data-clickable="true"] {
+  cursor: pointer;
 }
 
 .chip[data-clickable="true"]:hover {
   opacity: 0.8;
-  cursor: pointer;
+}
+
+/* Chip state variants - unified styling for toasts, headers, context */
+.chip--success {
+  color: var(--state-success);
+  border-left-color: var(--state-success);
+}
+
+.chip--error {
+  color: var(--state-error);
+  border-left-color: var(--state-error);
+}
+
+.chip--warning {
+  color: var(--state-warning);
+  border-left-color: var(--state-warning);
+}
+
+.chip--info {
+  color: var(--state-info);
+  border-left-color: var(--state-info);
+}
+
+.chip--progress {
+  color: var(--accent);
+  border-left-color: var(--accent);
 }
 
 /* Chip streaming state - now handled by .card.chat.is-streaming .chip */
@@ -613,7 +689,8 @@ textarea {
 /* ============================================================================
    9. COMPONENT: TOAST-NOTIFICATION
    ============================================================================
-   Floating notification messages with type variants.
+   Floating notification container - positioning/animation only.
+   Content uses .chip styling for unified look.
    ============================================================================ */
 
 .toast-notification {
@@ -622,17 +699,8 @@ textarea {
   left: 50%;
   transform: translateX(-50%) translateY(100px);
   z-index: 3000;
-
-  background: var(--surface-2);
-  color: var(--on-bg);
-  padding: var(--space-5) 20px;
-  border-radius: var(--space-5);
-  box-shadow: 0 var(--space-3) 24px rgba(0, 0, 0, 0.6);
-  border-left: 3px solid transparent;
-
   opacity: 0;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-
   max-width: 90%;
   width: fit-content;
   min-width: 200px;
@@ -649,59 +717,21 @@ textarea {
   transform: translateX(-50%) translateY(100px);
 }
 
-/* Legacy support for existing classes */
-.toast-notification.toast-show {
-  opacity: 1;
-  transform: translateX(-50%) translateY(0);
-}
-
-.toast-notification.toast-hide {
-  opacity: 0;
-  transform: translateX(-50%) translateY(100px);
-}
-
-/* Toast type variants using state classes */
-.toast-notification.is-info,
-.toast-info {
-  color: var(--state-info);
-  border-left-color: var(--state-info);
-}
-
-.toast-notification.is-success,
-.toast-success {
-  color: var(--state-success);
-  border-left-color: var(--state-success);
-}
-
-.toast-notification.is-warning,
-.toast-warning {
-  color: var(--state-warning);
-  border-left-color: var(--state-warning);
-}
-
-.toast-notification.is-error,
-.toast-error {
-  color: var(--state-error);
-  border-left-color: var(--state-error);
-}
-
-/* Toast with progress bar */
-.toast-notification.is-progress,
-.toast-progress {
-  color: var(--accent);
-  border-left-color: var(--accent);
-}
-
-.toast-content {
+/* Toast chip - extends base chip with toast-specific sizing */
+.toast-chip {
+  padding: var(--space-4) 16px;
+  border-radius: var(--space-5);
+  font-size: 14px;
+  box-shadow: 0 var(--space-3) 24px rgba(0, 0, 0, 0.6);
   display: flex;
   align-items: center;
-  gap: var(--space-5);
+  gap: var(--space-4);
 }
 
 .toast-icon {
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -713,9 +743,8 @@ textarea {
 }
 
 .toast-message {
-  font-size: 14px;
-  line-height: 1.4;
   font-weight: 500;
+  line-height: 1.4;
 }
 
 .toast-progress-content {

@@ -327,11 +327,9 @@ export function updateModelStatusChip(status) {
   els.avail.title = status.tooltip;
   
   // Update data attributes for styling hooks (no colors, just structure)
+  // CSS handles cursor via [data-clickable="true"] selector
   els.avail.dataset.level = status.level;
   els.avail.dataset.clickable = status.showGuideLink ? 'true' : 'false';
-  
-  // Update cursor style based on clickability
-  els.avail.style.cursor = status.showGuideLink ? 'pointer' : 'default';
 }
 
 /**
