@@ -20,9 +20,9 @@ const MAX_SESSIONS = LIMITS.MAX_SESSIONS;
 export { BLANK_TEMPLATE_ID, DEFAULT_TEMPLATES };
 
 /**
- * Application state object
+ * Application state object (internal - use getter/setter API below)
  */
-export const appState = {
+const appState = {
   sessions: {},           // Loaded sessions (full data)
   sessionMeta: {},        // Session metadata only (id, title, timestamp)
   sessionOrder: [],
@@ -38,6 +38,94 @@ export const appState = {
   model: null,
   lazyLoadEnabled: true   // Enable lazy loading when MAX_SESSIONS is high
 };
+
+// ============================================================================
+// STATE API - Encapsulated getters/setters for appState
+// ============================================================================
+
+/** @returns {Object<string, object>} All loaded sessions */
+export function getSessions() {
+  return appState.sessions;
+}
+
+/** @returns {Object<string, object>} Session metadata map */
+export function getSessionMeta() {
+  return appState.sessionMeta;
+}
+
+/** @returns {string[]} Ordered session IDs */
+export function getSessionOrder() {
+  return appState.sessionOrder;
+}
+
+/** @returns {string|null} Current active session ID */
+export function getCurrentSessionId() {
+  return appState.currentSessionId;
+}
+
+/** @returns {object[]} Template list */
+export function getTemplates() {
+  return appState.templates;
+}
+
+/**
+ * Replace templates array
+ * @param {object[]} templates
+ */
+export function setTemplates(templates) {
+  appState.templates = templates;
+}
+
+/** @returns {string} Current context draft text */
+export function getContextDraft() {
+  return appState.contextDraft;
+}
+
+/** @returns {object[]} Saved context snapshots */
+export function getContextSnapshots() {
+  return appState.contextSnapshots;
+}
+
+/** @returns {string|null} Active snapshot ID */
+export function getActiveSnapshotId() {
+  return appState.activeSnapshotId;
+}
+
+/** @returns {string} AI availability status */
+export function getAvailability() {
+  return appState.availability;
+}
+
+/**
+ * Update availability status
+ * @param {string} status
+ */
+export function setAvailability(status) {
+  appState.availability = status || 'unknown';
+}
+
+/** @returns {number|null} Timestamp of last availability check */
+export function getAvailabilityCheckedAt() {
+  return appState.availabilityCheckedAt;
+}
+
+/**
+ * Update availability check timestamp
+ * @param {number|null} timestamp
+ */
+export function setAvailabilityCheckedAt(timestamp) {
+  appState.availabilityCheckedAt = timestamp || null;
+}
+
+/** @returns {object} Current settings */
+export function getSettings() {
+  return appState.settings;
+}
+
+/** @returns {boolean} Whether lazy loading is enabled */
+export function isLazyLoadEnabled() {
+  return appState.lazyLoadEnabled;
+}
 
 const dirtySessions = new Set();
 const markMetaDirty = () => { metaDirty = true; };

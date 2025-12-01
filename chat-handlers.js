@@ -221,19 +221,19 @@ export async function bootstrap() {
   registerContextMenuHandlers();
   
   // Load state is handled by storage module import
-  const { loadState, appState, getPendingAttachments, BLANK_TEMPLATE_ID } = await import('./storage.js');
+  const { loadState, getSettings, getTemplates, getContextDraft, getPendingAttachments, BLANK_TEMPLATE_ID } = await import('./storage.js');
   await loadState();
 
-  Controller.applyTheme(getSettingOrDefault(appState.settings, 'theme'));
+  Controller.applyTheme(getSettingOrDefault(getSettings(), 'theme'));
 
   Controller.setSessionSearchTerm(Controller.getSessionSearchTerm());
   
   // Import UI for template initialization
   const UI = await import('./ui.js');
-  UI.updateTemplates(appState.templates, BLANK_TEMPLATE_ID);
+  UI.updateTemplates(getTemplates(), BLANK_TEMPLATE_ID);
   
   Controller.renderSessionsList();
-  Controller.setContextText(appState.contextDraft);
+  Controller.setContextText(getContextDraft());
   UI.renderPendingAttachments(getPendingAttachments());
   Controller.renderCurrentLog();
   Controller.renderContextUI();

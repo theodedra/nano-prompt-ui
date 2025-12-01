@@ -9,7 +9,19 @@
 
 import * as UI from './ui.js';
 import {
-  appState,
+  // State getters/setters
+  getSessions,
+  getSessionMeta,
+  getCurrentSessionId as getStoredCurrentSessionId,
+  getTemplates as getStoredTemplates,
+  getContextSnapshots,
+  getActiveSnapshotId,
+  getAvailability as getStoredAvailability,
+  setAvailability,
+  getAvailabilityCheckedAt as getStoredAvailabilityCheckedAt,
+  setAvailabilityCheckedAt,
+  getSettings as getStoredSettings,
+  // Session operations
   getCurrentSessionSync,
   upsertMessage,
   updateMessage,
@@ -20,18 +32,23 @@ import {
   setCurrentSession,
   createSessionFrom,
   deleteSession,
+  // Context operations
   updateContextDraft,
   saveContextDraft,
+  // Attachment operations
   addPendingAttachment,
   clearPendingAttachments,
   getPendingAttachments,
   removePendingAttachment,
+  // Settings
   updateSettings,
+  // Snapshots
   addContextSnapshot,
   getContextSnapshotById,
   getActiveSnapshot,
   removeContextSnapshot,
   setActiveSnapshot,
+  // Constants
   BLANK_TEMPLATE_ID
 } from './storage.js';
 import { toast } from './toast.js';
@@ -128,9 +145,9 @@ export function renderSessionsList(confirmingId = null) {
   const current = getCurrentSessionSync();
   const matches = searchSessions(sessionSearchTerm);
   UI.renderSessions({
-    sessions: appState.sessions,
-    sessionMeta: appState.sessionMeta,
-    currentSessionId: appState.currentSessionId,
+    sessions: getSessions(),
+    sessionMeta: getSessionMeta(),
+    currentSessionId: getStoredCurrentSessionId(),
     currentTitle: current?.title,
     matches,
     searchTerm: sessionSearchTerm,
@@ -216,7 +233,7 @@ export function setRestrictedState(restricted) {
 }
 
 export function renderContextUI() {
-  UI.renderContextSnapshots(appState.contextSnapshots, appState.activeSnapshotId);
+  UI.renderContextSnapshots(getContextSnapshots(), getActiveSnapshotId());
   UI.setContextSourceLabel(getActiveSnapshot());
 }
 
@@ -268,7 +285,7 @@ export function renderAttachments() {
 // --- SETTINGS ---
 
 export function getSettings() {
-  return appState.settings;
+  return getStoredSettings();
 }
 
 export function patchSettings(patch) {
@@ -276,15 +293,15 @@ export function patchSettings(patch) {
 }
 
 export function getSetting(key) {
-  return getSettingOrDefault(appState.settings, key);
+  return getSettingOrDefault(getStoredSettings(), key);
 }
 
 // --- DIAGNOSTICS & AVAILABILITY ---
 
 export function updateAvailabilityDisplay(status, checkedAt, diag = {}) {
   const label = describeAvailability(status);
-  appState.availability = status || 'unknown';
-  appState.availabilityCheckedAt = checkedAt || null;
+  setAvailability(status);
+  setAvailabilityCheckedAt(checkedAt);
   
   UI.setStatusText(label);
   UI.setHardwareStatus(`Gemini Nano: ${label}`);
@@ -315,10 +332,11 @@ function describeAvailability(status) {
 }
 
 export function hasCachedAvailability() {
+  const availability = getStoredAvailability();
   return Boolean(
-    appState.availability &&
-    appState.availability !== 'unknown' &&
-    appState.availabilityCheckedAt
+    availability &&
+    availability !== 'unknown' &&
+    getStoredAvailabilityCheckedAt()
   );
 }
 
@@ -345,11 +363,11 @@ export function refreshLog() {
 // --- TEMPLATES ---
 
 export function getTemplates() {
-  return appState.templates;
+  return getStoredTemplates();
 }
 
 export function updateTemplatesUI() {
-  UI.updateTemplates(appState.templates, BLANK_TEMPLATE_ID);
+  UI.updateTemplates(getStoredTemplates(), BLANK_TEMPLATE_ID);
 }
 
 // --- THEME ---
@@ -436,18 +454,18 @@ export function showToast(type, message) {
 // --- APP STATE ACCESS (read-only where possible) ---
 
 export function getCurrentSessionId() {
-  return appState.currentSessionId;
+  return getStoredCurrentSessionId();
 }
 
 export function getSession(sessionId) {
-  return appState.sessions[sessionId];
+  return getSessions()[sessionId];
 }
 
 export function getAvailability() {
-  return appState.availability;
+  return getStoredAvailability();
 }
 
 export function getAvailabilityCheckedAt() {
-  return appState.availabilityCheckedAt;
+  return getStoredAvailabilityCheckedAt();
 }
 
