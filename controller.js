@@ -48,6 +48,11 @@ import {
   getActiveSnapshot,
   removeContextSnapshot,
   setActiveSnapshot,
+  // Template operations
+  addTemplate as addStorageTemplate,
+  updateTemplate as updateStorageTemplate,
+  deleteTemplate as deleteStorageTemplate,
+  resetTemplates as resetStorageTemplates,
   // Constants
   BLANK_TEMPLATE_ID
 } from './storage.js';
@@ -367,8 +372,55 @@ export function getTemplates() {
   return getStoredTemplates();
 }
 
-export function updateTemplatesUI() {
-  UI.updateTemplates(getStoredTemplates(), BLANK_TEMPLATE_ID);
+export function updateTemplatesUI(editingId = null) {
+  UI.updateTemplates(getStoredTemplates(), BLANK_TEMPLATE_ID, editingId);
+}
+
+/**
+ * Add a new template
+ * @param {string} label - Template name
+ * @param {string} text - Template prompt text
+ * @returns {object} Created template
+ */
+export function addTemplate(label, text) {
+  const template = addStorageTemplate(label, text);
+  scheduleSaveState();
+  return template;
+}
+
+/**
+ * Update a template
+ * @param {string} id - Template ID
+ * @param {{label?: string, text?: string}} patch - Fields to update
+ * @returns {boolean} Success
+ */
+export function patchTemplate(id, patch) {
+  const result = updateStorageTemplate(id, patch);
+  if (result) {
+    scheduleSaveState();
+  }
+  return result;
+}
+
+/**
+ * Delete a template
+ * @param {string} id - Template ID
+ * @returns {boolean} Success
+ */
+export function removeTemplate(id) {
+  const result = deleteStorageTemplate(id);
+  if (result) {
+    scheduleSaveState();
+  }
+  return result;
+}
+
+/**
+ * Reset templates to defaults
+ */
+export function resetAllTemplates() {
+  resetStorageTemplates();
+  scheduleSaveState();
 }
 
 // --- THEME ---

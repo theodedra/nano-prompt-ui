@@ -35,7 +35,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Dropdown Triggers (Generic)
     { sel: '#templates-trigger', ev: 'click', fn: ChatHandlers.handleTemplatesTriggerClick },
-    { sel: '#templates-menu', ev: 'click', fn: ChatHandlers.handleTemplateSelect },
+    { sel: '#templates-menu', ev: 'click', fn: ChatHandlers.handleTemplateMenuClick },
     { sel: '#session-trigger', ev: 'click', fn: ChatHandlers.handleSessionTriggerClick },
     { sel: '#session-menu', ev: 'click', fn: ChatHandlers.handleSessionMenuClick },
     { sel: '#session-search', ev: 'input', fn: ChatHandlers.handleSessionSearchInput },
@@ -92,4 +92,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Handle keyboard events for inline session rename
   document.getElementById('session-menu')?.addEventListener('keydown', ChatHandlers.handleRenameInputKeyDown);
+  
+  // Handle keyboard events for template editing
+  document.getElementById('templates-menu')?.addEventListener('keydown', ChatHandlers.handleTemplateEditKeyDown);
 });

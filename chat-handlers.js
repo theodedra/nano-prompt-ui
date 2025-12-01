@@ -650,8 +650,14 @@ export function handleDocumentKeyDown(event) {
   }
 }
 
-export function handleDocumentClick(event) {
-  if (!event.target.closest('#templates-dropdown')) Controller.closeMenu('templates');
+export async function handleDocumentClick(event) {
+  if (!event.target.closest('#templates-dropdown')) {
+    Controller.closeMenu('templates');
+    // Cancel template editing when clicking outside templates dropdown
+    if (isTemplateEditingActive()) {
+      await cancelTemplateEdit();
+    }
+  }
   if (!event.target.closest('#session-dropdown')) {
     Controller.closeMenu('session');
     // Cancel inline rename when clicking outside session dropdown
@@ -707,17 +713,232 @@ export async function handleLogClick(event) {
   }
 }
 
+// Track which template is being edited
+let editingTemplateId = null;
+let isAddingTemplate = false;
+
 /**
- * Handle template selection from dropdown
+ * Start inline edit for a template
+ * @param {string} id - Template ID
+ */
+function startTemplateEdit(id) {
+  editingTemplateId = id;
+  isAddingTemplate = false;
+  Controller.updateTemplatesUI(id);
+}
+
+/**
+ * Cancel template editing
+ */
+async function cancelTemplateEdit() {
+  editingTemplateId = null;
+  isAddingTemplate = false;
+  const UI = await import('./ui.js');
+  UI.setAddingNewTemplate(false);
+  Controller.updateTemplatesUI();
+}
+
+/**
+ * Save template edit
+ * @param {string} id - Template ID
+ * @returns {Promise<void>}
+ */
+async function saveTemplateEdit(id) {
+  const UI = await import('./ui.js');
+  const values = UI.getTemplateEditValues(id);
+  
+  if (!values || !values.label) {
+    Controller.showToast('error', 'Template name is required');
+    return;
+  }
+  
+  const success = Controller.patchTemplate(id, values);
+  if (success) {
+    editingTemplateId = null;
+    Controller.updateTemplatesUI();
+    Controller.showToast('success', 'Template saved');
+  } else {
+    Controller.showToast('error', 'Failed to save template');
+  }
+}
+
+/**
+ * Delete a template
+ * @param {string} id - Template ID
+ */
+async function deleteTemplate(id) {
+  const success = Controller.removeTemplate(id);
+  if (success) {
+    Controller.updateTemplatesUI();
+    Controller.showToast('success', 'Template deleted');
+  }
+}
+
+/**
+ * Start adding a new template
+ */
+async function startAddTemplate() {
+  editingTemplateId = null;
+  isAddingTemplate = true;
+  const UI = await import('./ui.js');
+  UI.setAddingNewTemplate(true);
+  Controller.updateTemplatesUI();
+}
+
+/**
+ * Save new template
+ * @returns {Promise<void>}
+ */
+async function saveNewTemplate() {
+  const UI = await import('./ui.js');
+  const values = UI.getTemplateEditValues(null);
+  
+  if (!values || !values.label) {
+    Controller.showToast('error', 'Template name is required');
+    return;
+  }
+  
+  Controller.addTemplate(values.label, values.text);
+  isAddingTemplate = false;
+  UI.setAddingNewTemplate(false);
+  Controller.updateTemplatesUI();
+  Controller.showToast('success', 'Template created');
+}
+
+/**
+ * Cancel adding new template
+ */
+async function cancelNewTemplate() {
+  isAddingTemplate = false;
+  const UI = await import('./ui.js');
+  UI.setAddingNewTemplate(false);
+  Controller.updateTemplatesUI();
+}
+
+/**
+ * Handle template menu click events
+ * @param {MouseEvent} event - Click event
+ * @returns {Promise<void>}
+ */
+export async function handleTemplateMenuClick(event) {
+  const btn = event.target.closest('button');
+  const row = event.target.closest('.template-row');
+  const input = event.target.closest('input, textarea');
+  
+  // If clicking on an input, don't close menu
+  if (input) {
+    event.stopPropagation();
+    return;
+  }
+  
+  if (btn) {
+    const action = btn.dataset.action;
+    const id = btn.dataset.id;
+    
+    // Handle action buttons
+    if (action === 'edit-template') {
+      event.stopPropagation();
+      startTemplateEdit(id);
+      return;
+    }
+    
+    if (action === 'delete-template') {
+      event.stopPropagation();
+      await deleteTemplate(id);
+      return;
+    }
+    
+    if (action === 'save-template') {
+      event.stopPropagation();
+      await saveTemplateEdit(id);
+      return;
+    }
+    
+    if (action === 'cancel-template') {
+      event.stopPropagation();
+      cancelTemplateEdit();
+      return;
+    }
+    
+    if (action === 'add-template') {
+      event.stopPropagation();
+      await startAddTemplate();
+      return;
+    }
+    
+    if (action === 'save-new-template') {
+      event.stopPropagation();
+      await saveNewTemplate();
+      return;
+    }
+    
+    if (action === 'cancel-new-template') {
+      event.stopPropagation();
+      await cancelNewTemplate();
+      return;
+    }
+    
+    // Handle template selection (use the template)
+    if (btn.classList.contains('template-select')) {
+      const text = btn.dataset.text;
+      if (text) {
+        Controller.setInputValue(Controller.getInputValue() + text);
+        Controller.closeMenu('templates');
+        Controller.focusInput();
+      }
+      return;
+    }
+  }
+}
+
+/**
+ * Handle keyboard events on template edit inputs
+ * @param {KeyboardEvent} event - Keyboard event
+ * @returns {Promise<void>}
+ */
+export async function handleTemplateEditKeyDown(event) {
+  const input = event.target.closest('.template-edit-label, .template-edit-text');
+  if (!input) return;
+  
+  const id = input.dataset.id;
+  
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    if (id) {
+      cancelTemplateEdit();
+    } else {
+      await cancelNewTemplate();
+    }
+  }
+  
+  // Only save on Enter if it's the label input (not textarea)
+  if (event.key === 'Enter' && input.classList.contains('template-edit-label')) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (id) {
+      await saveTemplateEdit(id);
+    } else {
+      await saveNewTemplate();
+    }
+  }
+}
+
+/**
+ * Check if template editing is in progress
+ * @returns {boolean}
+ */
+export function isTemplateEditingActive() {
+  return editingTemplateId !== null || isAddingTemplate;
+}
+
+/**
+ * Handle template selection from dropdown (legacy - replaced by handleTemplateMenuClick)
  * @param {MouseEvent} event - Click event
  */
 export function handleTemplateSelect(event) {
-  const target = event.target.closest('.dropdown-item');
-  if (!target) return;
-  const text = target.dataset.text;
-  Controller.setInputValue(Controller.getInputValue() + text);
-  Controller.closeMenu('templates');
-  Controller.focusInput();
+  // Delegate to the new unified handler
+  handleTemplateMenuClick(event);
 }
 
 /**

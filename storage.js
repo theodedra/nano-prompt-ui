@@ -76,6 +76,63 @@ export function setTemplates(templates) {
   appState.templates = templates;
 }
 
+/**
+ * Add a new custom template
+ * @param {string} label - Template display name
+ * @param {string} text - Template prompt text
+ * @returns {object} The created template
+ */
+export function addTemplate(label, text) {
+  const template = {
+    id: nanoid(),
+    label: (label || '').trim() || 'New template',
+    text: (text || '').trim(),
+    custom: true
+  };
+  appState.templates.push(template);
+  return template;
+}
+
+/**
+ * Update an existing template
+ * @param {string} id - Template ID
+ * @param {{label?: string, text?: string}} patch - Fields to update
+ * @returns {boolean} Whether the template was found and updated
+ */
+export function updateTemplate(id, patch) {
+  const template = appState.templates.find(t => t.id === id);
+  if (!template) return false;
+  
+  if (typeof patch.label === 'string') {
+    template.label = patch.label.trim() || template.label;
+  }
+  if (typeof patch.text === 'string') {
+    template.text = patch.text.trim();
+  }
+  return true;
+}
+
+/**
+ * Delete a template by ID
+ * @param {string} id - Template ID to delete
+ * @returns {boolean} Whether the template was deleted
+ */
+export function deleteTemplate(id) {
+  // Don't allow deleting the blank template
+  if (id === BLANK_TEMPLATE_ID) return false;
+  
+  const before = appState.templates.length;
+  appState.templates = appState.templates.filter(t => t.id !== id);
+  return appState.templates.length < before;
+}
+
+/**
+ * Reset templates to defaults
+ */
+export function resetTemplates() {
+  appState.templates = DEFAULT_TEMPLATES.slice();
+}
+
 /** @returns {string} Current context draft text */
 export function getContextDraft() {
   return appState.contextDraft;
