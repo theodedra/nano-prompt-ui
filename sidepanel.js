@@ -8,6 +8,7 @@ import * as UI from './ui.js';
 import * as ChatHandlers from './chat-handlers.js';
 import * as AttachmentHandlers from './attachment-handlers.js';
 import * as SettingsHandlers from './settings-handlers.js';
+import { performSessionWarmup } from './model.js';
 
 function bind(selector, event, handler) {
   const el = document.querySelector(selector);
@@ -16,6 +17,11 @@ function bind(selector, event, handler) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   UI.initUI();
+  
+  // Trigger one-time model warmup on first sidepanel open (non-blocking)
+  // This primes the AI engine for faster first-prompt response
+  performSessionWarmup().catch(e => console.warn('Warmup error:', e));
+  
   await ChatHandlers.bootstrap();
   await ChatHandlers.refreshAvailability({ forceCheck: true });
 
@@ -66,7 +72,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Setup Guide
     { sel: '#open-setup-guide', ev: 'click', fn: SettingsHandlers.handleOpenSetupGuide },
-    { sel: '#setup-guide-modal', ev: 'click', fn: ChatHandlers.handleModalClick }
+    { sel: '#setup-guide-modal', ev: 'click', fn: ChatHandlers.handleModalClick },
+    
+    // Model Status Chip (click to open setup guide when issues exist)
+    { sel: '#model-status', ev: 'click', fn: () => UI.handleModelStatusChipClick() }
   ];
 
   // --- APPLY BINDINGS ---

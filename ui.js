@@ -289,6 +289,57 @@ export function setStatusText(text) {
   }
 }
 
+// Track current model status for click behavior
+let currentModelStatus = null;
+
+/**
+ * Update the model status chip with diagnostic info
+ * @param {Object} status - Model status from getModelStatusSummary()
+ * @param {string} status.level - 'ok' | 'limited' | 'broken'
+ * @param {string} status.label - Short text for the chip
+ * @param {string} status.tooltip - Tooltip text
+ * @param {boolean} status.showGuideLink - Whether to link to setup guide
+ */
+export function updateModelStatusChip(status) {
+  if (!els.avail || !status) return;
+  
+  currentModelStatus = status;
+  
+  // Update chip text (respects busy state)
+  lastStatus = status.label;
+  if (!isSystemBusy) {
+    els.avail.textContent = status.label;
+  }
+  
+  // Update tooltip
+  els.avail.title = status.tooltip;
+  
+  // Update data attributes for styling hooks (no colors, just structure)
+  els.avail.dataset.level = status.level;
+  els.avail.dataset.clickable = status.showGuideLink ? 'true' : 'false';
+  
+  // Update cursor style based on clickability
+  els.avail.style.cursor = status.showGuideLink ? 'pointer' : 'default';
+}
+
+/**
+ * Handle click on model status chip
+ * Opens setup guide if there are issues
+ */
+export function handleModelStatusChipClick() {
+  if (currentModelStatus?.showGuideLink) {
+    openSetupGuideModal();
+  }
+}
+
+/**
+ * Get current model status (for external checks)
+ * @returns {Object|null}
+ */
+export function getModelStatus() {
+  return currentModelStatus;
+}
+
 export function setHardwareStatus(text) {
   if (els.hardware) els.hardware.textContent = text;
 }

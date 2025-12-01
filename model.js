@@ -23,10 +23,14 @@ import {
 
 const STREAMING_THROTTLE_MS = 75;
 const DIAGNOSTICS_KEY = 'nanoPrompt.diagnostics';
+const SESSION_WARMUP_KEY = 'nanoPrompt.warmedUp';
 let diagnosticsCache = null;
 const SMART_REPLY_LIMIT = 3;
 const SMART_REPLY_CONTEXT_CHARS = 600;
 const SMART_REPLY_MAX_LENGTH = 120;
+
+// In-memory warmup flag - resets when Chrome restarts (sidepanel context reloads)
+let hasWarmedUp = false;
 
 // --- LOCAL AI WRAPPER ---
 /**
@@ -145,6 +149,42 @@ class LocalAI {
     if (this.controller) {
       try { this.controller.abort(); } catch(e) {}
       this.controller = null;
+    }
+  }
+
+  /**
+   * Lightweight warmup: create and immediately destroy a minimal session
+   * to prime the engine for faster first-prompt response.
+   * @returns {Promise<{success: boolean, error?: string}>}
+   */
+  async ensureEngine() {
+    if (!this.engine) {
+      return { success: false, error: 'AI engine not available' };
+    }
+
+    try {
+      const availability = await this.getAvailability();
+      if (availability === 'no') {
+        return { success: false, error: 'AI not available' };
+      }
+      if (availability === 'after-download') {
+        return { success: false, error: 'Model still downloading' };
+      }
+
+      // Create minimal warmup session
+      const session = await this.engine.create({
+        ...MODEL_CONFIG,
+        systemPrompt: 'Ready'
+      });
+      
+      // Immediately destroy - we just wanted to prime the engine
+      if (session?.destroy) {
+        session.destroy();
+      }
+
+      return { success: true };
+    } catch (e) {
+      return { success: false, error: e?.message || 'Warmup failed' };
     }
   }
 }
@@ -324,6 +364,12 @@ export async function warmUpModel() {
     }
   }
 
+  // Mark as warmed up if successful
+  if (warmupStatus === 'success') {
+    hasWarmedUp = true;
+    syncWarmupFlag(true);
+  }
+
   const diag = await saveDiagnosticsState({
     availability,
     availabilityCheckedAt: now,
@@ -333,6 +379,72 @@ export async function warmUpModel() {
   });
 
   return { status: availability, checkedAt: now, diag, warmupStatus, warmupError };
+}
+
+/**
+ * Sync warmup flag to chrome.storage.session for cross-context sharing
+ * @param {boolean} value - Warmup state to persist
+ */
+async function syncWarmupFlag(value) {
+  try {
+    await chrome.storage.session.set({ [SESSION_WARMUP_KEY]: value });
+  } catch (e) {
+    // Non-critical: session storage may not be available
+  }
+}
+
+/**
+ * Check if warmup has already been performed (checks storage for cross-context sync)
+ * @returns {Promise<boolean>}
+ */
+async function checkWarmupFlag() {
+  if (hasWarmedUp) return true;
+  
+  try {
+    const result = await chrome.storage.session.get(SESSION_WARMUP_KEY);
+    if (result[SESSION_WARMUP_KEY]) {
+      hasWarmedUp = true;
+      return true;
+    }
+  } catch (e) {
+    // Non-critical: fall back to in-memory flag
+  }
+  
+  return false;
+}
+
+/**
+ * One-time session warmup - runs ensureEngine() on first sidepanel open
+ * Skips warmup if already performed in this browser session.
+ * @returns {Promise<{skipped: boolean, success?: boolean, error?: string}>}
+ */
+export async function performSessionWarmup() {
+  // Check both in-memory and session storage flags
+  const alreadyWarmed = await checkWarmupFlag();
+  if (alreadyWarmed) {
+    return { skipped: true };
+  }
+
+  console.log('Nano Prompt: Performing first-open session warmup...');
+  const result = await localAI.ensureEngine();
+
+  if (result.success) {
+    hasWarmedUp = true;
+    syncWarmupFlag(true);
+    console.log('Nano Prompt: Session warmup complete.');
+  } else {
+    console.warn('Nano Prompt: Session warmup skipped -', result.error);
+  }
+
+  return { skipped: false, ...result };
+}
+
+/**
+ * Check if engine has been warmed up this session
+ * @returns {boolean}
+ */
+export function isWarmedUp() {
+  return hasWarmedUp;
 }
 
 /**

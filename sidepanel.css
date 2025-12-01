@@ -67,6 +67,11 @@ body {
 .chip {
   margin-left: auto; padding: 2px 8px; border-radius: 6px;
   background-color: var(--surface-2); color: var(--on-bg-dim); font-size: 11px;
+  transition: opacity 0.15s ease;
+  position: relative;
+}
+.chip[data-clickable="true"]:hover {
+  opacity: 0.8;
 }
 
 /* --- MAIN CONTENT (Grid Row 2) --- */

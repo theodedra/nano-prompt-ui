@@ -18,6 +18,7 @@ import {
   getSettingOrDefault
 } from './constants.js';
 import { registerContextMenuHandlers } from './context-menu-handlers.js';
+import { getModelStatusSummary } from './setup-guide.js';
 
 let recognition;
 let recognizing = false;
@@ -881,4 +882,12 @@ export async function refreshAvailability({ forceCheck = false } = {}) {
   });
   
   Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
+  
+  // Update model status chip with diagnostic summary
+  try {
+    const modelStatus = await getModelStatusSummary(result.status);
+    Controller.updateModelStatusChip(modelStatus);
+  } catch (e) {
+    console.warn('Failed to get model status summary:', e);
+  }
 }

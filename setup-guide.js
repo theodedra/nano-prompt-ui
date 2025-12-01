@@ -482,3 +482,67 @@ export async function getSetupStatus() {
     needsRestart: false // Could be set based on localStorage check
   };
 }
+
+/**
+ * Get a lightweight model status summary for the status chip
+ * @param {string} availability - Current availability status from model.js
+ * @returns {Promise<Object>} Model status summary
+ */
+export async function getModelStatusSummary(availability = 'unknown') {
+  const promptAPI = await checkPromptAPI();
+  const browserInfo = getBrowserInfo();
+  
+  // Determine level: ok | limited | broken
+  let level = 'ok';
+  let label = 'Ready';
+  let tooltip = 'Gemini Nano is ready';
+  let showGuideLink = false;
+  
+  // Check browser compatibility first
+  if (!browserInfo.isChrome) {
+    level = 'broken';
+    label = 'Unsupported';
+    tooltip = 'Chrome required for AI features';
+    showGuideLink = true;
+  } else if (!browserInfo.meetsMinimumVersion) {
+    level = 'broken';
+    label = 'Update Chrome';
+    tooltip = `Chrome ${browserInfo.chromeVersion} detected. Version 128+ required.`;
+    showGuideLink = true;
+  } else if (!promptAPI.available) {
+    level = 'broken';
+    label = 'Setup needed';
+    tooltip = promptAPI.message || 'Prompt API not available. Click for setup guide.';
+    showGuideLink = true;
+  } else if (availability === 'after-download') {
+    level = 'limited';
+    label = 'Downloading';
+    tooltip = 'Model will download on first use';
+    showGuideLink = false;
+  } else if (availability === 'no' || availability === 'unknown') {
+    // API exists but availability check failed - may still work
+    level = 'limited';
+    label = 'Page-Mode';
+    tooltip = 'Running in page context (limited). Some features may not work.';
+    showGuideLink = true;
+  } else {
+    // All good
+    level = 'ok';
+    label = 'Ready';
+    tooltip = `Gemini Nano ready${promptAPI.multilingual ? ' (multilingual)' : ''}`;
+    showGuideLink = false;
+  }
+  
+  return {
+    level,
+    label,
+    tooltip,
+    showGuideLink,
+    flags: {
+      promptAPIAvailable: promptAPI.available,
+      multilingual: promptAPI.multilingual || false,
+      chromeVersion: browserInfo.chromeVersion,
+      availability
+    }
+  };
+}

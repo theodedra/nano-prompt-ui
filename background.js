@@ -24,14 +24,49 @@ const UI_MESSAGES = {
   WARMUP_SUCCESS: 'Nano Prompt: Warmup successful.'
 };
 
+// Session warmup key shared with model.js for cross-context sync
+const SESSION_WARMUP_KEY = 'nanoPrompt.warmedUp';
+
 let pendingAction = null;
 
 /**
+ * Check if warmup has already been performed this session
+ * @returns {Promise<boolean>}
+ */
+async function checkWarmupFlag() {
+  try {
+    const result = await chrome.storage.session.get(SESSION_WARMUP_KEY);
+    return Boolean(result[SESSION_WARMUP_KEY]);
+  } catch (e) {
+    return false;
+  }
+}
+
+/**
+ * Set the warmup flag in session storage
+ * @param {boolean} value
+ */
+async function setWarmupFlag(value) {
+  try {
+    await chrome.storage.session.set({ [SESSION_WARMUP_KEY]: value });
+  } catch (e) {
+    // Non-critical
+  }
+}
+
+/**
  * Warm up the AI model for faster first use
+ * Checks shared session flag to avoid redundant warmups
  * @returns {Promise<void>}
  */
 async function warmUpModel() {
   try {
+    // Skip if already warmed up this browser session
+    if (await checkWarmupFlag()) {
+      console.log(LOG_PREFIX.INFO, 'Model already warmed up this session, skipping.');
+      return;
+    }
+
     // Check if LanguageModel API is available (global constructor in Chrome extensions)
     if (typeof LanguageModel === 'undefined') return;
 
@@ -53,6 +88,9 @@ async function warmUpModel() {
             expectedOutputs: MODEL_CONFIG.expectedOutputs
         });
         session.destroy();
+        
+        // Mark warmup complete in shared session storage
+        await setWarmupFlag(true);
         console.log(LOG_PREFIX.INFO, UI_MESSAGES.WARMUP_SUCCESS);
       } catch (e) {
         console.warn(LOG_PREFIX.WARN, 'Warmup failed (non-critical):', e);

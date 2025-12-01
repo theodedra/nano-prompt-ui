@@ -298,6 +298,14 @@ export function updateAvailabilityDisplay(status, checkedAt, diag = {}) {
   return label;
 }
 
+/**
+ * Update model status chip with diagnostic summary
+ * @param {Object} status - Model status from getModelStatusSummary()
+ */
+export function updateModelStatusChip(status) {
+  UI.updateModelStatusChip(status);
+}
+
 function describeAvailability(status) {
   if (status === 'readily') return UI_MESSAGES.READY;
   if (status === 'after-download') return 'After download';
