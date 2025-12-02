@@ -1,28 +1,26 @@
-// pdf.js - PDF text extraction using Mozilla's pdf.js library (local)
+// pdf.js - PDF text extraction using Web Worker for non-blocking processing
 // This module handles PDF file processing for attachment support
 
 import { LIMITS } from './constants.js';
 
-const PDF_CHAR_SAFETY_MARGIN = 2_000;
+/** @type {Worker|null} */
+let pdfWorker = null;
 
 /**
- * Yield control to the browser to prevent UI jank.
- * Uses requestIdleCallback when available, falls back to setTimeout.
- * @returns {Promise<void>}
+ * Get or create the PDF extraction worker
+ * @returns {Worker}
  */
-function yieldToMain() {
-  return new Promise((resolve) => {
-    if ('requestIdleCallback' in window) {
-      requestIdleCallback(resolve, { timeout: 50 });
-    } else {
-      setTimeout(resolve, 0);
-    }
-  });
+function getWorker() {
+  if (!pdfWorker) {
+    const workerUrl = chrome.runtime.getURL('pdf-worker.js');
+    pdfWorker = new Worker(workerUrl);
+  }
+  return pdfWorker;
 }
 
 /**
- * Extract text content from a PDF file with chunked processing.
- * Yields to the UI between pages to prevent jank.
+ * Extract text content from a PDF file using Web Worker.
+ * Keeps the main thread responsive during extraction.
  *
  * @param {File} file - PDF file object
  * @param {Object} options - Optional configuration
@@ -33,160 +31,92 @@ function yieldToMain() {
 export async function extractPdfText(file, options = {}) {
   const { onProgress, signal } = options;
 
-  try {
-    if (signal?.aborted) {
-      throw new DOMException('PDF extraction aborted', 'AbortError');
-    }
-
-    if (!window.pdfjsLib) {
-      await loadPdfJs();
-    }
-
-    const arrayBuffer = await file.arrayBuffer();
-
-    if (signal?.aborted) {
-      throw new DOMException('PDF extraction aborted', 'AbortError');
-    }
-
-    const loadingTask = window.pdfjsLib.getDocument({
-      data: arrayBuffer,
-      useWorkerFetch: false,
-      isEvalSupported: false,
-      useSystemFonts: true
-    });
-
-    const pdf = await loadingTask.promise;
-    const totalPages = pdf.numPages;
-    const maxPages = Math.min(totalPages, LIMITS.PDF_MAX_PAGES || 50);
-
-    onProgress?.(0, maxPages);
-
-    const textParts = [];
-    let collectedLength = 0;
-    let pagesProcessed = 0;
-    let hitEarlyExit = false;
-
-    for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-      if (signal?.aborted) {
-        throw new DOMException('PDF extraction aborted', 'AbortError');
-      }
-
-      await yieldToMain();
-
-      if (collectedLength > LIMITS.PDF_MAX_CHARS + PDF_CHAR_SAFETY_MARGIN) {
-        hitEarlyExit = true;
-        break;
-      }
-
-      const page = await pdf.getPage(pageNum);
-      const textContent = await page.getTextContent();
-
-      const pageText = textContent.items
-        .map(item => item.str)
-        .join(' ')
-        .trim();
-
-      if (pageText) {
-        const chunk = `--- Page ${pageNum} ---\n${pageText}`;
-        const separatorLength = textParts.length > 0 ? 2 : 0; // account for join '\n\n'
-        const remainingBudget = (LIMITS.PDF_MAX_CHARS + PDF_CHAR_SAFETY_MARGIN) - collectedLength - separatorLength;
-
-        if (remainingBudget <= 0) {
-          hitEarlyExit = true;
-          break;
-        }
-
-        const chunkToAdd = chunk.length > remainingBudget ? chunk.slice(0, Math.max(remainingBudget, 0)) : chunk;
-        if (!chunkToAdd) {
-          hitEarlyExit = true;
-          break;
-        }
-
-        collectedLength += separatorLength + chunkToAdd.length;
-        textParts.push(chunkToAdd);
-        pagesProcessed++;
-
-        if (chunkToAdd.length < chunk.length || collectedLength > LIMITS.PDF_MAX_CHARS + PDF_CHAR_SAFETY_MARGIN) {
-          hitEarlyExit = true;
-          break;
-        }
-      }
-
-      onProgress?.(pageNum, maxPages);
-    }
-
-    const fullText = textParts.join('\n\n');
-    const wasClamped = fullText.length > LIMITS.PDF_MAX_CHARS;
-    const clampedText = wasClamped ? fullText.slice(0, LIMITS.PDF_MAX_CHARS) : fullText;
-    const truncated = hitEarlyExit || wasClamped || totalPages > maxPages;
-
-    onProgress?.(pagesProcessed, maxPages);
-
-    if (wasClamped) {
-      return {
-        text: clampedText + '\n\n[...PDF content truncated due to length...]',
-        meta: {
-          truncated: true,
-          pagesProcessed,
-          totalPagesEstimate: totalPages,
-          charsUsed: Math.min(clampedText.length, LIMITS.PDF_MAX_CHARS)
-        }
-      };
-    }
-
-    return {
-      text: fullText || '[PDF appears to be empty or contains only images]',
-      meta: {
-        truncated,
-        pagesProcessed,
-        totalPagesEstimate: totalPages,
-        charsUsed: Math.min((fullText || '').length, LIMITS.PDF_MAX_CHARS)
-      }
-    };
-
-  } catch (error) {
-    // Re-throw abort errors without logging
-    if (error.name === 'AbortError') {
-      throw error;
-    }
-    console.error('PDF extraction failed:', error);
-    console.error('Error name:', error.name);
-    console.error('Error message:', error.message);
-    console.error('Error stack:', error.stack);
-    throw error;
+  // Check for early abort
+  if (signal?.aborted) {
+    throw new DOMException('PDF extraction aborted', 'AbortError');
   }
-}
 
-/**
- * Load Mozilla's pdf.js library from local lib folder
- * @returns {Promise<void>}
- */
-async function loadPdfJs() {
+  const arrayBuffer = await file.arrayBuffer();
+
+  // Check for abort after reading file
+  if (signal?.aborted) {
+    throw new DOMException('PDF extraction aborted', 'AbortError');
+  }
+
   return new Promise((resolve, reject) => {
-    if (window.pdfjsLib) {
-      resolve();
-      return;
+    const worker = getWorker();
+
+    // Handle abort signal
+    const abortHandler = () => {
+      worker.onmessage = null;
+      worker.onerror = null;
+      reject(new DOMException('PDF extraction aborted', 'AbortError'));
+    };
+
+    if (signal) {
+      signal.addEventListener('abort', abortHandler, { once: true });
     }
 
-    const script = document.createElement('script');
-    script.src = chrome.runtime.getURL('lib/pdf.min.js');
-    script.async = false; // Load synchronously for reliability
+    // Set up message handler
+    worker.onmessage = (e) => {
+      const { type, page, total, text, meta, error } = e.data;
 
-    script.onload = () => {
-      if (window.pdfjsLib) {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = chrome.runtime.getURL('lib/pdf.worker.min.js');
-        resolve();
-      } else {
-        reject(new Error('pdf.js failed to load from local files'));
+      switch (type) {
+        case 'progress':
+          onProgress?.(page, total);
+          break;
+
+        case 'complete':
+          // Clean up
+          if (signal) {
+            signal.removeEventListener('abort', abortHandler);
+          }
+          worker.onmessage = null;
+          worker.onerror = null;
+          resolve({ text, meta });
+          break;
+
+        case 'error':
+          // Clean up
+          if (signal) {
+            signal.removeEventListener('abort', abortHandler);
+          }
+          worker.onmessage = null;
+          worker.onerror = null;
+          reject(new Error(error));
+          break;
       }
     };
 
-    script.onerror = (error) => {
-      console.error('Failed to load pdf.js from local lib folder:', error);
-      reject(new Error('Failed to load pdf.js library from local files'));
+    // Handle worker errors
+    worker.onerror = (e) => {
+      if (signal) {
+        signal.removeEventListener('abort', abortHandler);
+      }
+      worker.onmessage = null;
+      worker.onerror = null;
+      console.error('PDF worker error:', e);
+      reject(new Error('PDF worker failed'));
     };
 
-    document.head.appendChild(script);
+    // Send extraction request to worker
+    worker.postMessage({
+      arrayBuffer,
+      limits: {
+        PDF_MAX_PAGES: LIMITS.PDF_MAX_PAGES,
+        PDF_MAX_CHARS: LIMITS.PDF_MAX_CHARS
+      }
+    });
   });
 }
 
+/**
+ * Terminate the PDF worker to free resources
+ * Call this when the extension is being unloaded
+ */
+export function terminatePdfWorker() {
+  if (pdfWorker) {
+    pdfWorker.terminate();
+    pdfWorker = null;
+  }
+}

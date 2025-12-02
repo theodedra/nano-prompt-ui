@@ -34,7 +34,6 @@ export const LIMITS = {
   TOTAL_TOKEN_BUDGET: 28_000, // Leave headroom below 32k limit
   SYSTEM_PROMPT_BUDGET: 500, // Budget for system prompt/rules
   CONTEXT_BUDGET: 6_000, // Budget for page context
-  HISTORY_BUDGET: 18_000, // Budget for conversation history (sliding window)
   USER_QUERY_BUDGET: 2_000, // Budget for current user query
   ATTACHMENT_BUDGET: 1_500, // Budget for attachment text content
 
@@ -243,9 +242,9 @@ export const VALIDATION = {
 // ============================================================================
 
 export const INTENT_PATTERNS = {
-  page: /summari|page|article|tab|website|context|window/,
-  time: /time|date|today|now/,
-  location: /where|location|lat|long/
+  page: /\b(summari|page|article|tab|website|context|window)\b/i,
+  time: /\b(time|date|today|now)\b/i,
+  location: /\b(where|location|lat|long)\b/i
 };
 
 export const INTENT_TYPES = {

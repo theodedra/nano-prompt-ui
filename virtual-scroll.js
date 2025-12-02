@@ -20,6 +20,7 @@ export class VirtualScroller {
     this.bottomSpacer = null;
     this.lastMessageCount = 0;
     this.currentRange = { start: 0, end: 0 };
+    this.needsPrune = false;
 
     this.handleScroll = this.handleScroll.bind(this);
   }
@@ -82,7 +83,12 @@ export class VirtualScroller {
    * @param {Array} messages
    */
   setMessages(messages = []) {
-    this.messages = Array.isArray(messages) ? messages : [];
+    const newMessages = Array.isArray(messages) ? messages : [];
+    // Only set prune flag on known deletions
+    if (newMessages.length < this.messages.length) {
+      this.needsPrune = true;
+    }
+    this.messages = newMessages;
   }
 
   /**
@@ -158,7 +164,12 @@ export class VirtualScroller {
 
     this.container.replaceChildren(...nodes);
     this.currentRange = { start, end };
-    this.pruneStaleNodes(messages);
+
+    // Only prune on deletions to avoid scanning on every render
+    if (this.needsPrune) {
+      this.pruneStaleNodes(messages);
+      this.needsPrune = false;
+    }
   }
 
   /**

@@ -11,7 +11,6 @@
     "activeTab",
     "tabs",
     "clipboardWrite",
-    "alarms",
     "contextMenus"
   ],
   "host_permissions": [
@@ -21,7 +20,7 @@
   ],
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
+      "matches": ["http://*/*", "https://*/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
     }
@@ -37,7 +36,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["lib/pdf.min.js", "lib/pdf.worker.min.js"],
+      "resources": ["pdf-worker.js", "lib/pdf.min.js", "lib/pdf.worker.min.js"],
       "matches": ["<all_urls>"]
     }
   ],

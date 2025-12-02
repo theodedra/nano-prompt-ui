@@ -1,4 +1,4 @@
-import { nanoid } from './utils.js';
+import { nanoid, markdownToHtml } from './utils.js';
 import { toast } from './toast.js';
 import {
   STORAGE_KEYS,
@@ -254,7 +254,7 @@ function estimateAttachmentSize(att) {
  * @param {string} sessionId - Session owner
  * @param {number} messageIndex - Message index within the session
  * @param {object} att - Attachment with data
- * @returns {{id: string, name: string, type: string, size: number}} Metadata saved alongside the message
+ * @returns {{meta: {id: string, name: string, type: string, size: number}, promise: Promise}} Metadata and write promise
  */
 function persistAttachmentRecord(sessionId, messageIndex, att) {
   if (!att || typeof att !== 'object') return null;
@@ -271,11 +271,10 @@ function persistAttachmentRecord(sessionId, messageIndex, att) {
     meta: att.meta ? { ...att.meta } : undefined
   };
 
-  // Fire-and-forget write; session save shouldn't wait on blobs
-  dbOp(STORES.ATTACHMENTS, 'readwrite', store => store.put(record))
-    .catch(err => console.warn('Attachment save failed', err));
+  const promise = dbOp(STORES.ATTACHMENTS, 'readwrite', store => store.put(record));
+  const meta = { id: record.id, name: record.name, type: record.type, size: record.size };
 
-  return { id: record.id, name: record.name, type: record.type, size: record.size };
+  return { meta, promise };
 }
 
 /**
@@ -283,14 +282,15 @@ function persistAttachmentRecord(sessionId, messageIndex, att) {
  * @param {string} sessionId - Session ID
  * @param {number} messageIndex - Message index
  * @param {Array} attachments - Raw attachments
- * @returns {{attachments: Array, changed: boolean}} Sanitized attachments and whether mutation occurred
+ * @returns {{attachments: Array, changed: boolean, attachmentPromises: Promise[]}} Sanitized attachments, whether mutation occurred, and write promises
  */
 function sanitizeMessageAttachments(sessionId, messageIndex, attachments = []) {
   if (!Array.isArray(attachments) || attachments.length === 0) {
-    return { attachments: [], changed: false };
+    return { attachments: [], changed: false, attachmentPromises: [] };
   }
 
   let changed = false;
+  const attachmentPromises = [];
   const sanitized = attachments.map((att) => {
     if (!att) return null;
 
@@ -306,7 +306,10 @@ function sanitizeMessageAttachments(sessionId, messageIndex, attachments = []) {
 
     if (hasData) {
       changed = true;
-      persistAttachmentRecord(sessionId, messageIndex, { ...att, ...meta });
+      const result = persistAttachmentRecord(sessionId, messageIndex, { ...att, ...meta });
+      if (result?.promise) {
+        attachmentPromises.push(result.promise);
+      }
     } else if (!att.id) {
       changed = true;
     }
@@ -314,7 +317,7 @@ function sanitizeMessageAttachments(sessionId, messageIndex, attachments = []) {
     return meta;
   }).filter(Boolean);
 
-  return { attachments: sanitized, changed };
+  return { attachments: sanitized, changed, attachmentPromises };
 }
 
 /**
@@ -326,14 +329,26 @@ function normalizeSession(session) {
   if (!session || !Array.isArray(session.messages)) return session;
 
   let mutated = false;
+  const allAttachmentPromises = [];
   session.messages = session.messages.map((msg, idx) => {
     if (!msg?.attachments?.length) return msg;
-    const { attachments, changed } = sanitizeMessageAttachments(session.id, idx, msg.attachments);
+    const { attachments, changed, attachmentPromises } = sanitizeMessageAttachments(session.id, idx, msg.attachments);
     if (changed) mutated = true;
+    if (attachmentPromises.length > 0) {
+      allAttachmentPromises.push(...attachmentPromises);
+    }
     return { ...msg, attachments };
   });
 
   if (mutated) dirtySessions.add(session.id);
+
+  // Handle attachment write errors during normalization
+  if (allAttachmentPromises.length > 0) {
+    Promise.all(allAttachmentPromises).catch(() => {
+      toast.warning('Some attachments may not have saved');
+    });
+  }
+
   return session;
 }
 
@@ -499,17 +514,45 @@ export function createSessionFrom(baseSessionId = null) {
   // Persist ordering + active session change separately
   markMetaDirty();
 
-  // Remove oldest sessions if limit exceeded
+  // Remove oldest sessions if limit exceeded (batched in single transaction)
   if (appState.sessionOrder.length > MAX_SESSIONS) {
     const sessionsToRemove = appState.sessionOrder.slice(MAX_SESSIONS);
+    
+    // Batch IndexedDB deletes in single transaction
+    dbPromise.then(db => {
+      const storeNames = [STORES.SESSIONS];
+      if (STORES.ATTACHMENTS) storeNames.push(STORES.ATTACHMENTS);
+      
+      const tx = db.transaction(storeNames, 'readwrite');
+      const sessionStore = tx.objectStore(STORES.SESSIONS);
+      const attachmentStore = STORES.ATTACHMENTS ? tx.objectStore(STORES.ATTACHMENTS) : null;
+      
+      sessionsToRemove.forEach(oldId => {
+        sessionStore.delete(oldId);
+        
+        // Delete attachments via index cursor
+        if (attachmentStore) {
+          const idx = attachmentStore.index('sessionId');
+          idx.openCursor(IDBKeyRange.only(oldId)).onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (cursor) {
+              cursor.delete();
+              cursor.continue();
+            }
+          };
+        }
+      });
+      
+      tx.onerror = () => console.error('Failed to batch delete old sessions', tx.error);
+    }).catch(e => console.error('Failed to open DB for batch delete', e));
+    
+    // Clean memory synchronously
     sessionsToRemove.forEach(oldId => {
       delete appState.sessions[oldId];
       delete appState.sessionMeta[oldId];
       dirtySessions.delete(oldId);
-      dbOp(STORES.SESSIONS, 'readwrite', store => store.delete(oldId))
-        .catch(e => console.error('Failed to delete old session from IDB', e));
-      deleteAttachmentsForSession(oldId);
     });
+    
     appState.sessionOrder = appState.sessionOrder.slice(0, MAX_SESSIONS);
     markMetaDirty();
   }
@@ -567,9 +610,16 @@ export function upsertMessage(sessionId, message, replaceIndex = null) {
 
   const targetIndex = replaceIndex === null ? session.messages.length : replaceIndex;
   const storedMessage = { ...message };
+  let attachmentPromises = [];
   if (storedMessage.attachments?.length) {
-    const { attachments } = sanitizeMessageAttachments(sessionId, targetIndex, storedMessage.attachments);
-    storedMessage.attachments = attachments;
+    const result = sanitizeMessageAttachments(sessionId, targetIndex, storedMessage.attachments);
+    storedMessage.attachments = result.attachments;
+    attachmentPromises = result.attachmentPromises;
+  }
+
+  // Pre-cache markdown HTML to avoid render-time parsing
+  if (storedMessage.text) {
+    storedMessage.htmlCache = markdownToHtml(storedMessage.text);
   }
 
   if (replaceIndex === null) {
@@ -583,6 +633,13 @@ export function upsertMessage(sessionId, message, replaceIndex = null) {
     appState.sessionMeta[sessionId].updatedAt = session.updatedAt;
   }
   dirtySessions.add(sessionId);
+
+  // Handle attachment write errors after session is marked dirty
+  if (attachmentPromises.length > 0) {
+    Promise.all(attachmentPromises).catch(() => {
+      toast.warning('Some attachments may not have saved');
+    });
+  }
 }
 
 /**
@@ -595,16 +652,35 @@ export function updateMessage(sessionId, messageIndex, patch) {
   const session = appState.sessions[sessionId];
   if (!session || !session.messages[messageIndex]) return;
   const next = { ...session.messages[messageIndex], ...patch };
+  let attachmentPromises = [];
   if (Array.isArray(next.attachments)) {
-    const { attachments } = sanitizeMessageAttachments(sessionId, messageIndex, next.attachments);
-    next.attachments = attachments;
+    const result = sanitizeMessageAttachments(sessionId, messageIndex, next.attachments);
+    next.attachments = result.attachments;
+    attachmentPromises = result.attachmentPromises;
   }
+
+  // Recompute htmlCache if text changed, clear if text is empty/removed
+  if ('text' in patch) {
+    if (patch.text) {
+      next.htmlCache = markdownToHtml(patch.text);
+    } else {
+      delete next.htmlCache;
+    }
+  }
+
   session.messages[messageIndex] = next;
   session.updatedAt = Date.now();
   if (appState.sessionMeta[sessionId]) {
     appState.sessionMeta[sessionId].updatedAt = session.updatedAt;
   }
   dirtySessions.add(sessionId);
+
+  // Handle attachment write errors after session is marked dirty
+  if (attachmentPromises.length > 0) {
+    Promise.all(attachmentPromises).catch(() => {
+      toast.warning('Some attachments may not have saved');
+    });
+  }
 }
 
 /**

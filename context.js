@@ -56,13 +56,20 @@ export function classifyIntent(text) {
 }
 
 /**
- * Rough estimation of tokens (1 token ~= 4 chars for English)
+ * Rough estimation of tokens with non-ASCII awareness
+ * ASCII: ~4 chars per token, non-ASCII (CJK, etc.): ~1 char per token
  * @param {string} text - Text to estimate
  * @returns {number} Estimated token count
  */
 export function estimateTokens(text) {
   if (!text) return 0;
-  return Math.ceil(text.length / LIMITS.TOKEN_TO_CHAR_RATIO);
+  
+  // Count non-ASCII characters (CJK, etc.) as 1 token each
+  const nonAsciiCount = (text.match(/[^\x00-\x7F]/g) || []).length;
+  const asciiCount = text.length - nonAsciiCount;
+  
+  // ASCII: ~4 chars per token, non-ASCII: ~1 char per token
+  return Math.ceil(asciiCount / LIMITS.TOKEN_TO_CHAR_RATIO + nonAsciiCount);
 }
 
 /**

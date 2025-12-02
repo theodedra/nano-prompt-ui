@@ -505,9 +505,9 @@ MAX_ATTACHMENTS: 3,                 // Max attachments per message
 
 ### Overview
 
-Extracts text from PDF files using Mozilla's pdf.js library (local copy in `lib/`).
+Extracts text from PDF files using Mozilla's pdf.js library (local copy in `lib/`), running entirely off the main thread via a Web Worker to keep the UI responsive.
 
-**File:** `pdf.js`
+**Files:** `pdf.js` (coordinator), `pdf-worker.js` (Web Worker)
 
 ### Limits
 
@@ -518,13 +518,27 @@ PDF_MAX_PAGES: 50,        // Maximum pages to extract
 PDF_MAX_CHARS: 50_000,    // Maximum characters (~12,500 tokens)
 ```
 
+### Architecture
+
+```
+┌─────────────────┐         ┌─────────────────┐
+│   pdf.js        │ ──────▶ │  pdf-worker.js  │
+│   (main thread) │ ◀────── │  (Web Worker)   │
+└─────────────────┘         └─────────────────┘
+     │                              │
+     │ postMessage({arrayBuffer})   │
+     │ ◀─ progress updates ─────────│
+     │ ◀─ complete/error ───────────│
+```
+
 ### Extraction Flow
 
-1. Load pdf.js from local `lib/` folder
-2. Parse PDF pages sequentially
-3. Track character budget with safety margin (`PDF_CHAR_SAFETY_MARGIN = 2_000`)
-4. Early exit when budget exceeded (before processing all pages)
-5. Return text with truncation metadata
+1. `extractPdfText()` sends `ArrayBuffer` to worker via `postMessage`
+2. Worker loads pdf.js via `importScripts()`
+3. Worker parses pages sequentially, sending progress updates
+4. Worker respects character budget with safety margin (`PDF_CHAR_SAFETY_MARGIN = 2_000`)
+5. Worker posts completion message with text and metadata
+6. Main thread receives result (no UI blocking)
 
 ```javascript
 // Returns structured result with metadata
@@ -536,6 +550,19 @@ PDF_MAX_CHARS: 50_000,    // Maximum characters (~12,500 tokens)
     totalPagesEstimate: number,
     charsUsed: number
   }
+}
+```
+
+### Sequential Processing
+
+**File:** `handlers/attachment-handlers.js`
+
+Multiple PDF attachments are processed sequentially (not concurrently) to avoid memory pressure:
+
+```javascript
+// Process files sequentially to avoid concurrent PDF extractions
+for (const file of files.slice(0, LIMITS.MAX_ATTACHMENTS)) {
+  // ... process each file
 }
 ```
 
@@ -569,15 +596,31 @@ static shouldEnable(itemCount) {
 2. **Buffer zone** (5 items above/below viewport) prevents flicker
 3. **Top/bottom spacers** maintain scroll position
 4. **DOM node cache** (`messageNodes` Map) reuses rendered elements
-5. **Scroll debouncing** (100ms) prevents excessive re-renders
+5. **requestAnimationFrame** for smooth scroll handling (no setTimeout)
+6. **Range change detection** skips DOM updates when viewport unchanged
+
+### Performance Optimizations
+
+1. **Cached HTML rendering** - Messages store pre-rendered `htmlCache` (no markdown parsing on scroll)
+2. **Lazy pruning** - `pruneStaleNodes()` only runs on message deletions, not every scroll
+3. **Efficient range checking** - Skip render if `start`/`end` unchanged
+
+```javascript
+// Only prune on deletions to avoid scanning on every render
+if (this.needsPrune) {
+  this.pruneStaleNodes(messages);
+  this.needsPrune = false;
+}
+```
 
 ### Key Methods
 
 - `enable()` / `disable()` - Toggle virtual scrolling
 - `render(messages)` - Render visible items with spacers
+- `setMessages(messages)` - Update message list, flag for pruning on deletion
 - `calibrateItemHeight()` - Measure actual heights after first render
 - `reset()` - Clear cache on session switch
-- `pruneStaleNodes()` - Remove cached nodes for deleted messages
+- `getMessageNode(message, index)` - Get cached node for streaming updates
 
 ---
 
@@ -665,6 +708,17 @@ dirtySessions.forEach(id => {
   sessionStore.put(appState.sessions[id]);
 });
 dirtySessions.clear();
+```
+
+### Debounced Persistence
+
+Rapid changes are coalesced into a single IndexedDB transaction:
+
+```javascript
+TIMING.SAVE_STATE_DEBOUNCE_MS: 500 // Debounce for IndexedDB writes
+
+// scheduleSaveState() batches all dirty sessions
+// flushSaveState() for critical operations (immediate save)
 ```
 
 ### Quota Handling
@@ -870,27 +924,49 @@ All other APIs are optional with clear fallback explanations:
 | File | Purpose |
 |------|---------|
 | `model.js` | AI operations, streaming, translation, speech |
-| `storage.js` | IndexedDB, session management, attachments |
+| `storage.js` | IndexedDB, session management, attachments, markdown caching |
 | `controller.js` | Mediates between Model, Storage, and UI |
 | `virtual-scroll.js` | Performance optimization for large logs |
-| `pdf.js` | PDF text extraction |
+| `pdf.js` | PDF extraction coordinator (delegates to Web Worker) |
+| `pdf-worker.js` | Web Worker for off-thread PDF text extraction |
 | `constants.js` | All configuration values and limits |
+| `context.js` | Context fetching, intent classification, token estimation |
 
-### Handler Modules
+### Handler Modules (`handlers/`)
 
 | File | Purpose |
 |------|---------|
-| `chat-handlers.js` | Message sending, context menu actions |
+| `chat-handlers.js` | Re-exports and shared navigation handlers |
+| `prompt-handlers.js` | Prompt execution, summarization, translation |
+| `session-handlers.js` | Session switching, renaming, deletion, search |
+| `template-handlers.js` | Template CRUD operations |
+| `snapshot-handlers.js` | Context snapshot management |
+| `voice-handlers.js` | Speech recognition and synthesis |
+| `attachment-handlers.js` | File upload processing (sequential queue) |
 | `settings-handlers.js` | Settings panel interactions |
-| `attachment-handlers.js` | File upload processing |
+| `context-menu-handlers.js` | Routes context menu commands |
 
-### UI Modules
+### UI Modules (`ui/`)
 
 | File | Purpose |
 |------|---------|
-| `ui.js` | DOM rendering, UI state |
+| `index.js` | Re-exports all UI modules |
+| `core.js` | DOM caching, busy state, status, input controls |
+| `log-renderer.js` | Chat message rendering (with cached HTML) |
+| `session-renderer.js` | Session list rendering |
+| `template-renderer.js` | Template list rendering |
+| `snapshot-renderer.js` | Context snapshot rendering |
+| `modal-manager.js` | Modal open/close, focus trapping |
+| `attachment-renderer.js` | Attachment chip rendering |
+
+### Other Modules
+
+| File | Purpose |
+|------|---------|
 | `toast.js` | Toast notifications |
 | `sidepanel.js` | Main entry point, event wiring |
+| `background.js` | Service worker, context menus, warmup |
+| `content.js` | Page scraping with SPA cache invalidation |
 
 ---
 
@@ -968,6 +1044,140 @@ If considering changes:
 
 ---
 
+## Intent Classification
+
+### Overview
+
+User queries are classified to determine context handling.
+
+**File:** `context.js`
+
+### Patterns
+
+```javascript
+INTENT_PATTERNS = {
+  page: /\b(summari|page|article|tab|website|context|window)\b/i,
+  time: /\b(time|date|today|now)\b/i,
+  location: /\b(where|location|lat|long)\b/i
+}
+```
+
+Note: Word boundaries (`\b`) prevent false positives (e.g., "tabletop" won't match "page" intent).
+
+### Token Estimation
+
+**File:** `context.js`
+
+Non-ASCII aware estimation accounts for different character-to-token ratios:
+
+```javascript
+export function estimateTokens(text) {
+  if (!text) return 0;
+  
+  // Count non-ASCII characters (CJK, etc.) as 1 token each
+  const nonAsciiCount = (text.match(/[^\x00-\x7F]/g) || []).length;
+  const asciiCount = text.length - nonAsciiCount;
+  
+  // ASCII: ~4 chars per token, non-ASCII: ~1 char per token
+  return Math.ceil(asciiCount / TOKEN_TO_CHAR_RATIO + nonAsciiCount);
+}
+```
+
+---
+
+## SPA Cache Invalidation
+
+### Overview
+
+Content scripts cache page scrapes for 30 seconds. Single Page Applications (SPAs) that change content without full navigation require cache invalidation.
+
+**File:** `content.js`
+
+### Detection Strategy
+
+1. **Pathname tracking** - Invalidate when `window.location.pathname` changes
+2. **popstate listener** - Invalidate on browser back/forward navigation
+3. **URL change detection** - Invalidate when full URL changes
+
+```javascript
+// Track pathname for SPA navigation detection (History API)
+let lastPathname = window.location.pathname;
+
+// Invalidate cache on popstate (browser back/forward)
+window.addEventListener('popstate', () => {
+  lastScrapeCache = { url: '', ts: 0, payload: null };
+});
+```
+
+---
+
+## Attachment Data Integrity
+
+### Overview
+
+Attachments are stored in a separate IndexedDB store to keep session records small. Write failures are now properly tracked and reported.
+
+**File:** `storage.js`
+
+### Error Handling
+
+```javascript
+// Track write promises
+const attachmentPromises = [];
+
+// ... persist each attachment ...
+
+// Handle attachment write errors after session is marked dirty
+if (attachmentPromises.length > 0) {
+  Promise.all(attachmentPromises).catch(() => {
+    toast.warning('Some attachments may not have saved');
+  });
+}
+```
+
+### Batch Session Cleanup
+
+When `MAX_SESSIONS` is exceeded, old sessions are deleted in a single transaction:
+
+```javascript
+// Batch IndexedDB deletes in single transaction
+const tx = db.transaction(storeNames, 'readwrite');
+sessionsToRemove.forEach(oldId => {
+  sessionStore.delete(oldId);
+  // Delete attachments via index cursor
+});
+```
+
+---
+
+## Markdown HTML Caching
+
+### Overview
+
+Messages store pre-rendered HTML to avoid repeated markdown parsing during scroll and re-render operations.
+
+**Files:** `storage.js`, `ui/log-renderer.js`
+
+### Implementation
+
+```javascript
+// storage.js - upsertMessage()
+if (storedMessage.text) {
+  storedMessage.htmlCache = markdownToHtml(storedMessage.text);
+}
+
+// ui/log-renderer.js - createMessageElement()
+const html = msg.htmlCache || markdownToHtml(msg.text);
+```
+
+### Benefits
+
+- Virtual scroller reuses cached DOM nodes (no re-parsing)
+- Session load doesn't trigger markdown parsing
+- Streaming updates invalidate cache only for the active message
+
+---
+
 ## References
 
 - [Chrome Prompt API Documentation](https://developer.chrome.com/docs/ai/prompt-api)
@@ -977,4 +1187,4 @@ If considering changes:
 
 ---
 
-*Last Updated: 2025-12-01*
+*Last Updated: 2025-12-02*

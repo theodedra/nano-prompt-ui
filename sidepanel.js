@@ -4,10 +4,10 @@
  * Wires up UI event bindings and bootstraps the application.
  */
 
-import * as UI from './ui.js';
-import * as ChatHandlers from './chat-handlers.js';
-import * as AttachmentHandlers from './attachment-handlers.js';
-import * as SettingsHandlers from './settings-handlers.js';
+import * as UI from './ui/index.js';
+import * as ChatHandlers from './handlers/chat-handlers.js';
+import * as AttachmentHandlers from './handlers/attachment-handlers.js';
+import * as SettingsHandlers from './handlers/settings-handlers.js';
 import { performSessionWarmup } from './model.js';
 
 function bind(selector, event, handler) {

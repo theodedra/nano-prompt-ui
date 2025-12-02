@@ -160,28 +160,45 @@ Because the AI is read-only with no execution privileges, prompt injection attac
 nano-prompt-ui/
 ├── manifest.json              # MV3 manifest (side panel, permissions)
 ├── background.js              # Service worker, context menus, warmup
-├── content.js                 # Page content scraper
+├── content.js                 # Page content scraper (SPA-aware caching)
 │
 ├── sidepanel.html             # Side panel markup
 ├── sidepanel.js               # Bootstrap + event wiring
 ├── sidepanel.css              # Layout, theming, styles
 │
 ├── controller.js              # Orchestrates handlers and state
-├── chat-handlers.js           # Chat send/stop, streaming lifecycle
-├── attachment-handlers.js     # Image/PDF attachment handling
-├── context-menu-handlers.js   # Summarize/Rewrite/Translate/Describe flows
-├── settings-handlers.js       # Theme, language, diagnostics hooks
+│
+├── handlers/                  # Modular event handlers
+│   ├── chat-handlers.js       # Re-exports + shared navigation handlers
+│   ├── prompt-handlers.js      # Prompt execution, summarization, translation
+│   ├── session-handlers.js    # Session switching, renaming, deletion, search
+│   ├── template-handlers.js   # Template CRUD operations
+│   ├── snapshot-handlers.js   # Context snapshot management
+│   ├── voice-handlers.js      # Speech recognition and synthesis
+│   ├── attachment-handlers.js # Image/PDF attachment handling (sequential queue)
+│   ├── settings-handlers.js   # Theme, language, diagnostics hooks
+│   └── context-menu-handlers.js # Routes context menu commands
+│
+├── ui/                        # Modular UI renderers
+│   ├── index.js               # Re-exports all UI modules
+│   ├── core.js                # DOM caching, busy state, status, input controls
+│   ├── log-renderer.js        # Chat message rendering (with cached HTML)
+│   ├── session-renderer.js    # Session list rendering
+│   ├── template-renderer.js   # Template list rendering
+│   ├── snapshot-renderer.js   # Context snapshot rendering
+│   ├── modal-manager.js       # Modal open/close, focus trapping
+│   └── attachment-renderer.js # Attachment chip rendering
 │
 ├── model.js                   # Gemini Nano + Translation API interface
-├── storage.js                 # Session state, persistence, search
-├── context.js                 # Context assembly, snapshots, prompt building
+├── storage.js                 # IndexedDB, session state, persistence, markdown caching
+├── context.js                 # Context assembly, snapshots, prompt building, intent classification
 ├── utils.js                   # Markdown → HTML, sanitization, utilities
-├── ui.js                      # DOM helpers, rendering
 ├── toast.js                   # Toast notification system
 ├── constants.js               # Limits, timing, labels, model config
-├── virtual-scroll.js          # Virtualized chat list
+├── virtual-scroll.js          # Virtualized chat list (performance optimized)
 │
-├── pdf.js                     # PDF text extraction
+├── pdf.js                     # PDF extraction coordinator (delegates to Web Worker)
+├── pdf-worker.js              # Web Worker for off-thread PDF text extraction
 ├── setup-guide.js             # API availability checks, flag guidance
 │
 ├── lib/

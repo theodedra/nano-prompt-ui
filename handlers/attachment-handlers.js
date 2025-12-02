@@ -4,11 +4,11 @@
  * Handles file attachment UI interactions via controller layer.
  */
 
-import * as Controller from './controller.js';
-import { extractPdfText } from './pdf.js';
-import { toast } from './toast.js';
-import { LIMITS, USER_ERROR_MESSAGES, validateAttachment } from './constants.js';
-import * as UI from './ui.js';
+import * as Controller from '../controller.js';
+import { extractPdfText } from '../pdf.js';
+import { toast } from '../toast.js';
+import { LIMITS, USER_ERROR_MESSAGES, validateAttachment } from '../constants.js';
+import * as UI from '../ui/index.js';
 
 /**
  * Trigger the hidden file input for attachments.
@@ -21,15 +21,17 @@ export function handleAttachClick() {
  * Handle file input change - process and attach images or PDFs.
  * @param {Event} event - Change event
  */
-export function handleFileInputChange(event) {
+export async function handleFileInputChange(event) {
   const files = Array.from(event.target.files || []);
-  files.slice(0, LIMITS.MAX_ATTACHMENTS).forEach(async (file) => {
+
+  // Process files sequentially to avoid concurrent PDF extractions
+  for (const file of files.slice(0, LIMITS.MAX_ATTACHMENTS)) {
     let progressToast = null;
 
     const validation = validateAttachment(file);
     if (!validation.valid) {
       toast.warning(validation.error);
-      return;
+      continue;
     }
 
     try {
@@ -77,12 +79,12 @@ export function handleFileInputChange(event) {
       console.error('File processing failed', e);
       if (validation.fileType === 'pdf') {
         const errorMsg = e.message || USER_ERROR_MESSAGES.PDF_PROCESSING_FAILED;
-        toast.error(`PDF Error: ${errorMsg}`);
+        Controller.showToast('error', `PDF Error: ${errorMsg}`);
       } else {
-        toast.error(USER_ERROR_MESSAGES.IMAGE_PROCESSING_FAILED);
+        Controller.showToast('error', USER_ERROR_MESSAGES.IMAGE_PROCESSING_FAILED);
       }
     }
-  });
+  }
   event.target.value = '';
 }
 
@@ -156,3 +158,4 @@ export function handleAttachmentListClick(event) {
     Controller.renderAttachments();
   }
 }
+

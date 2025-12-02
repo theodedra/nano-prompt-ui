@@ -7,7 +7,7 @@
  * - All state mutations go through this layer
  */
 
-import * as UI from './ui.js';
+import * as UI from './ui/index.js';
 import {
   // State getters/setters
   getSessions,

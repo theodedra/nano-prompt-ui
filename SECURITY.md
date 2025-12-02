@@ -1,6 +1,6 @@
 # Security Analysis - NanoPromptUI
 
-**Last Updated:** 2025-11-28
+**Last Updated:** 2025-12-02
 **Summary:** Browser-side extension designed to keep all processing local and reduce common web-extension risks by blocking system pages, isolating content scripts, sanitizing HTML output, validating inputs/URLs, and avoiding remote network calls.
 
 ---
@@ -105,7 +105,7 @@ function sanitizeHtmlString(dirtyHtml) {
 **Protection:**
 - ✅ DOMParser-based sanitization (production-ready)
 - ✅ Whitelist approach (only safe tags allowed)
-- ✅ `javascript:` URLs blocked
+- ✅ `javascript:` and `data:` URLs blocked in anchor hrefs
 - ✅ All attributes stripped except safe ones (`href`, `target`, `rel` on `<a>`)
 - ✅ All `on*` event handlers and `style` attributes stripped
 - ✅ `<style>`, `<iframe>`, `<object>`, and `<embed>` nodes explicitly removed
@@ -117,11 +117,13 @@ function sanitizeHtmlString(dirtyHtml) {
 <script>alert('xss')</script>
 <img src=x onerror=alert('xss')>
 <a href="javascript:alert('xss')">click</a>
+<a href="data:text/html,<script>alert('xss')</script>">click</a>
 
 <!-- After sanitization -->
 (removed - not in whitelist)
 (removed - not in whitelist)
 <a>click</a> (href stripped because javascript:)
+<a>click</a> (href stripped because data:)
 ```
 
 #### Sanitization Trade-off: Safety vs. SPA Context
@@ -397,13 +399,13 @@ Prompt injection = Low impact given read-only design (annoyance/incorrect text)
 - ✅ Only extension scripts can run
 
 ### 2. Minimal Permissions
-**File:** `manifest.json:6-16`
+**File:** `manifest.json:6-14`
 
 ```json
 "permissions": [
   "sidePanel", "storage", "unlimitedStorage",
   "scripting", "activeTab", "tabs",
-  "clipboardWrite", "alarms", "contextMenus"
+  "clipboardWrite", "contextMenus"
 ]
 ```
 
@@ -411,7 +413,23 @@ Prompt injection = Low impact given read-only design (annoyance/incorrect text)
 - ✅ No `cookies` permission
 - ✅ No `history` permission
 - ✅ No `bookmarks` permission
+- ✅ No unused permissions (removed `alarms`)
 - ✅ Only what's needed, nothing more
+
+### 2a. Content Script Scope
+**File:** `manifest.json:21-26`
+
+```json
+"content_scripts": [{
+  "matches": ["http://*/*", "https://*/*"],
+  "js": ["content.js"],
+  "run_at": "document_idle"
+}]
+```
+
+- ✅ Content scripts limited to http/https only (no `<all_urls>`)
+- ✅ Does not run on `file://`, `chrome://`, or extension pages
+- ✅ Reduces attack surface by excluding sensitive URLs
 
 ### 3. Secure `world: 'MAIN'` Usage
 **Files:** `model.js:207-224` (image fetch), `model.js:372-390` (AI fallback)
@@ -551,10 +569,11 @@ The `world: 'MAIN'` usage is:
 - [x] System page blocking
 - [x] URL validation for images
 - [x] CSP configured
-- [x] Minimal permissions
+- [x] Minimal permissions (unused `alarms` removed)
 - [x] No eval() or Function()
 - [x] No inline scripts
-- [x] No dangerous protocols (javascript:, data:)
+- [x] No dangerous protocols in anchors (`javascript:`, `data:` blocked)
+- [x] Content scripts limited to http/https (no `<all_urls>`)
 - [x] Read-only AI model
 - [x] No persistence of AI instructions
 
@@ -589,9 +608,14 @@ The `world: 'MAIN'` usage is:
 
 ## 📝 Security Audit Summary
 
-**Date:** 2025-11-28
-**Auditor:** Claude (Sonnet 4.5)
-**Scope:** Full codebase security analysis
+**Date:** 2025-12-02
+**Auditor:** Claude (Opus 4.5)
+**Scope:** Full codebase security analysis and remediation
+
+**Fixes Applied (2025-12-02):**
+- Blocked `data:` URLs in anchor sanitization (XSS mitigation)
+- Removed unused `alarms` permission (minimal privilege)
+- Limited content script matches to http/https only (reduced attack surface)
 
 **Findings:**
 - No critical or high issues identified in this review

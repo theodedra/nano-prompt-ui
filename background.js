@@ -1,6 +1,12 @@
-// Note: Service worker with inline constants to avoid module loading issues
-
-// Inline constants (subset needed for background script)
+/**
+ * INLINED CONSTANTS (Service worker cannot use ES modules)
+ * Keep in sync with constants.js:
+ * - MODEL_CONFIG → constants.js:67-73
+ * - TIMING.PANEL_READY_DELAY_MS → constants.js:12
+ * - UI_MESSAGES.WARMUP_SUCCESS → constants.js:160
+ * - LOG_PREFIX → unique to background.js
+ * - SESSION_WARMUP_KEY → unique to background.js
+ */
 const MODEL_CONFIG = {
   expectedInputs: [
     { type: 'text', languages: ['en'] },

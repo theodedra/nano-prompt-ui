@@ -150,6 +150,7 @@ export function markdownToHtml(md) {
     .replace(/^###\s+(.*)$/gm, '<h3>$1</h3>')
     .replace(/^##\s+(.*)$/gm, '<h2>$1</h2>')
     .replace(/^#\s+(.*)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
@@ -240,8 +241,11 @@ function sanitizeHtmlString(dirtyHtml) {
       }
 
       if (tagName === 'A' && VALIDATION.ALLOWED_LINK_ATTRIBUTES.includes(attrName)) {
-        if (attrName === 'href' && attr.value.trim().toLowerCase().startsWith('javascript:')) {
-          node.removeAttribute('href');
+        if (attrName === 'href') {
+          const val = attr.value.trim().toLowerCase();
+          if (val.startsWith('javascript:') || val.startsWith('data:')) {
+            node.removeAttribute('href');
+          }
         }
         continue;
       }

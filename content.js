@@ -1,8 +1,8 @@
-// Note: Content scripts cannot use ES6 imports, so constants are inlined
-
 /**
- * Configuration constants for content scraping (single source of truth;
- * content scripts can't import shared modules so keep selectors/noise here)
+ * INLINED CONSTANTS (Content scripts cannot use ES modules)
+ * Keep in sync with constants.js:
+ * - CONTEXT_MAX_CHARS → LIMITS.MAX_CONTEXT_TOKENS * LIMITS.TOKEN_TO_CHAR_RATIO (constants.js:30-31)
+ * - SCRAPING_CONSTANTS → unique to content.js (page scraping selectors/noise filters)
  */
 const SCRAPING_CONSTANTS = {
   MAIN_CONTENT_SELECTORS: [
@@ -39,6 +39,14 @@ let lastScrapeCache = {
   ts: 0,
   payload: null
 };
+
+// Track pathname for SPA navigation detection (History API)
+let lastPathname = window.location.pathname;
+
+// Invalidate cache on popstate (browser back/forward)
+window.addEventListener('popstate', () => {
+  lastScrapeCache = { url: '', ts: 0, payload: null };
+});
 
 // Check if chrome.runtime is available before adding listener
 // This prevents errors when extension is reloaded or disabled
@@ -83,10 +91,14 @@ function scrapePage() {
     }
 
     const currentUrl = window.location.href.split('?')[0];
+    const currentPathname = window.location.pathname;
     const now = Date.now();
 
-    // Invalidate cache on SPA navigations or hard URL changes
-    if (lastScrapeCache.url && lastScrapeCache.url !== currentUrl) {
+    // Invalidate cache on SPA navigations (pathname change via History API) or hard URL changes
+    if (lastPathname !== currentPathname) {
+      lastScrapeCache = { url: '', ts: 0, payload: null };
+      lastPathname = currentPathname;
+    } else if (lastScrapeCache.url && lastScrapeCache.url !== currentUrl) {
       lastScrapeCache = { url: '', ts: 0, payload: null };
     }
 
