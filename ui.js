@@ -846,19 +846,15 @@ export function renderLog(session) {
   // Centralized state: toggle is-empty on chat card container
   if (chatCardEl) chatCardEl.classList.toggle('is-empty', messages.length === 0);
 
-  // --- FIX START: Handle Empty State ---
+  // Toggle ready bubble visibility above textbox
+  if (wrapEl) wrapEl.classList.toggle('show-ready-bubble', messages.length === 0);
+
+  // Handle Empty State - clear log and show ready bubble
   if (messages.length === 0) {
-    els.log.innerHTML = '<div class="msg ai placeholder"><div class="body"><p>Ready to chat.</p></div></div>';
+    els.log.innerHTML = '';
     setExportAvailability(false);
     return;
   }
-
-  // --- FIX START: Remove Placeholder if chatting starts ---
-  const placeholder = els.log.querySelector('.placeholder');
-  if (placeholder) {
-    placeholder.remove();
-  }
-  // --- FIX END ---
 
   // VIRTUAL SCROLLING: Enable if message count is high
   if (virtualScroller && VirtualScroller.shouldEnable(messages.length)) {
