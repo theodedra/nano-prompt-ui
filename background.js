@@ -1,4 +1,3 @@
-// background.js
 // Note: Service worker with inline constants to avoid module loading issues
 
 // Inline constants (subset needed for background script)
@@ -62,7 +61,6 @@ async function setWarmupFlag(value) {
  */
 async function warmUpModel() {
   try {
-    // Skip if already warmed up this browser session
     if (await checkWarmupFlag()) {
       console.log(LOG_PREFIX.INFO, 'Model already warmed up this session, skipping.');
       return;
@@ -97,11 +95,9 @@ async function warmUpModel() {
         });
         session.destroy();
         
-        // Mark warmup complete in shared session storage
         await setWarmupFlag(true);
         console.log(LOG_PREFIX.INFO, UI_MESSAGES.WARMUP_SUCCESS);
         
-        // Notify sidepanel that warmup is complete
         try {
           chrome.runtime.sendMessage({ action: 'MODEL_READY' }).catch(() => {});
         } catch (e) {
@@ -153,7 +149,6 @@ chrome.runtime.onStartup.addListener(setupExtension);
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   await chrome.sidePanel.open({ windowId: tab.windowId });
 
-  // Queue the action
   if (info.menuItemId === 'summarize_sel') {
     pendingAction = { action: 'CMD_SUMMARIZE', text: info.selectionText };
   } else if (info.menuItemId === 'rewrite_sel') {
