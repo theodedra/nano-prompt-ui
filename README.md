@@ -158,20 +158,44 @@ Because the AI is read-only with no execution privileges, prompt injection attac
 
 ```
 nano-prompt-ui/
-├── manifest.json          # MV3 manifest (side panel, permissions)
-├── background.js          # Service worker, context menus, warmup
-├── content.js             # Page scraper
-├── sidepanel.html/js/css  # Main UI
-├── model.js               # Gemini Nano + Translation API
-├── storage.js             # Session state, persistence
-├── context.js             # Context assembly, snapshots
-├── utils.js               # Markdown, sanitization, utilities
-├── pdf.js                 # PDF text extraction
-├── setup-guide.js         # API checks, flag guidance
-├── virtual-scroll.js      # Virtualized chat list
-├── lib/                   # Bundled Mozilla PDF.js
-├── SECURITY.md            # Security model and threat analysis
-└── IMPLEMENTATION.md      # Internal implementation notes
+├── manifest.json              # MV3 manifest (side panel, permissions)
+├── background.js              # Service worker, context menus, warmup
+├── content.js                 # Page content scraper
+│
+├── sidepanel.html             # Side panel markup
+├── sidepanel.js               # Bootstrap + event wiring
+├── sidepanel.css              # Layout, theming, styles
+│
+├── controller.js              # Orchestrates handlers and state
+├── chat-handlers.js           # Chat send/stop, streaming lifecycle
+├── attachment-handlers.js     # Image/PDF attachment handling
+├── context-menu-handlers.js   # Summarize/Rewrite/Translate/Describe flows
+├── settings-handlers.js       # Theme, language, diagnostics hooks
+│
+├── model.js                   # Gemini Nano + Translation API interface
+├── storage.js                 # Session state, persistence, search
+├── context.js                 # Context assembly, snapshots, prompt building
+├── utils.js                   # Markdown → HTML, sanitization, utilities
+├── ui.js                      # DOM helpers, rendering
+├── toast.js                   # Toast notification system
+├── constants.js               # Limits, timing, labels, model config
+├── virtual-scroll.js          # Virtualized chat list
+│
+├── pdf.js                     # PDF text extraction
+├── setup-guide.js             # API availability checks, flag guidance
+│
+├── lib/
+│   ├── pdf.min.js             # Bundled Mozilla PDF.js
+│   └── pdf.worker.min.js      # PDF.js worker
+│
+├── package.json               # Dev dependencies (ESLint)
+├── eslint.config.js           # Linting configuration
+│
+├── Screenshot(dark).png       # Dark theme screenshot
+├── Screenshot(light).png      # Light theme screenshot
+├── LICENSE.txt                # The Unlicense
+├── SECURITY.md                # Security model and threat analysis
+└── IMPLEMENTATION.md          # Internal implementation notes
 ```
 
 ---
