@@ -261,10 +261,8 @@ async function executePrompt(text, contextOverride, attachments, displayText = n
   const session = Controller.getCurrentSession();
   const settings = Controller.getSettings();
   
-  // Clear smart replies
   Controller.renderSmartReplies([]);
   
-  // Add user message
   const userMessage = { 
     role: 'user', 
     text: displayText || text, 
@@ -327,12 +325,10 @@ async function executePrompt(text, contextOverride, attachments, displayText = n
   Controller.setStatus('Ready to chat.');
   await Controller.persistState();
   
-  // Generate smart replies in background
   if (!result.aborted && lastAiText) {
     generateSmartRepliesBackground(session.id, userMessage.text, lastAiText, aiMessageIndex);
   }
   
-  // Auto-generate title for first exchange
   if (session.messages.length === 2) {
     generateTitleBackground(session.id);
   }
@@ -454,7 +450,6 @@ async function deleteSessionHandler(btn, id) {
   }
 }
 
-// Track the session currently being edited inline
 let editingSessionId = null;
 
 /**
@@ -713,7 +708,6 @@ export async function handleLogClick(event) {
   }
 }
 
-// Track which template is being edited
 let editingTemplateId = null;
 let isAddingTemplate = false;
 
@@ -835,7 +829,6 @@ export async function handleTemplateMenuClick(event) {
     const action = btn.dataset.action;
     const id = btn.dataset.id;
     
-    // Handle action buttons
     if (action === 'edit-template') {
       event.stopPropagation();
       startTemplateEdit(id);
@@ -1146,7 +1139,6 @@ export async function runImageDescription(url) {
   const session = Controller.getCurrentSession();
 
   try {
-    // Fetch and prepare image
     const blob = await Model.fetchImage(url);
 
     const attachment = {
@@ -1155,7 +1147,6 @@ export async function runImageDescription(url) {
       data: blob
     };
 
-    // Reset model before image task
     Model.resetModel(session.id);
 
     await executePrompt("Describe this image in detail.", '', [attachment]);
