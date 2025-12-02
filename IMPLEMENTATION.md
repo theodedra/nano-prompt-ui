@@ -21,6 +21,7 @@ Complete technical documentation for NanoPromptUI Chrome extension features and 
 13. [Context Snapshots](#context-snapshots)
 14. [Speech Synthesis](#speech-synthesis)
 15. [Setup Guide](#setup-guide)
+16. [HTML Sanitization Trade-offs](#html-sanitization-trade-offs)
 
 ---
 
@@ -890,6 +891,80 @@ All other APIs are optional with clear fallback explanations:
 | `ui.js` | DOM rendering, UI state |
 | `toast.js` | Toast notifications |
 | `sidepanel.js` | Main entry point, event wiring |
+
+---
+
+## HTML Sanitization Trade-offs
+
+### Overview
+
+The `markdownToHtml()` function in `utils.js` converts AI responses from markdown to HTML with sanitization. This section documents the intentional trade-off between maximum security and preserving useful output formatting.
+
+### The Trade-off: Safety vs. SPA Context
+
+**Problem:** AI responses often contain or reference page content from SPAs (Single Page Applications). This content may include structural HTML elements like divs, spans, headings, and lists that are meaningful in context.
+
+**Decision:** We use a **balanced whitelist approach** rather than maximum restriction.
+
+### What We Allow (and Why)
+
+| Element | Purpose |
+|---------|---------|
+| `p`, `br` | Basic paragraph/line structure |
+| `strong`, `em` | Emphasis in explanations |
+| `code`, `pre` | Code snippets (critical for dev tool) |
+| `ul`, `ol`, `li` | Lists (common in AI responses) |
+| `h1`, `h2`, `h3` | Section headings |
+| `a` | Links (with sanitized href) |
+| `div`, `span` | Structural elements from page context |
+
+### What We Strip (Security-Critical)
+
+| Element/Attribute | Why Blocked |
+|-------------------|-------------|
+| `<script>` | XSS vector |
+| `<iframe>`, `<object>`, `<embed>` | Frame injection |
+| `<style>` | CSS injection |
+| `on*` attributes | Event handler injection |
+| `style` attribute | CSS injection |
+| `javascript:` URLs | Script execution |
+
+### Why Not Stricter?
+
+A text-only or minimal-tag sanitizer would:
+
+1. **Break readability** - AI responses explaining page structure become walls of text
+2. **Remove code formatting** - Critical for a developer-focused tool
+3. **Degrade list rendering** - Common in summaries and explanations
+4. **Minimal security gain** - The AI is read-only; it cannot execute code
+
+### Architectural Context
+
+The sanitizer is **one layer** in a defense-in-depth model:
+
+1. **System page blocking** - AI disabled on chrome://, edge://, etc.
+2. **Content script isolation** - Chrome's built-in sandbox
+3. **Read-only AI** - No execution, no API access, no persistence
+4. **HTML sanitization** - Prevents XSS in rendered output
+5. **Input validation** - Type checking for all stored data
+
+See `SECURITY.md` for the complete security model.
+
+### Maintenance Guidance
+
+> ⚠️ **DO NOT** make the sanitizer more aggressive without reviewing this trade-off.
+
+If considering changes:
+
+1. Document the specific threat you're addressing
+2. Test with real AI responses that reference SPA content
+3. Verify that code blocks, lists, and explanatory formatting still render correctly
+4. Update this section and the inline comments in `utils.js`
+
+**Files involved:**
+- `utils.js` - `markdownToHtml()`, `sanitizeHtmlString()`
+- `ui.js` - Calls to `markdownToHtml()` in message rendering
+- `constants.js` - `VALIDATION.ALLOWED_HTML_TAGS`, `VALIDATION.ALLOWED_LINK_ATTRIBUTES`
 
 ---
 

@@ -138,6 +138,31 @@ export function nanoid(size = 10) {
 /**
  * PRODUCTION READY MARKDOWN SANITIZER
  * Convert markdown to HTML with strict sanitization
+ * 
+ * SECURITY/UX TRADE-OFF NOTE:
+ * ─────────────────────────────────────────────────────────────────────────────
+ * This sanitizer is intentionally NOT maximally aggressive. We allow basic
+ * formatting tags (p, br, strong, em, code, lists, links, headings, div, span)
+ * because AI responses often contain page context (SPAs, scraped content) that
+ * uses these structures.
+ * 
+ * Making the sanitizer more restrictive (e.g., text-only output) would:
+ * 1. Break readability of AI responses that reference page structure
+ * 2. Remove useful formatting from code explanations and lists
+ * 3. Degrade UX significantly for minimal incremental security gain
+ * 
+ * Current protections (sufficient for read-only AI output):
+ * - All script/event handlers stripped (onclick, onerror, etc.)
+ * - javascript: URLs blocked
+ * - style attributes removed (no CSS injection)
+ * - iframe/object/embed/style tags removed (no embedding)
+ * - Only whitelisted tags pass through
+ * 
+ * DO NOT make the sanitizer more aggressive without understanding this trade-off.
+ * The AI is read-only and cannot execute code—sanitization prevents XSS, not
+ * prompt injection (which is handled by architectural isolation, see SECURITY.md).
+ * ─────────────────────────────────────────────────────────────────────────────
+ * 
  * @param {string} md - Markdown text
  * @returns {string} Sanitized HTML
  */
@@ -186,6 +211,15 @@ export function escapeHtml(unsafe) {
 
 /**
  * Sanitize HTML string using whitelist approach
+ * 
+ * IMPLEMENTATION NOTE:
+ * This whitelist approach balances security and usability. We preserve structural
+ * HTML (divs, spans, headings, lists) because AI responses often explain page
+ * content that uses these elements. Stripping them would make responses less
+ * useful when the AI is describing or quoting SPA structures.
+ * 
+ * See markdownToHtml() docstring for the full security/UX trade-off rationale.
+ * 
  * @param {string} dirtyHtml - Unsanitized HTML
  * @returns {string} Sanitized HTML
  */

@@ -124,6 +124,29 @@ function sanitizeHtmlString(dirtyHtml) {
 <a>click</a> (href stripped because javascript:)
 ```
 
+#### Sanitization Trade-off: Safety vs. SPA Context
+
+> ⚠️ **INTENTIONAL DESIGN DECISION** - Do not make the sanitizer more aggressive without reviewing this section.
+
+**Why the whitelist includes structural tags (div, span, headings, lists):**
+
+AI responses frequently contain or reference content from Single Page Applications (SPAs). This content uses structural HTML that is meaningful in context. Stripping these elements would:
+
+1. **Break readability** - Explanations of page structure become unformatted text
+2. **Remove code formatting** - Critical for a developer tool
+3. **Degrade list/heading rendering** - Common in summaries
+
+**Why this is acceptable:**
+
+The AI is **read-only** with no execution privileges. The sanitizer's job is to prevent XSS, not to defend against prompt injection (which is handled by architectural isolation—the AI cannot execute code regardless of what it outputs).
+
+**Current approach provides:**
+- Full XSS protection (no script execution paths)
+- Preserved formatting for useful AI responses
+- No incremental attack surface (AI already can't execute code)
+
+**For the complete rationale,** see `IMPLEMENTATION.md` → "HTML Sanitization Trade-offs".
+
 ---
 
 ### Layer 5: Input Validation

@@ -750,6 +750,9 @@ function createMessageElement(m, idx) {
     if (m.role === 'ai' && (!m.text || m.text.trim() === '')) {
       body.innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
     } else {
+      // NOTE: markdownToHtml() uses balanced sanitization—see utils.js for the
+      // security/UX trade-off rationale. Do not replace with a more aggressive
+      // sanitizer without reviewing that documentation.
       body.innerHTML = markdownToHtml(m.text || '');
     }
     div.appendChild(body);
@@ -967,6 +970,8 @@ export function updateLastMessageBubble(session, markdownText, { streaming = fal
     return;
   }
 
+  // NOTE: markdownToHtml() uses balanced sanitization that preserves SPA context.
+  // See utils.js for the security/UX trade-off rationale.
   const newHtml = markdownToHtml(markdownText);
   if (body.dataset.renderMode !== 'markdown' || body.innerHTML !== newHtml) {
     body.innerHTML = newHtml;
