@@ -12,9 +12,6 @@ import { toast } from './toast.js';
 import * as UI from './ui.js';
 import { escapeHtml } from './utils.js';
 
-/**
- * Handle settings button click - open settings modal
- */
 export function handleOpenSettings() {
   UI.openSettingsModal();
   const settings = Controller.getSettings();
@@ -46,10 +43,6 @@ async function renderDiagnosticsPanel() {
   }
 }
 
-/**
- * Handle language dropdown selection
- * @param {MouseEvent} event - Click event
- */
 export function handleLanguageSelect(event) {
   const target = event.target.closest('.dropdown-item');
   if (!target) return;
@@ -66,9 +59,6 @@ export function handleLanguageTriggerClick(event) {
   UI.toggleMenu('language');
 }
 
-/**
- * Handle theme dropdown selection
- */
 export function handleThemeSelect(event) {
   const target = event.target.closest('.dropdown-item');
   if (!target) return;
@@ -133,9 +123,6 @@ export async function handleWarmupClick() {
   }
 }
 
-/**
- * Handle settings close button click
- */
 export function handleCloseSettings() {
   UI.closeModal();
 }
@@ -145,10 +132,6 @@ export function handleDocumentClick(event) {
   if (!event.target.closest('#theme-dropdown')) UI.closeMenu('theme');
 }
 
-/**
- * Handle settings save button click
- * @returns {Promise<void>}
- */
 export async function handleSaveSettings() {
   const settings = Controller.getSettings();
   const defaults = {
@@ -185,10 +168,6 @@ export async function handleSaveSettings() {
   toast.success('Settings saved');
 }
 
-/**
- * Handle setup guide button click
- * @returns {Promise<void>}
- */
 export async function handleOpenSetupGuide() {
   UI.openSetupGuideModal();
   UI.setSetupGuideContent('<p class="setup-intro">Checking API availability...</p>');

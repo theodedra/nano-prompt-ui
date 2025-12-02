@@ -19,7 +19,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   UI.initUI();
   await ChatHandlers.bootstrap();
   
-  // Check availability
   const availabilityResult = await ChatHandlers.refreshAvailability({ forceCheck: true });
   
   // Handle download states: 'after-download' OR 'downloading'
@@ -29,7 +28,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (needsDownload) {
     UI.setStatusText('Downloading model...');
     
-    // Start warmup which will wait for download to complete
     performSessionWarmup().then((result) => {
       if (result.success || result.downloaded) {
         const statusEl = document.getElementById('model-status');
@@ -50,7 +48,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
     
   } else {
-    // Model readily available or other status - do normal warmup
     performSessionWarmup().catch(() => {});
   }
 
@@ -118,18 +115,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   document.getElementById('in')?.addEventListener('keydown', ChatHandlers.handleInputKeyDown);
   document.addEventListener('keydown', ChatHandlers.handleDocumentKeyDown, true);
-  
-  // Handle keyboard events for inline session rename
   document.getElementById('session-menu')?.addEventListener('keydown', ChatHandlers.handleRenameInputKeyDown);
-  
-  // Handle keyboard events for template editing
   document.getElementById('templates-menu')?.addEventListener('keydown', ChatHandlers.handleTemplateEditKeyDown);
   
-  // Listen for model status messages from background script
   chrome.runtime.onMessage.addListener((message) => {
     if (message.action === 'MODEL_READY') {
       console.log('Nano Prompt: Received MODEL_READY from background');
-      // Update DOM directly first
       const statusEl = document.getElementById('model-status');
       if (statusEl) {
         statusEl.textContent = 'Ready';
@@ -137,7 +128,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         statusEl.dataset.level = 'ok';
         statusEl.dataset.clickable = 'false';
       }
-      // Refresh availability after a delay
       setTimeout(() => {
         ChatHandlers.refreshAvailability({ forceCheck: true });
       }, 1000);

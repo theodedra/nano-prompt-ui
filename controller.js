@@ -68,17 +68,10 @@ import {
 
 // --- SESSION MANAGEMENT ---
 
-/**
- * Get current session (sync)
- */
 export function getCurrentSession() {
   return getCurrentSessionSync();
 }
 
-/**
- * Switch to a different session
- * @param {string} sessionId 
- */
 export async function switchSession(sessionId) {
   await setCurrentSession(sessionId);
   await flushSaveState(); // Immediate save for user action
@@ -87,9 +80,6 @@ export async function switchSession(sessionId) {
   UI.closeMenu('session');
 }
 
-/**
- * Create a new chat session
- */
 export async function createNewSession() {
   const session = createSessionFrom();
   await setCurrentSession(session.id);
@@ -100,10 +90,6 @@ export async function createNewSession() {
   return session;
 }
 
-/**
- * Delete a session by ID
- * @param {string} sessionId 
- */
 export async function removeSession(sessionId) {
   deleteSession(sessionId);
   await flushSaveState(); // Immediate save for destructive action
@@ -112,11 +98,6 @@ export async function removeSession(sessionId) {
   toast.success('Chat deleted');
 }
 
-/**
- * Rename a session
- * @param {string} sessionId 
- * @param {string} newTitle 
- */
 export async function renameSessionById(sessionId, newTitle) {
   renameSession(sessionId, newTitle);
   await flushSaveState(); // Immediate save for user action
@@ -124,11 +105,6 @@ export async function renameSessionById(sessionId, newTitle) {
   toast.success('Chat renamed');
 }
 
-/**
- * Search sessions by query
- * @param {string} query 
- * @returns {string[]} Matching session IDs
- */
 export function filterSessions(query) {
   return searchSessions(query);
 }
@@ -180,12 +156,6 @@ export function addMessage(sessionId, message) {
   upsertMessage(sessionId, message);
 }
 
-/**
- * Update an existing message
- * @param {string} sessionId 
- * @param {number} index 
- * @param {object} patch 
- */
 export function patchMessage(sessionId, index, patch) {
   updateMessage(sessionId, index, patch);
 }
@@ -358,9 +328,6 @@ export function updateLastBubble(text, options = {}) {
   UI.updateLastMessageBubble(session, text, options);
 }
 
-/**
- * Render the full chat log
- */
 export function refreshLog() {
   const session = getCurrentSessionSync();
   UI.renderLog(session);
@@ -376,24 +343,12 @@ export function updateTemplatesUI(editingId = null) {
   UI.updateTemplates(getStoredTemplates(), BLANK_TEMPLATE_ID, editingId);
 }
 
-/**
- * Add a new template
- * @param {string} label - Template name
- * @param {string} text - Template prompt text
- * @returns {object} Created template
- */
 export function addTemplate(label, text) {
   const template = addStorageTemplate(label, text);
   scheduleSaveState();
   return template;
 }
 
-/**
- * Update a template
- * @param {string} id - Template ID
- * @param {{label?: string, text?: string}} patch - Fields to update
- * @returns {boolean} Success
- */
 export function patchTemplate(id, patch) {
   const result = updateStorageTemplate(id, patch);
   if (result) {
@@ -402,11 +357,6 @@ export function patchTemplate(id, patch) {
   return result;
 }
 
-/**
- * Delete a template
- * @param {string} id - Template ID
- * @returns {boolean} Success
- */
 export function removeTemplate(id) {
   const result = deleteStorageTemplate(id);
   if (result) {
@@ -415,9 +365,6 @@ export function removeTemplate(id) {
   return result;
 }
 
-/**
- * Reset templates to defaults
- */
 export function resetAllTemplates() {
   resetStorageTemplates();
   scheduleSaveState();
@@ -487,11 +434,6 @@ export function trapFocus(event, container) {
 
 // --- TITLE GENERATION ---
 
-/**
- * Update session title after AI generates it
- * @param {string} sessionId 
- * @param {string} title 
- */
 export async function updateSessionTitle(sessionId, title) {
   renameSession(sessionId, title);
   scheduleSaveState(); // Debounced save for background operation

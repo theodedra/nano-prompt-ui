@@ -16,7 +16,6 @@ let inputCardEl = null;
 // UPDATED: Observer for smooth scrolling
 let scrollObserver = null;
 
-// Virtual scrolling instance
 let virtualScroller = null;
 
 const ICON_MIC = ICONS.MIC;
@@ -82,7 +81,6 @@ export function initUI() {
     });
   }
 
-  // Initialize virtual scroller (will only enable when needed)
   if (els.log) {
     virtualScroller = new VirtualScroller(els.log, createMessageElement);
   }
@@ -288,7 +286,6 @@ export function setBusy(isBusy) {
   if (els.sumBtn) els.sumBtn.disabled = isBusy;
   if (els.stop) els.stop.disabled = !isBusy;
 
-  // Status text updates
   if (els.avail) {
     els.avail.textContent = isBusy ? UI_MESSAGES.THINKING : lastStatus;
   }
@@ -301,7 +298,6 @@ export function setStatusText(text) {
   }
 }
 
-// Track current model status for click behavior
 let currentModelStatus = null;
 
 /**
@@ -427,7 +423,6 @@ function scrollToBottom() {
 function observeLastMessage() {
   if (!scrollObserver || !els.log) return;
 
-  // Disconnect previous observations
   scrollObserver.disconnect();
 
   const lastMsg = els.log.lastElementChild;
@@ -435,7 +430,6 @@ function observeLastMessage() {
     scrollObserver.observe(lastMsg);
   }
 
-  // Also scroll once immediately
   scrollToBottom();
 }
 
@@ -505,10 +499,8 @@ export function renderSessions({
       input.setAttribute('autocomplete', 'off');
       info.appendChild(input);
       
-      // Store reference for focus
       editingInputRef = input;
       
-      // Also add hidden title for structure
       const titleDiv = document.createElement('div');
       titleDiv.className = 'session-title';
       titleDiv.textContent = session.title || 'Untitled';
@@ -526,7 +518,6 @@ export function renderSessions({
     actions.className = isEditing ? 'session-rename-actions' : 'session-actions';
     
     if (isEditing) {
-      // Save button
       const saveBtn = document.createElement('button');
       saveBtn.className = 'action-btn save';
       saveBtn.textContent = '✓';
@@ -535,7 +526,6 @@ export function renderSessions({
       saveBtn.dataset.action = 'save-rename';
       actions.appendChild(saveBtn);
       
-      // Cancel button
       const cancelBtn = document.createElement('button');
       cancelBtn.className = 'action-btn cancel';
       cancelBtn.textContent = '✕';
@@ -794,13 +784,11 @@ function createMessageElement(m, idx) {
     const actions = createMessageActions(m, idx);
     div.appendChild(actions);
 
-    // SMART POSITIONING: Detect cursor position and reposition buttons
     div.addEventListener('mousemove', (e) => {
       const rect = div.getBoundingClientRect();
       const mouseY = e.clientY - rect.top;
       const halfHeight = rect.height / 2;
 
-      // If cursor is in bottom half, show buttons at bottom
       if (mouseY > halfHeight) {
         actions.classList.add('bottom');
       } else {
@@ -827,7 +815,6 @@ function createMessageElement(m, idx) {
 export function renderLog(session) {
   if (!session || !els.log) return;
 
-  // Detect session switch and clear
   if (renderedSessionId !== session.id) {
       els.log.innerHTML = '';
       renderedSessionId = session.id;
@@ -1098,7 +1085,6 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
       editContainer.appendChild(actions);
       item.appendChild(editContainer);
       
-      // Store reference for focus
       editingTemplateInputRef = labelInput;
     } else {
       // Normal display mode
@@ -1139,7 +1125,6 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     fragment.appendChild(item);
   });
   
-  // Add "New Template" row if not currently editing
   if (!editingId && !isAddingNewTemplate) {
     const addRow = document.createElement('li');
     addRow.className = 'template-add-row';
@@ -1153,7 +1138,6 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     fragment.appendChild(addRow);
   }
   
-  // Add "New Template" form if adding
   if (isAddingNewTemplate) {
     const addFormRow = document.createElement('li');
     addFormRow.className = 'template-row is-editing new-template';
@@ -1199,7 +1183,6 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     addFormRow.appendChild(editContainer);
     fragment.appendChild(addFormRow);
     
-    // Store reference for focus
     editingTemplateInputRef = labelInput;
   }
   

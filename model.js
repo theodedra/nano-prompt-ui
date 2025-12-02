@@ -45,7 +45,7 @@ let downloadStatusCallback = null;
 class LocalAI {
   constructor() {
     this.sessions = new Map();
-    this.controller = null; // Track active generation controller
+    this.controller = null;
   }
 
   get engine() {
@@ -130,10 +130,7 @@ class LocalAI {
     return fullText;
   }
 
-  /**
-   * Destroy the current AI session and clean up resources
-   */
-  destroy(sessionId = null) {
+    destroy(sessionId = null) {
     if (sessionId) {
       const session = this.sessions.get(sessionId);
       if (session) {
@@ -330,7 +327,6 @@ export async function checkAvailability({ forceCheck = false, cachedAvailability
  * @returns {Function} Stop polling function
  */
 export function startDownloadPolling(onStatusChange) {
-  // Stop any existing polling
   stopDownloadPolling();
   
   downloadStatusCallback = onStatusChange;
@@ -374,7 +370,6 @@ export function startDownloadPolling(onStatusChange) {
         }
       }
       
-      // If status changed from 'after-download' to something else, we're done
       if (status === 'readily' || status === 'no') {
         console.log('Nano Prompt: Model download complete, status:', status);
         
@@ -425,9 +420,6 @@ export function startDownloadPolling(onStatusChange) {
   return stopDownloadPolling;
 }
 
-/**
- * Stop download polling
- */
 export function stopDownloadPolling() {
   if (downloadPollTimer) {
     clearTimeout(downloadPollTimer);
@@ -436,10 +428,6 @@ export function stopDownloadPolling() {
   downloadStatusCallback = null;
 }
 
-/**
- * Check if download polling is active
- * @returns {boolean}
- */
 export function isDownloadPolling() {
   return downloadPollTimer !== null;
 }
@@ -490,7 +478,6 @@ export async function warmUpModel() {
     }
   }
 
-  // Mark as warmed up if successful
   if (warmupStatus === 'success') {
     hasWarmedUp = true;
     syncWarmupFlag(true);
@@ -557,7 +544,6 @@ export async function performSessionWarmup(callbacks = {}) {
     return { skipped: true };
   }
 
-  // First check availability
   const availability = await localAI.getAvailability();
   
   // Handle both 'after-download' and 'downloading' states
@@ -576,7 +562,6 @@ export async function performSessionWarmup(callbacks = {}) {
         }
       });
       
-      // Download complete, destroy the warmup session
       if (session?.destroy) {
         session.destroy();
       }
@@ -604,10 +589,6 @@ export async function performSessionWarmup(callbacks = {}) {
   return { skipped: false, ...result };
 }
 
-/**
- * Check if engine has been warmed up this session
- * @returns {boolean}
- */
 export function isWarmedUp() {
   return hasWarmedUp;
 }
@@ -697,7 +678,6 @@ async function blobToCanvas(blob, maxWidth) {
     const img = new Image();
 
     img.onload = () => {
-      // Calculate scaled dimensions
       let width = img.width;
       let height = img.height;
 
@@ -706,14 +686,11 @@ async function blobToCanvas(blob, maxWidth) {
         width = maxWidth;
       }
 
-      // Create canvas and draw resized image
       const canvas = document.createElement('canvas');
       canvas.width = width;
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
-
-      // Clean up object URL
       URL.revokeObjectURL(img.src);
 
       resolve(canvas);
@@ -935,9 +912,6 @@ export async function fetchImage(url) {
   return await fetchImageWithRetry(url);
 }
 
-/**
- * Cancel ongoing AI generation
- */
 export function cancelGeneration() {
   if (localAI.controller) {
     localAI.controller.abort();
@@ -945,10 +919,6 @@ export function cancelGeneration() {
   }
 }
 
-/**
- * Check if AI generation is active
- * @returns {boolean}
- */
 export function isGenerating() {
   return localAI.controller !== null;
 }
@@ -980,7 +950,6 @@ AI: ${aiText.slice(0, LIMITS.TITLE_GENERATION_MAX_CHARS)}`;
 
     if (!generatedTitle) return null;
 
-    // Clean and truncate the title
     let title = generatedTitle.trim()
       .replace(/^["']|["']$/g, '') // Remove quotes
       .replace(/[.!?]$/, '')        // Remove ending punctuation
@@ -1093,7 +1062,6 @@ export async function translateText(text, targetLang, callbacks = {}) {
     console.warn('Language detection failed, assuming English:', e);
   }
 
-  // Don't translate if source is same as target
   if (sourceLang === targetLang) {
     return { 
       translatedText: text, 
@@ -1149,7 +1117,6 @@ export function speakText(text, callbacks = {}) {
     return;
   }
 
-  // Cancel any ongoing speech before starting new one
   if (window.speechSynthesis.speaking) {
     window.speechSynthesis.cancel();
   }
@@ -1179,27 +1146,16 @@ export function speakText(text, callbacks = {}) {
   window.speechSynthesis.speak(utterance);
 }
 
-/**
- * Stop speech synthesis
- */
 export function stopSpeech() {
   if (window.speechSynthesis && window.speechSynthesis.speaking) {
     window.speechSynthesis.cancel();
   }
 }
 
-/**
- * Check if speech synthesis is active
- * @returns {boolean}
- */
 export function isSpeaking() {
   return window.speechSynthesis && window.speechSynthesis.speaking;
 }
 
-/**
- * Check if something is running (generation or speech)
- * @returns {boolean}
- */
 export function isSomethingRunning() {
   return isSpeaking() || isGenerating();
 }

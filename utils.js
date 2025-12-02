@@ -1,6 +1,6 @@
 // utils.js - General utility functions
 
-import { VALIDATION } from './constants.js';
+import { VALIDATION, LIMITS } from './constants.js';
 
 /**
  * Query selector helper
@@ -134,35 +134,52 @@ export function nanoid(size = 10) {
   return id;
 }
 
+/**
+ * Resize image file to max width while maintaining aspect ratio
+ * @param {File} file - Image file to resize
+ * @param {number} maxWidth - Maximum width in pixels
+ * @returns {Promise<string>} Base64 encoded image data URL
+ */
+export function resizeImage(file, maxWidth = LIMITS.IMAGE_DEFAULT_MAX_WIDTH) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+        if (width > maxWidth) {
+          height = Math.round(height * (maxWidth / width));
+          width = maxWidth;
+        }
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = reject;
+      img.src = e.target.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Convert data URL to Blob for AI model input
+ * @param {string} dataUrl - Data URL string
+ * @returns {Promise<Blob>} Image blob
+ */
+export async function dataUrlToBlob(dataUrl) {
+  const res = await fetch(dataUrl);
+  return await res.blob();
+}
 
 /**
  * PRODUCTION READY MARKDOWN SANITIZER
  * Convert markdown to HTML with strict sanitization
- * 
- * SECURITY/UX TRADE-OFF NOTE:
- * ─────────────────────────────────────────────────────────────────────────────
- * This sanitizer is intentionally NOT maximally aggressive. We allow basic
- * formatting tags (p, br, strong, em, code, lists, links, headings, div, span)
- * because AI responses often contain page context (SPAs, scraped content) that
- * uses these structures.
- * 
- * Making the sanitizer more restrictive (e.g., text-only output) would:
- * 1. Break readability of AI responses that reference page structure
- * 2. Remove useful formatting from code explanations and lists
- * 3. Degrade UX significantly for minimal incremental security gain
- * 
- * Current protections (sufficient for read-only AI output):
- * - All script/event handlers stripped (onclick, onerror, etc.)
- * - javascript: URLs blocked
- * - style attributes removed (no CSS injection)
- * - iframe/object/embed/style tags removed (no embedding)
- * - Only whitelisted tags pass through
- * 
- * DO NOT make the sanitizer more aggressive without understanding this trade-off.
- * The AI is read-only and cannot execute code—sanitization prevents XSS, not
- * prompt injection (which is handled by architectural isolation, see SECURITY.md).
- * ─────────────────────────────────────────────────────────────────────────────
- * 
  * @param {string} md - Markdown text
  * @returns {string} Sanitized HTML
  */
@@ -200,7 +217,7 @@ export function markdownToHtml(md) {
  * @param {string} unsafe - Unsafe HTML string
  * @returns {string} Escaped HTML
  */
-export function escapeHtml(unsafe) {
+function escapeHtml(unsafe) {
   return unsafe
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -211,15 +228,6 @@ export function escapeHtml(unsafe) {
 
 /**
  * Sanitize HTML string using whitelist approach
- * 
- * IMPLEMENTATION NOTE:
- * This whitelist approach balances security and usability. We preserve structural
- * HTML (divs, spans, headings, lists) because AI responses often explain page
- * content that uses these elements. Stripping them would make responses less
- * useful when the AI is describing or quoting SPA structures.
- * 
- * See markdownToHtml() docstring for the full security/UX trade-off rationale.
- * 
  * @param {string} dirtyHtml - Unsanitized HTML
  * @returns {string} Sanitized HTML
  */

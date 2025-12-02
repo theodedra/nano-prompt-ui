@@ -7,7 +7,6 @@ import { escapeHtml } from './utils.js';
  * In Chrome extensions, the API is exposed as a global LanguageModel class
  */
 function getLanguageModelAPI() {
-  // In Chrome extensions, the API is a global LanguageModel constructor
   if (typeof LanguageModel !== 'undefined') {
     return LanguageModel;
   }
@@ -39,7 +38,6 @@ async function tryCreateSession(createFn) {
       return true;
     }
   } catch (e) {
-    // Session creation failed
   }
   return false;
 }
@@ -77,7 +75,6 @@ export async function checkAllAPIs() {
     summarizationAPI: await checkSummarizationAPI(),
     rewriterAPI: await checkRewriterAPI(),
 
-    // Additional info
     browserInfo: getBrowserInfo()
   };
 
@@ -129,7 +126,6 @@ async function checkPromptAPI() {
       }));
     }
 
-    // Determine availability
     isAvailable = isAvailable || actuallyWorks;
 
     // Set message (with special handling for Prompt API 'no' status)
@@ -191,7 +187,6 @@ async function checkMultilingualSupport() {
  */
 async function checkTranslationAPI() {
   try {
-    // Check if Translator API is available as a global
     if (typeof Translator === 'undefined') {
       return {
         available: false,
@@ -222,7 +217,6 @@ async function checkTranslationAPI() {
 
     isAvailable = isAvailable || actuallyWorks;
 
-    // Special message for translation API (includes language count)
     let message;
     if (availability === 'readily' || availability === 'available') {
       message = 'Ready - Expert translation for 12+ languages';
@@ -275,7 +269,6 @@ async function checkLanguageDetectionAPI() {
 
     const availability = await LanguageDetector.availability();
 
-    // Try to actually create a session if status check fails
     let isAvailable = availability !== 'no';
     let actuallyWorks = false;
 
@@ -285,7 +278,6 @@ async function checkLanguageDetectionAPI() {
 
     isAvailable = isAvailable || actuallyWorks;
 
-    // Special message for language detection (mentions feature)
     let message;
     if (availability === 'readily' || availability === 'available') {
       message = 'Ready - Auto-detects source language';
@@ -340,7 +332,6 @@ async function checkSummarizationAPI() {
     });
     const status = typeof availabilityResult === 'object' ? availabilityResult.availability : availabilityResult;
 
-    // Try to actually create a session if status check fails
     let isAvailable = status === 'readily' || status === 'after-download' || status === 'available' || status === 'downloadable';
     let actuallyWorks = false;
 
@@ -399,7 +390,6 @@ async function checkRewriterAPI() {
     });
     const status = typeof availabilityResult === 'object' ? availabilityResult.availability : availabilityResult;
 
-    // Try to actually create a session if status check fails
     let isAvailable = status === 'readily' || status === 'after-download' || status === 'available' || status === 'downloadable';
     let actuallyWorks = false;
 
@@ -460,7 +450,6 @@ function getBrowserInfo() {
 export async function getSetupStatus() {
   const apis = await checkAllAPIs();
 
-  // Only Prompt API is absolutely required!
   const requiredAPIs = [
     apis.promptAPI
   ];
@@ -503,7 +492,6 @@ export async function getModelStatusSummary(availability = 'unknown') {
   let tooltip = 'Gemini Nano is ready';
   let showGuideLink = false;
   
-  // Check browser compatibility first
   if (!browserInfo.isChrome) {
     level = 'broken';
     label = 'Unsupported';
@@ -531,7 +519,6 @@ export async function getModelStatusSummary(availability = 'unknown') {
     tooltip = 'Running in page context (limited). Some features may not work.';
     showGuideLink = true;
   } else {
-    // All good
     level = 'ok';
     label = 'Ready';
     tooltip = `Gemini Nano ready${promptAPI.multilingual ? ' (multilingual)' : ''}`;

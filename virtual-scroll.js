@@ -12,17 +12,16 @@ export class VirtualScroller {
     this.renderItem = renderItemCallback;
     this.messages = [];
     this.itemHeight = 100; // Estimated average message height
-    this.buffer = 5; // Number of items to render above/below viewport
+    this.buffer = 5;
     this.enabled = false;
     this.lastScrollTop = 0;
-    this.rafId = null; // requestAnimationFrame ID for scroll handling
+    this.rafId = null;
     this.messageNodes = new Map(); // messageId -> DOM node cache (avoids re-render on scroll)
     this.topSpacer = null;
     this.bottomSpacer = null;
     this.lastMessageCount = 0;
     this.currentRange = { start: 0, end: 0 };
 
-    // Scroll handler bound once
     this.handleScroll = this.handleScroll.bind(this);
   }
 
@@ -57,7 +56,7 @@ export class VirtualScroller {
    * This keeps per-scroll work minimal: just schedule a rAF, no heavy logic.
    */
   handleScroll() {
-    if (this.rafId) return; // Already scheduled, skip
+    if (this.rafId) return;
     this.rafId = requestAnimationFrame(() => {
       this.rafId = null;
       this.updateRange();
@@ -98,7 +97,6 @@ export class VirtualScroller {
     const firstVisible = Math.floor(scrollTop / this.itemHeight);
     const lastVisible = Math.ceil((scrollTop + viewportHeight) / this.itemHeight);
 
-    // Add buffer above and below
     const start = Math.max(0, firstVisible - this.buffer);
     const end = Math.min(totalItems, lastVisible + this.buffer);
 
@@ -132,7 +130,6 @@ export class VirtualScroller {
     // Create document fragment for batch DOM update
     const nodes = [];
 
-    // Create spacer for items above viewport
     if (start > 0) {
       this.topSpacer.style.height = `${start * this.itemHeight}px`;
       nodes.push(this.topSpacer);
@@ -155,13 +152,11 @@ export class VirtualScroller {
       nodes.push(element);
     }
 
-    // Create spacer for items below viewport
     if (end < messages.length) {
       this.bottomSpacer.style.height = `${(messages.length - end) * this.itemHeight}px`;
       nodes.push(this.bottomSpacer);
     }
 
-    // Replace container contents without recreating cached nodes
     this.container.replaceChildren(...nodes);
     this.currentRange = { start, end };
     this.pruneStaleNodes(messages);

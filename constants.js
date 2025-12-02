@@ -1,22 +1,20 @@
-// constants.js - Centralized configuration and constants
-
 // ============================================================================
 // TIMING CONSTANTS
 // ============================================================================
 
 export const TIMING = {
   // Context caching and refresh
-  CONTEXT_CACHE_MS: 15_000,           // How long to cache context before refresh
-  TAB_UPDATE_DEBOUNCE_MS: 300,        // Debounce for tab switch/update events
+  CONTEXT_CACHE_MS: 15_000,
+  TAB_UPDATE_DEBOUNCE_MS: 300,
 
   // Network timeouts
-  IMAGE_FETCH_TIMEOUT_MS: 5_000,      // Timeout for image download
+  IMAGE_FETCH_TIMEOUT_MS: 5_000,
   PANEL_READY_DELAY_MS: 1_000,        // Delay before sending queued actions to panel
 
   // UI feedback
-  TOAST_DURATION_MS: 2_500,           // How long to show toast messages
-  TOAST_ANIMATION_MS: 300,            // Toast animation duration
-  DELETE_CONFIRM_TIMEOUT_MS: 3_000,   // Time to confirm session deletion
+  TOAST_DURATION_MS: 2_500,
+  TOAST_ANIMATION_MS: 300,
+  DELETE_CONFIRM_TIMEOUT_MS: 3_000,
   MIC_SETUP_DELAY_MS: 500,            // Delay before auto-triggering mic on setup
 
   // Model warmup
@@ -44,17 +42,17 @@ export const LIMITS = {
   ATTACHMENT_BUDGET: 1_500,           // Budget for attachment text content
 
   // Image processing
-  IMAGE_MAX_WIDTH: 1_024,             // Max width for uploaded images
-  IMAGE_MAX_WIDTH_DESCRIPTION: 512,   // Max width for image description
+  IMAGE_MAX_WIDTH: 1_024,
+  IMAGE_MAX_WIDTH_DESCRIPTION: 512,   // Smaller size for image description requests
   IMAGE_QUALITY: 0.7,                 // JPEG compression quality (0-1)
-  MAX_ATTACHMENTS: 3,                 // Max number of attachments per message
+  MAX_ATTACHMENTS: 3,
 
   // PDF processing
-  PDF_MAX_PAGES: 50,                  // Maximum pages to extract from PDF
-  PDF_MAX_CHARS: 50_000,              // Maximum characters to extract from PDF (~12,500 tokens)
+  PDF_MAX_PAGES: 50,
+  PDF_MAX_CHARS: 50_000,              // ~12,500 tokens
 
   // Storage
-  MAX_SESSIONS: 100,                  // Maximum number of sessions to keep
+  MAX_SESSIONS: 100,
   MIN_TEXT_LENGTH: 2,                 // Minimum text length for content scraping
 
   // Context truncation
@@ -64,7 +62,7 @@ export const LIMITS = {
   SHORT_QUERY_THRESHOLD: 60,          // Queries under this length might not need context
 
   // Title generation
-  TITLE_MAX_LENGTH: 50,               // Maximum length for auto-generated titles
+  TITLE_MAX_LENGTH: 50,
   TITLE_GENERATION_MAX_CHARS: 500,    // Max chars from conversation to use for title generation
 };
 
@@ -126,8 +124,8 @@ Title:`;
 export const STORAGE_KEYS = {
   SYNC: 'nanoPromptUI.settings.v1',      // Chrome sync storage for settings
   SESSION_DRAFT: 'nanoPromptUI.draft',   // Session storage for context draft
-  DB_NAME: 'NanoPromptDB',               // IndexedDB database name
-  DB_VERSION: 2,                         // IndexedDB version
+  DB_NAME: 'NanoPromptDB',
+  DB_VERSION: 2,
   STORES: {
     SESSIONS: 'sessions',
     META: 'meta',

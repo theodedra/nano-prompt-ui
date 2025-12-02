@@ -14,7 +14,6 @@ import { TIMING } from './constants.js';
  * @param {number} duration - How long to show the toast in ms (default: 2500ms)
  */
 export function showToast(message, type = 'info', duration = TIMING.TOAST_DURATION_MS) {
-  // Remove any existing toasts first
   const existingToast = document.querySelector('.toast-notification');
   if (existingToast) {
     existingToast.remove();
@@ -25,7 +24,6 @@ export function showToast(message, type = 'info', duration = TIMING.TOAST_DURATI
   toast.setAttribute('role', 'alert');
   toast.setAttribute('aria-live', 'polite');
 
-  // Add icon based on type
   const icon = getIconForType(type);
 
   // Use chip styling internally for unified look
@@ -38,12 +36,10 @@ export function showToast(message, type = 'info', duration = TIMING.TOAST_DURATI
 
   document.body.appendChild(toast);
 
-  // Trigger animation
   requestAnimationFrame(() => {
     toast.classList.add('is-visible');
   });
 
-  // Auto-dismiss after duration
   setTimeout(() => {
     hideToast(toast);
   }, duration);
@@ -107,7 +103,6 @@ function escapeHtml(unsafe) {
  * @returns {{ update: (message: string, current: number, total: number) => void, dismiss: () => void }}
  */
 export function showProgressToast(message, current = 0, total = 100) {
-  // Remove any existing toasts first
   const existingToast = document.querySelector('.toast-notification');
   if (existingToast) {
     existingToast.remove();
@@ -135,7 +130,6 @@ export function showProgressToast(message, current = 0, total = 100) {
 
   document.body.appendChild(toast);
 
-  // Trigger animation
   requestAnimationFrame(() => {
     toast.classList.add('is-visible');
   });

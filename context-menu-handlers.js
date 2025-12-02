@@ -14,9 +14,6 @@ import {
 
 let contextMenuRegistered = false;
 
-/**
- * Wire up context menu actions from the background script.
- */
 export function registerContextMenuHandlers() {
   if (contextMenuRegistered) return;
 

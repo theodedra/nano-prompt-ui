@@ -88,13 +88,11 @@ export function applySlidingWindow(messages, tokenBudget = LIMITS.HISTORY_BUDGET
     return { messages: [], tokens: 0, trimmed: 0 };
   }
 
-  // Fast path: if all messages fit, return them all
   const totalTokens = estimateMessagesTokens(messages);
   if (totalTokens <= tokenBudget) {
     return { messages, tokens: totalTokens, trimmed: 0 };
   }
 
-  // Sliding window: work backwards from most recent
   const result = [];
   let usedTokens = 0;
   let trimmed = 0;
@@ -104,7 +102,6 @@ export function applySlidingWindow(messages, tokenBudget = LIMITS.HISTORY_BUDGET
   const reserveFirst = firstMsgTokens < tokenBudget * 0.15; // Only if <15% of budget
   const effectiveBudget = reserveFirst ? tokenBudget - firstMsgTokens : tokenBudget;
 
-  // Add messages from most recent backwards
   for (let i = messages.length - 1; i >= (reserveFirst ? 1 : 0); i--) {
     const msg = messages[i];
     const msgTokens = estimateTokens(msg.text || '');
@@ -117,7 +114,6 @@ export function applySlidingWindow(messages, tokenBudget = LIMITS.HISTORY_BUDGET
     }
   }
 
-  // Prepend first message if we reserved space for it
   if (reserveFirst && messages.length > 0) {
     result.unshift(messages[0]);
     usedTokens += firstMsgTokens;
@@ -151,7 +147,6 @@ function smartTruncate(text, maxTokens) {
   const currentTokens = estimateTokens(text);
   if (currentTokens <= maxTokens) return text;
 
-  // Approximate char limit based on tokens
   const charLimit = maxTokens * LIMITS.TOKEN_TO_CHAR_RATIO;
 
   const truncated = text.slice(0, charLimit);
@@ -299,7 +294,6 @@ export async function buildPromptWithContext(userText, contextOverride = '', att
   // security rationale lives in SECURITY.md#prompt-injection-rationale-for-contextjs.
   const intent = classifyIntent(userText);
 
-  // Use cached header instead of rebuilding
   const header = getCachedPromptHeader();
   let totalTokens = header.tokens;
 

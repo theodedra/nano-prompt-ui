@@ -26,7 +26,6 @@
   --spinner-filter: invert(1) hue-rotate(180deg);
   --spinner-filter-hover: invert(1) hue-rotate(180deg) brightness(1.3);
   
-  /* State colors */
   --state-success: #3fb950;
   --state-error: #f85149;
   --state-warning: #d29922;
@@ -41,13 +40,11 @@
   --space-4: 10px;
   --space-5: 12px;
   
-  /* Font scale */
   --font-xs: 11px;
   --font-sm: 12px;
   --font-md: 13px;
 }
 
-/* Light Theme */
 :root[data-theme="light"] {
   --bg: #f5f5f7;
   --surface: #ffffff;
@@ -79,12 +76,10 @@ body {
   height: 100vh;
 }
 
-/* Scrollbars */
 *::-webkit-scrollbar { width: var(--space-1); height: var(--space-1); }
 *::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: var(--space-1); }
 *::-webkit-scrollbar-track { background: transparent; }
 
-/* Focus states */
 :focus:not(:focus-visible) { outline: none !important; }
 :focus-visible {
   outline: none !important;
@@ -158,7 +153,6 @@ body {
   background-color: rgba(255, 107, 107, 0.05);
 }
 
-/* Input error - highlight field with error styling */
 .input-card.has-error .field {
   border: 1px solid var(--state-error);
   background-color: rgba(248, 81, 73, 0.05);
@@ -216,18 +210,15 @@ body {
    3.5 SHARED STATE MODIFIERS (for direct element use)
    -------------------------------------------------------------------------- */
 
-/* Active/Selected state */
 .is-active {
   background-color: var(--surface) !important;
 }
 
-/* Error state (direct element) */
 .is-error {
   color: var(--state-error) !important;
   border-left-color: var(--state-error) !important;
 }
 
-/* Warning state */
 .is-warning {
   color: var(--state-warning) !important;
   border-left-color: var(--state-warning) !important;
@@ -240,12 +231,10 @@ body {
   opacity: 1 !important;
 }
 
-/* Editing state */
 .is-editing {
   background-color: var(--surface);
 }
 
-/* Success state */
 .is-success {
   color: var(--state-success) !important;
   border-left-color: var(--state-success) !important;
@@ -354,7 +343,6 @@ body {
   flex: 1; 
 }
 
-/* Session row */
 .session-row {
   display: flex; 
   align-items: center; 
@@ -381,7 +369,6 @@ body {
   display: none;
 }
 
-/* Template row */
 .template-row {
   display: flex;
   align-items: center;
@@ -408,7 +395,6 @@ body {
   padding-top: var(--space-5);
 }
 
-/* Snapshot row */
 .snapshot-row {
   display: flex;
   align-items: center;
@@ -481,7 +467,6 @@ body {
 
 /* Chip streaming state - now handled by .card.chat.is-streaming .chip */
 
-/* Attachment chip */
 .attachment-chip { 
   background-color: var(--surface-3); 
   border-radius: var(--space-2); 
@@ -533,7 +518,6 @@ textarea {
   box-shadow: none !important;
 }
 
-/* Session rename input */
 .session-rename-input {
   width: 100%;
   padding: var(--space-1) var(--space-3);
@@ -551,7 +535,6 @@ textarea {
   background-color: var(--surface-hover);
 }
 
-/* Template edit inputs */
 .template-edit-label {
   width: 100%;
   padding: var(--space-3) var(--space-4);
@@ -588,7 +571,6 @@ textarea {
   background-color: var(--surface-hover);
 }
 
-/* Session search input */
 .session-search {
   padding: var(--space-1) var(--space-2) var(--space-3);
 }
@@ -654,7 +636,6 @@ textarea {
 
 /* Icon button recording state - now handled by .input-card.is-recording #mic */
 
-/* Action buttons (edit, delete, save, cancel) */
 .action-btn {
   background-color: transparent; 
   border: none; 
@@ -832,7 +813,6 @@ textarea:disabled {
   border: none; 
 }
 
-/* Filled button variant */
 .filled {
   background-color: var(--surface-hover);
   color: var(--on-bg);
@@ -862,7 +842,6 @@ textarea:disabled {
   background-color: #5a5a5f;
 }
 
-/* Tonal button variant */
 .tonal { 
   background-color: var(--surface-2); 
   color: var(--on-bg); 
@@ -1009,7 +988,6 @@ textarea:disabled {
   display: none; 
 }
 
-/* Message actions (copy, speak) */
 .msg .copy1 {
   position: absolute;
   top: calc(-1 * var(--space-5));
@@ -1049,7 +1027,6 @@ textarea:disabled {
   background-color: var(--surface-3); 
 }
 
-/* Smart replies */
 .smart-replies {
   margin-top: var(--space-5);
   display: flex;
@@ -1082,7 +1059,6 @@ textarea:disabled {
   word-wrap: break-word;
 }
 
-/* Loading animation */
 .loading-dots {
   display: inline-flex;
   align-items: center;
@@ -1165,7 +1141,6 @@ textarea:disabled {
   background-color: var(--surface-2); 
 }
 
-/* Dropdown menus */
 ul.dropdown-menu, 
 ul.attachment-list { 
   list-style: none; 
@@ -1217,7 +1192,6 @@ ul.attachment-list {
   background-color: var(--surface-3); 
 }
 
-/* Session list */
 .session-info { 
   flex: 1; 
   overflow: hidden; 
@@ -1455,7 +1429,6 @@ input[type="range"] {
   color: var(--accent);
 }
 
-/* Diagnostics */
 .diagnostics-block { 
   margin-top: var(--space-4); 
 }
@@ -1475,7 +1448,6 @@ input[type="range"] {
   color: var(--on-bg-dim); 
 }
 
-/* Context modal */
 #context-modal .modal-card { 
   width: 90%; 
   height: 70vh; 

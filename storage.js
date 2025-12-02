@@ -692,7 +692,7 @@ let saveTimeout = null;
 let savePromise = null;
 
 export function scheduleSaveState() {
-  if (saveTimeout) return; // Already scheduled
+  if (saveTimeout) return;
   
   saveTimeout = setTimeout(async () => {
     saveTimeout = null;
@@ -885,7 +885,6 @@ export async function loadState() {
       const shouldLazyLoad = normalized.length >= 50;
       appState.lazyLoadEnabled = shouldLazyLoad;
 
-      // Build lightweight metadata once
       const metaMap = {};
       normalized.forEach(s => {
         metaMap[s.id] = {

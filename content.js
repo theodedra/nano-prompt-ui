@@ -1,4 +1,3 @@
-// content.js
 // Note: Content scripts cannot use ES6 imports, so constants are inlined
 
 /**
@@ -54,11 +53,6 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
   console.warn('[NanoPrompt] Content script loaded but chrome.runtime is not available. This is normal after extension reload.');
 }
 
-/**
- * Check if an element is visible in the DOM
- * @param {HTMLElement} el - Element to check
- * @returns {boolean} True if element is visible
- */
 function isVisible(el) {
   if (!el) return false;
   const style = window.getComputedStyle(el);
@@ -110,7 +104,6 @@ function scrapePage() {
       }
     }
 
-    // TreeWalker for efficient text extraction
     const walker = document.createTreeWalker(
       root,
       NodeFilter.SHOW_TEXT,
