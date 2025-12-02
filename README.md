@@ -2,7 +2,7 @@
 
 ![Nano Prompt UI – Dark](Screenshot(dark).png) ![Nano Prompt UI – Light](Screenshot(light).png)
 
-**TL;DR:** A privacy-first Chrome extension that runs entirely on-device using Chrome's built-in **Gemini Nano** language model. Version **1.1.0** builds on the multimodal 1.0.0 release with a **storage + performance overhaul**, **smarter context handling**, **session search**, and **quality-of-life UX upgrades** — while staying 100% local and side-panel based.
+**TL;DR:** A privacy-first Chrome extension that runs entirely on-device using Chrome's built-in **Gemini Nano** language model. Version **1.2.0** ships a major **engine + safety + design overhaul** on top of the multimodal 1.0.0 and storage/performance 1.1.0 releases — adding token-aware prompt building, cross-context warmup, a model status chip, tighter XSS + attachment validation, and a unified, flatter UI — while staying 100% local and side-panel based.
 
 ---
 
@@ -12,7 +12,7 @@ Unlike standard popups that close when you click away, **Nano Prompt UI lives in
 
 - **True Multitasking:** Read an article on the left while the AI summarizes it on the right.
 - **Persistent Sessions:** Copy text from a website and paste it into the chat without the window closing.
-- **Hybrid Execution:** If the Side Panel / extension context can’t talk to the model, Nano Prompt can fall back to running the prompt directly in the page context (for text-only prompts), so you still get a response instead of a silent failure.
+- **Hybrid Execution:** If the side panel / extension context can’t talk to the model, Nano Prompt can fall back to running the prompt directly in the page context (for text-only prompts), so you still get a response instead of a silent failure.
 
 ---
 
@@ -20,15 +20,20 @@ Unlike standard popups that close when you click away, **Nano Prompt UI lives in
 
 ### Core Capabilities
 
-- **100% Local & Private**
-  - Runs on Chrome’s on-device **Prompt API** (`LanguageModel` / `window.ai`).  
-  - No calls to external servers; everything stays on your machine.
-- **Multi-Session Chat**
-  - Multiple named conversations with their own histories.
-  - Automatic session titles based on the first exchange.
-- **Rich Markdown Output**
-  - Headings, lists, tables, and code blocks.
-  - Rendered through a strict HTML sanitizer before hitting the DOM.
+**100% Local & Private**
+
+- Runs on Chrome’s on-device **Prompt API** (`LanguageModel` / `window.ai`).
+- No calls to external servers; everything stays on your machine.
+
+**Multi-Session Chat**
+
+- Multiple named conversations with their own histories.
+- Automatic session titles based on the first exchange.
+
+**Rich Markdown Output**
+
+- Headings, lists, tables, and code blocks.
+- Rendered through a strict HTML sanitizer before hitting the DOM.
 
 ### 🖱️ Context Menu Integration
 
@@ -41,129 +46,142 @@ Right-click anywhere on the web:
 
 ---
 
-## 🆕 v1.1.0 – Storage, Performance & UX Upgrade
+## 🆕 v1.2.0 – Engine, Safety & Design Overhaul
 
-This release focuses on long-term reliability and day-to-day ergonomics.
+This release focuses on the **internal engine, safety model, and UI consistency**, so the extension feels flatter, more predictable, and more robust over long use.
 
-### 📦 Smarter Sessions & Storage
+### 🧠 Token-Aware Prompt Engine
 
-- **Session-Level Storage**
-  - Sessions are stored individually rather than as one giant blob.
-  - `sessionMeta` keeps a light index (title, timestamps) so the sidebar loads instantly even with many chats.
-- **Attachment Decoupling**
-  - Big base64 image/PDF payloads are stored separately from message text.
-  - Messages reference attachment IDs instead of embedding the data repeatedly.
-  - Reduces `chrome.storage` pressure and makes long-running use realistic.
+- **Explicit token budgets** in `constants.js` for system rules, page context, history, user query, and attachment text. The prompt builder uses these budgets to keep the model comfortably under the Gemini Nano context limit.
+- **Sliding-window history** – older messages are trimmed gracefully using token estimates, preserving the initial “setup” part of the conversation when there’s room.
+- **Cached prompt headers** – assistant rules and their token count are computed once and reused, reducing per-prompt overhead.
+- **Token usage logging** – warns when prompt size crosses ~80% of the configured budget, making it easier to spot pathological contexts.
 
-### 🧭 Session Search & Navigation
+### 🧊 Cross-Context Warmup & Availability
 
-- **Session Search Bar**
-  - New search input in the sidebar to quickly filter sessions by title and metadata.
-  - Works without loading every full history into memory.
-- **Cleaner Session Actions**
-  - New handler modules for chat, attachments, context-menu actions, and settings keep behaviour predictable and easier to extend.
+**Unified warmup flow shared between background and side-panel contexts:**
 
-### 🧠 Context Snapshots & Safer Limits
+- Background and UI both use a shared `chrome.storage.session` flag (e.g. `nanoPrompt.warmedUp`) to avoid redundant warmups.
+- On first use, a minimal model session is created and destroyed to “prime” the engine.
 
-- **Context Snapshot Mode**
-  - Capture the current tab’s context once and “pin” it to the conversation.
-  - Reuse the same snapshot without re-scraping the page, perfect for research flows where the article doesn’t change.
-- **Non-Aggressive Global Length Caps**
-  - All inbound context (page, selection, PDFs) is clamped through a single shared limit before prompt building.
-  - Caps are tuned so the model still sees the same amount of information as before — the code just stops doing pointless extra work beyond that.
+**Session-scoped warmup**
 
-### ⚡ Performance Tweaks
+- The warmup flag is cleared when Chrome restarts, so the model gets primed again only when it’s actually needed.
 
-- **Throttled Streaming Rendering**
-  - Streaming updates are batched so the UI isn’t re-rendered on every token.
-  - Markdown is optionally rendered less frequently while streaming for smoother typing and scrolling.
-- **HTML Context Scraping Early-Exit + Cache**
-  - The content script stops walking the DOM once enough text has been collected to fill the configured context budget.
-  - Per-URL caching avoids re-scraping the same page when you hit “Use page context” multiple times.
-- **PDF Early-Exit & Truncation Feedback**
-  - PDF extraction stops reading once `PDF_MAX_CHARS` (+ a small safety margin) is reached.
-  - The UI shows a small note like *“PDF text truncated at X pages / Y characters”* so you know what the model actually saw.
+**Non-blocking UI**
 
-### 🧪 Diagnostics & Smart UX
+- Warmup runs asynchronously; the side panel stays responsive while Gemini Nano prepares in the background.
 
-- **Setup / Diagnostics Panel Upgrade**
-  - Settings now include status text for Prompt API availability and last warmup.
-  - Makes it obvious when Chrome flags or model downloads are misconfigured.
-- **Smart Reply Suggestions**
-  - After a response, Nano Prompt can surface quick follow-up prompts (e.g. “Summarize”, “Explain like I’m 5”, “Draft a reply”).
-  - One tap to ask a natural next question without retyping.
-- **Attachment Lifecycle Polish**
-  - Clear separation between “pending attachments” for the next message and attachments that belong to past messages.
-  - Pending attachments are visible and removable before you hit Send.
+### 🟢 Model Status Chip
+
+New **model status chip** in the header that shows:
+
+- `Ready`, `Downloading`, `Page-Mode`, `Setup needed`, `Update Chrome`, or `Unsupported`.
+
+The chip:
+
+- Uses a small, structured status object (`level`, `label`, `tooltip`, `showGuideLink`, flags) returned from `getModelStatusSummary()`.
+- Updates live when availability checks run.
+- Becomes clickable when there’s an issue and jumps straight into the **Setup Guide**.
+
+### 🔐 Safety & Data Hygiene
+
+**XSS-hardening for titles & inline editors**
+
+- Session titles, template labels, and chip/tooltips are now rendered via `textContent` and an explicit HTML-escape helper instead of raw `innerHTML`.
+- Inline session rename and template editing avoid any user-controlled HTML.
+
+**Centralised attachment validation**
+
+- A single `validateAttachment()` function enforces MIME allow-lists and size caps (e.g. ~5 MB images, ~10 MB PDFs).
+- Both images and PDFs use the same validator and error messages.
+
+**Dead-code cleanup**
+
+- Removed unused utilities (e.g. `resizeImage`, `dataUrlToBlob`) and their dangling constants so it’s clear which helpers are actually part of the pipeline.
+
+### 📄 PDFs, Progress & Non-Freezing Extraction
+
+**Chunked PDF parsing**
+
+- `pdf.js` now processes pages in an idle-friendly loop using `requestIdleCallback` (with a `setTimeout` fallback) so long documents don’t freeze the panel.
+
+**Progress toasts**
+
+- New `showProgressToast()` in `toast.js` displays a spinner, progress bar, and “Page X of Y” text while extraction runs.
+- `attachment-handlers.js` wires `onProgress` callbacks into PDF extraction and keeps the toast in sync.
+
+**Truncation awareness**
+
+- Extraction still respects `PDF_MAX_CHARS`, but now reports how many pages/characters made it into the prompt.
+
+### 🎛️ Encapsulated State & Controller Layer
+
+**Private `appState` in `storage.js`**
+
+- Internal state is no longer imported and mutated directly. Instead, modules call explicit getters/setters like `getSessions()`, `updateSettings(patch)`, `setActiveSnapshot(id)`, etc.
+
+**Controller orchestration**
+
+- `controller.js` (mentioned in docs) centralises common flows like updating templates, sessions, and status chips.
+- Handlers (`chat-handlers.js`, `settings-handlers.js`, `attachment-handlers.js`) talk to storage and UI through the controller instead of each other.
+
+### 🎨 Flatter, Unified UI
+
+**Inline session rename (no browser popups)**
+
+- `window.prompt()` for session renaming has been replaced with an inline text field in the session list.
+- Enter saves, Escape cancels, and all behaviour is fully keyboard-accessible.
+
+**Saved prompt templates inline**
+
+- Templates are editable in-place with proper add/edit/delete/reset flows, using the same “capsule” UI vocabulary as the rest of the panel.
+
+**Component vocabulary & state classes**
+
+- New documented classes for sections, cards, chips and container states (`.is-busy`, `.is-streaming`, `.is-empty`, `.is-recording`, `.has-error`, `.is-open`, `.is-collapsed`, etc.).
+- State is expressed on container elements instead of scattered inline styles, which reduces DOM mutations and keeps the UI flat and consistent.
+
+**Density & typography tokens**
+
+- All small spacing and font sizes now use CSS variables:
+  - `--space-0`…`--space-5` for 2–12px spacing.
+  - `--font-xs`, `--font-sm`, `--font-md` for 11–13px text.
+- Adjusting the “thinness” of the UI is now a single dial change instead of a global search/replace.
+
+**Standardised section headers**
+
+- Every section header uses the same padding, font size, weight, and chip alignment through a `.section-header` pattern.
 
 ---
 
-## 🔥 v1.0.0 Highlights (Multimodal + Translation)
+### Earlier releases (still included in v1.2.0)
 
-> All of these features are still present in v1.1.0.
+**v1.1.0 – Storage, performance & UX**
 
-### 🖼️ Multimodal Support (Vision)
+- Per-session storage with a light `sessionMeta` index so large chat lists stay fast.
+- Attachments stored separately from message text to avoid `chrome.storage` bloat.
+- Session search bar for quick filtering by title/metadata.
+- Context snapshots you can pin to a session and reuse without re-scraping.
+- Shared global caps for all context (page, selection, PDFs) before prompt building.
+- Streaming + PDF processing optimised (batched renders, early-exit, truncation feedback).
+- Setup/diagnostics panel showing Prompt API availability and last warmup.
+- Small UX touches like smart reply suggestions and clearer attachment lifecycle.
 
-- **Image Analysis**
-  - Attach images via the file button or right-click → **Describe image**.
-- **Canvas Conversion**
-  - Images are normalized and converted to `<canvas>` objects for the Prompt API.
-  - Multiple images can be attached alongside text.
+**v1.0.0 – Multimodal, PDFs & translation**
 
-### 📄 Document Support (PDF via Mozilla PDF.js)
+- Image support: attach images or right-click → **Describe image**.
+- Local PDF support via bundled Mozilla PDF.js with safe page/char limits and clear errors.
+- “Chat with docs”: summarise, explain or extract arguments from PDFs.
+- Chrome Translation API integration with automatic detection and a clean Gemini Nano fallback.
+- Baseline performance features: virtual scrolling, lazy session loading, streaming-friendly chat, theming (light/dark/system), Setup Guide, and micro-UX like typing indicators and “stop”.
 
-- **Local PDF Parsing**
-  - Uses bundled **Mozilla PDF.js** (`lib/pdf.min.js`, `lib/pdf.worker.min.js`) shipped with the extension.
-- **Chat with Docs**
-  - Attach PDFs and ask questions:
-    - Summaries,
-    - Argument extraction,
-    - “Explain this section” style prompts.
-- **Safe Limits & Errors**
-  - Hard caps on pages & characters (`PDF_MAX_PAGES`, `PDF_MAX_CHARS`).
-  - Clear toast errors for oversized or malformed PDFs.
-  - Truncation is explicitly surfaced in the chat.
+**v0.9.0 – Early foundation**
 
-### 🌐 Native Translation API
-
-- **Chrome Translation Integration**
-  - Uses Chrome’s experimental Translation API when available.
-- **Automatic Detection & Fallback**
-  - Auto-detects source language where possible.
-  - Falls back to a Gemini Nano translation prompt if the API or language pack isn’t present, with a clear toast message.
-
-### ⚡ Performance & UX (1.0.0 Baseline)
-
-- **Virtual Scrolling**
-  - Custom `VirtualScroller` renders only visible messages + a buffer.
-- **Lazy Session Loading**
-  - Session list loads immediately; histories are fetched when opened.
-- **Streaming-Friendly Chat**
-  - AI messages update in place.
-  - Auto-scroll only when you’re at the bottom (no yanking if you scroll up).
-- **Theming**
-  - Light, Dark, and System Auto themes.
-- **Setup Guide**
-  - Built-in Setup Guide checks browser version, flags, and optional AI APIs.
-- **Micro-UX**
-  - Typing indicator, subtle toasts, and a “stop” behaviour that preserves partial output.
-
----
-
-## ♻️ v0.9.0 Features (Still Relevant)
-
-- **🏷️ Smart Auto-Naming**
-  - Sessions get descriptive titles from the conversation itself.
-- **🔔 Toast Notifications**
-  - Non-intrusive feedback for copy, delete, rename, errors, etc.
-- **🧠 Context Engine**
-  - Page-aware prompts that combine:
-    - Title, URL, headings, meta description,
-    - Best-effort article/body text.
-- **⚙️ Early Architecture**
-  - `constants.js` centralises limits and strings.
-  - `model.js` wraps the Prompt API.
-  - `storage.js` defines the base app state shape.
+- Smart auto-naming of sessions from early conversation.
+- Toast notifications for key actions (copy, delete, rename, errors).
+- First version of the context engine (title, URL, headings, meta description, article text).
+- Early architecture for `constants.js`, `model.js` and `storage.js` that later releases built on.
 
 ---
 
