@@ -7,8 +7,7 @@
 export class VirtualScroller {
   constructor(container, renderItemCallback) {
     this.container = container;
-    // NOTE: renderItem is called ONCE per message and cached in messageNodes.
-    // It should do full markdown parsing/sanitisation since it's a one-time cost.
+    // renderItem is called once per message and cached (no re-parsing on scroll)
     this.renderItem = renderItemCallback;
     this.messages = [];
     this.itemHeight = 100; // Estimated average message height
@@ -261,12 +260,3 @@ export class VirtualScroller {
   }
 }
 
-/**
- * Create a virtual scroller instance for the chat log
- * @param {HTMLElement} container - Log container element
- * @param {Function} renderCallback - Function to render a single message
- * @returns {VirtualScroller}
- */
-export function createVirtualScroller(container, renderCallback) {
-  return new VirtualScroller(container, renderCallback);
-}

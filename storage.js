@@ -53,11 +53,6 @@ export function getSessionMeta() {
   return appState.sessionMeta;
 }
 
-/** @returns {string[]} Ordered session IDs */
-export function getSessionOrder() {
-  return appState.sessionOrder;
-}
-
 /** @returns {string|null} Current active session ID */
 export function getCurrentSessionId() {
   return appState.currentSessionId;
@@ -179,11 +174,6 @@ export function getSettings() {
   return appState.settings;
 }
 
-/** @returns {boolean} Whether lazy loading is enabled */
-export function isLazyLoadEnabled() {
-  return appState.lazyLoadEnabled;
-}
-
 const dirtySessions = new Set();
 let metaDirty = false;
 const markMetaDirty = () => { metaDirty = true; };
@@ -235,7 +225,6 @@ async function dbOp(storeName, mode, callback) {
 
     tx.oncomplete = () => resolve(reqResult);
     tx.onerror = (event) => {
-      // QUOTA HANDLING: Detect quota exceeded errors
       if (event.target.error?.name === 'QuotaExceededError') {
         console.error('IndexedDB quota exceeded. Consider clearing old sessions.');
         toast.error(USER_ERROR_MESSAGES.STORAGE_QUOTA_EXCEEDED);
@@ -510,7 +499,7 @@ export function createSessionFrom(baseSessionId = null) {
   // Persist ordering + active session change separately
   markMetaDirty();
 
-  // AUTO-CLEANUP: Remove oldest sessions if limit exceeded
+  // Remove oldest sessions if limit exceeded
   if (appState.sessionOrder.length > MAX_SESSIONS) {
     const sessionsToRemove = appState.sessionOrder.slice(MAX_SESSIONS);
     sessionsToRemove.forEach(oldId => {
@@ -563,7 +552,6 @@ export function upsertMessage(sessionId, message, replaceIndex = null) {
   const session = appState.sessions[sessionId];
   if (!session) return;
 
-  // MESSAGE VALIDATION: Ensure message has required fields
   if (!message || typeof message !== 'object') {
     console.error('Invalid message: must be an object');
     return;
@@ -877,7 +865,6 @@ export async function loadState() {
       appState.activeSnapshotId = exists ? activeSnapshotId : null;
     }
 
-    // LAZY LOADING LOGIC
     if (allSessions && allSessions.length) {
       const normalized = allSessions.map(s => normalizeSession(s));
       // Determine if we should enable lazy loading
@@ -959,13 +946,3 @@ export function updateSettings(patch) {
   appState.settings = { ...appState.settings, ...patch };
 }
 
-/**
- * Get plain text summary of a session's messages
- * @param {string} sessionId - Session ID
- * @returns {string} Plain text summary
- */
-export function summarizeSession(sessionId) {
-  const session = appState.sessions[sessionId];
-  if (!session) return '';
-  return session.messages.map(m => `${m.role === 'user' ? 'User' : 'Nano'}: ${m.text}`).join('\n\n');
-}

@@ -1,4 +1,4 @@
-import { $, formatTime, formatDate, markdownToHtml, escapeHtml } from './utils.js';
+import { $, formatTime, formatDate, markdownToHtml, escapeHtml, getSnapshotHost, clampLabel } from './utils.js';
 import { UI_MESSAGES, ICONS } from './constants.js';
 import { VirtualScroller } from './virtual-scroll.js';
 
@@ -13,7 +13,6 @@ let wrapEl = null;
 let chatCardEl = null;
 let inputCardEl = null;
 
-// UPDATED: Observer for smooth scrolling
 let scrollObserver = null;
 
 let virtualScroller = null;
@@ -73,8 +72,7 @@ export function initUI() {
   chatCardEl = $('.card.chat');
   inputCardEl = $('.input-card');
 
-  // UPDATED: Initialize ResizeObserver for smooth auto-scrolling
-  // We observe the last message element. When it grows (streaming), we scroll.
+  // ResizeObserver for auto-scrolling during streaming
   if (window.ResizeObserver && els.log) {
     scrollObserver = new ResizeObserver(() => {
        scrollToBottom();
@@ -154,19 +152,6 @@ export function setContextSourceLabel(snapshot = null) {
   }
 }
 
-function getSnapshotHost(url = '') {
-  try {
-    return url ? new URL(url).hostname : '';
-  } catch {
-    return '';
-  }
-}
-
-function clampLabel(text = '', max = 80) {
-  if (!text) return 'Saved page';
-  return text.length > max ? text.slice(0, max - 1) + '...' : text;
-}
-
 export function renderContextSnapshots(
   snapshots = [],
   activeId = null
@@ -240,8 +225,7 @@ export function setRestrictedState(isRestricted) {
 
   if (isRestricted) {
     interactive.forEach(el => { if (el) el.disabled = true; });
-    // TAB SWITCH FIX: Don't disable stop button if something is running
-    // Stop button should remain functional even on restricted pages if narration/generation is active
+    // Stop button stays enabled on restricted pages if narration/generation is active
     if (els.input) els.input.placeholder = UI_MESSAGES.INPUT_PLACEHOLDER_DISABLED;
     setStatusText(UI_MESSAGES.SYSTEM_PAGE);
   } else {
@@ -338,14 +322,6 @@ export function handleModelStatusChipClick() {
   }
 }
 
-/**
- * Get current model status (for external checks)
- * @returns {Object|null}
- */
-export function getModelStatus() {
-  return currentModelStatus;
-}
-
 export function setHardwareStatus(text) {
   if (els.hardware) els.hardware.textContent = text;
 }
@@ -413,13 +389,11 @@ export function getContextText() {
   return els.contextText?.value?.trim() || '';
 }
 
-// UPDATED: Simplified scroll logic, called by Observer
 function scrollToBottom() {
   if (!els.log) return;
   els.log.scrollTop = els.log.scrollHeight;
 }
 
-// UPDATED: Helper to attach observer to the latest message
 function observeLastMessage() {
   if (!scrollObserver || !els.log) return;
 
@@ -433,8 +407,7 @@ function observeLastMessage() {
   scrollToBottom();
 }
 
-// Track which session is currently being renamed
-let editingSessionId = null;
+// Track rename input reference for focus management
 let editingInputRef = null;
 
 export function renderSessions({
@@ -573,34 +546,6 @@ export function renderSessions({
   }
 }
 
-/**
- * Get the current value from the rename input
- * @returns {string|null} The input value or null if not editing
- */
-export function getRenameInputValue() {
-  if (!editingInputRef) return null;
-  return editingInputRef.value.trim();
-}
-
-/**
- * Get the editing session ID
- * @returns {string|null}
- */
-export function getEditingSessionId() {
-  return editingSessionId;
-}
-
-/**
- * Set the editing session ID
- * @param {string|null} id
- */
-export function setEditingSessionId(id) {
-  editingSessionId = id;
-  if (!id) {
-    editingInputRef = null;
-  }
-}
-
 export function setSessionSearchTerm(value) {
   sessionSearchTerm = value || '';
   if (els.sessionSearch && els.sessionSearch.value !== sessionSearchTerm) {
@@ -736,13 +681,10 @@ function createMessageElement(m, idx) {
     const body = document.createElement('div');
     body.className = 'body';
 
-    // LOADING ANIMATION: Show three dots for empty AI messages
+    // Show loading dots for empty AI messages
     if (m.role === 'ai' && (!m.text || m.text.trim() === '')) {
       body.innerHTML = '<div class="loading-dots"><span></span><span></span><span></span></div>';
     } else {
-      // NOTE: markdownToHtml() uses balanced sanitization—see utils.js for the
-      // security/UX trade-off rationale. Do not replace with a more aggressive
-      // sanitizer without reviewing that documentation.
       body.innerHTML = markdownToHtml(m.text || '');
     }
     div.appendChild(body);
@@ -843,7 +785,7 @@ export function renderLog(session) {
     return;
   }
 
-  // VIRTUAL SCROLLING: Enable if message count is high
+  // Enable virtual scrolling for large message counts
   if (virtualScroller && VirtualScroller.shouldEnable(messages.length)) {
     virtualScroller.setMessages(messages);
     if (!virtualScroller.enabled) {
@@ -856,8 +798,7 @@ export function renderLog(session) {
     return;
   }
 
-  // NORMAL RENDERING: For small message counts
-  // Incremental Append
+  // Normal rendering for small message counts
   const existingCount = els.log.querySelectorAll('.msg:not(.placeholder)').length;
 
   if (existingCount < messages.length) {
@@ -876,7 +817,6 @@ export function renderLog(session) {
 
   setExportAvailability(true);
 
-  // UPDATED: Start observing the new last element
   observeLastMessage();
 }
 
@@ -935,7 +875,6 @@ export function updateLastMessageBubble(session, markdownText, { streaming = fal
 
   const body = lastMsg.querySelector('.body');
 
-  // LOADING ANIMATION: Show three dots if text is empty, otherwise show content
   const hasContent = markdownText && markdownText.trim() !== '';
   if (!hasContent) {
     const dotsHtml = '<div class="loading-dots"><span></span><span></span><span></span></div>';
@@ -953,8 +892,6 @@ export function updateLastMessageBubble(session, markdownText, { streaming = fal
     return;
   }
 
-  // NOTE: markdownToHtml() uses balanced sanitization that preserves SPA context.
-  // See utils.js for the security/UX trade-off rationale.
   const newHtml = markdownToHtml(markdownText);
   if (body.dataset.renderMode !== 'markdown' || body.innerHTML !== newHtml) {
     body.innerHTML = newHtml;
@@ -1018,8 +955,7 @@ export function renderPendingAttachments(attachments) {
   els.attachmentList.appendChild(fragment);
 }
 
-// Track which template is currently being edited
-let editingTemplateId = null;
+// Track template editing state
 let editingTemplateInputRef = null;
 let isAddingNewTemplate = false;
 
@@ -1238,33 +1174,6 @@ export function setAddingNewTemplate(adding) {
   }
 }
 
-/**
- * Get whether we're adding a new template
- * @returns {boolean}
- */
-export function isAddingTemplate() {
-  return isAddingNewTemplate;
-}
-
-/**
- * Get the editing template ID
- * @returns {string|null}
- */
-export function getEditingTemplateId() {
-  return editingTemplateId;
-}
-
-/**
- * Set the editing template ID
- * @param {string|null} id
- */
-export function setEditingTemplateId(id) {
-  editingTemplateId = id;
-  if (!id) {
-    editingTemplateInputRef = null;
-  }
-}
-
 export function setMicState(active) {
   // Centralized state: toggle on input-card container
   if (inputCardEl) inputCardEl.classList.toggle('is-recording', active);
@@ -1334,18 +1243,12 @@ export function setStopEnabled(canStop) {
   if (els.stop) els.stop.disabled = !canStop;
 }
 
-// SIMPLIFIED: Accept state as parameter instead of dynamic import
-// This eliminates circular dependency complexity
 export function restoreStopButtonState(isActive) {
   if (els.stop) els.stop.disabled = !isActive;
 }
 
 export function focusInput() {
   if (els.input) els.input.focus();
-}
-
-export function getSessionSearchValue() {
-  return els.sessionSearch?.value || '';
 }
 
 export function setLanguageSelection(lang, label) {

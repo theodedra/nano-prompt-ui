@@ -427,10 +427,6 @@ export function stopDownloadPolling() {
   downloadStatusCallback = null;
 }
 
-export function isDownloadPolling() {
-  return downloadPollTimer !== null;
-}
-
 /**
  * Get diagnostics snapshot
  * @param {{availability?: string, availabilityCheckedAt?: number}} cached - Cached values
@@ -588,10 +584,6 @@ export async function performSessionWarmup(callbacks = {}) {
   return { skipped: false, ...result };
 }
 
-export function isWarmedUp() {
-  return hasWarmedUp;
-}
-
 /**
  * Fetch image with retry and fallback strategies
  * @param {string} url - Image URL to fetch
@@ -599,7 +591,7 @@ export function isWarmedUp() {
  * @throws {Error} If image cannot be fetched
  */
 async function fetchImageWithRetry(url) {
-  // SECURITY: Validate URL before processing
+  // Validate URL before processing
   let parsedUrl;
   try {
     parsedUrl = new URL(url);
@@ -622,7 +614,6 @@ async function fetchImageWithRetry(url) {
         return await res.blob();
       }
     } finally {
-      // TIMEOUT CLEANUP FIX: Always clear timeout in finally block
       clearTimeout(timeoutId);
     }
   } catch (e) {
@@ -790,7 +781,7 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
 export async function runPrompt({ sessionId, text, contextOverride, attachments, settings }, callbacks = {}) {
   const { onChunk, onComplete, onError, onAbort } = callbacks;
 
-  // RACE CONDITION FIX: Cancel any existing generation before starting new one
+  // Cancel any existing generation before starting new one
   if (localAI.controller) {
     try {
       localAI.controller.abort();
@@ -893,7 +884,7 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
       if (onError) onError(err);
     }
   } finally {
-    // RACE CONDITION FIX: Only clear controller if it's still the active one
+    // Only clear controller if it's still the active one (avoids race conditions)
     if (localAI.controller === controller) {
       localAI.controller = null;
     }
@@ -1126,7 +1117,7 @@ export function speakText(text, callbacks = {}) {
   utterance.onerror = (event) => {
     const errorType = event.error || 'unknown';
 
-    // EXPECTED USER ACTIONS: Don't report as errors
+    // Ignore expected user actions (cancel, interrupt)
     if (SPEECH.EXPECTED_ERROR_TYPES.includes(errorType)) {
       if (onEnd) onEnd();
       return;

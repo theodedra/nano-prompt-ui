@@ -8,7 +8,7 @@
 import * as Controller from './controller.js';
 import * as Model from './model.js';
 import { fetchContext, classifyIntent } from './context.js';
-import { debounce } from './utils.js';
+import { debounce, getSnapshotHost, clampLabel } from './utils.js';
 import {
   TIMING,
   LIMITS,
@@ -70,19 +70,6 @@ function ensureTabContextSync() {
     if (tab?.active && info.status === 'complete') debouncedUpdate();
   });
   tabListenersAttached = true;
-}
-
-function getSnapshotHost(url = '') {
-  try {
-    return url ? new URL(url).hostname : '';
-  } catch {
-    return '';
-  }
-}
-
-function clampLabel(text = '', max = 80) {
-  if (!text) return 'Saved page';
-  return text.length > max ? text.slice(0, max - 1) + '...' : text;
 }
 
 function getSessionMarkdown(sessionId) {
@@ -483,14 +470,6 @@ async function saveInlineRename(id, newTitle) {
     // Empty title - just re-render without saving
     Controller.renderSessionsList();
   }
-}
-
-/**
- * Get the current editing session ID
- * @returns {string|null}
- */
-export function getEditingSessionId() {
-  return editingSessionId;
 }
 
 /**
@@ -921,15 +900,6 @@ export async function handleTemplateEditKeyDown(event) {
  */
 export function isTemplateEditingActive() {
   return editingTemplateId !== null || isAddingTemplate;
-}
-
-/**
- * Handle template selection from dropdown (legacy - replaced by handleTemplateMenuClick)
- * @param {MouseEvent} event - Click event
- */
-export function handleTemplateSelect(event) {
-  // Delegate to the new unified handler
-  handleTemplateMenuClick(event);
 }
 
 /**

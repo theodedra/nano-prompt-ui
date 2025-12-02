@@ -1,6 +1,7 @@
 // toast.js - Toast notification system for user feedback
 
 import { TIMING } from './constants.js';
+import { escapeHtml } from './utils.js';
 
 /**
  * Toast notification types
@@ -78,20 +79,6 @@ function getIconForType(type) {
   };
 
   return icons[type] || icons.info;
-}
-
-/**
- * Escape HTML to prevent XSS in toast messages
- * @param {string} unsafe
- * @returns {string}
- */
-function escapeHtml(unsafe) {
-  return String(unsafe)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
 }
 
 /**

@@ -66,63 +66,6 @@ export function estimateTokens(text) {
 }
 
 /**
- * Estimate tokens for an array of messages
- * @param {Array<{role: string, text: string}>} messages - Conversation messages
- * @returns {number} Total estimated tokens
- */
-export function estimateMessagesTokens(messages) {
-  if (!messages || !messages.length) return 0;
-  return messages.reduce((sum, msg) => sum + estimateTokens(msg.text || ''), 0);
-}
-
-/**
- * Apply sliding window to conversation history based on token budget
- * Keeps most recent messages that fit within the budget.
- * Always includes the first message for context if space allows.
- * @param {Array<{role: string, text: string}>} messages - Full conversation history
- * @param {number} tokenBudget - Maximum tokens for history
- * @returns {{messages: Array, tokens: number, trimmed: number}}
- */
-export function applySlidingWindow(messages, tokenBudget = LIMITS.HISTORY_BUDGET) {
-  if (!messages || !messages.length) {
-    return { messages: [], tokens: 0, trimmed: 0 };
-  }
-
-  const totalTokens = estimateMessagesTokens(messages);
-  if (totalTokens <= tokenBudget) {
-    return { messages, tokens: totalTokens, trimmed: 0 };
-  }
-
-  const result = [];
-  let usedTokens = 0;
-  let trimmed = 0;
-
-  // Reserve space for first message if we have room (provides initial context)
-  const firstMsgTokens = estimateTokens(messages[0]?.text || '');
-  const reserveFirst = firstMsgTokens < tokenBudget * 0.15; // Only if <15% of budget
-  const effectiveBudget = reserveFirst ? tokenBudget - firstMsgTokens : tokenBudget;
-
-  for (let i = messages.length - 1; i >= (reserveFirst ? 1 : 0); i--) {
-    const msg = messages[i];
-    const msgTokens = estimateTokens(msg.text || '');
-
-    if (usedTokens + msgTokens <= effectiveBudget) {
-      result.unshift(msg);
-      usedTokens += msgTokens;
-    } else {
-      trimmed++;
-    }
-  }
-
-  if (reserveFirst && messages.length > 0) {
-    result.unshift(messages[0]);
-    usedTokens += firstMsgTokens;
-  }
-
-  return { messages: result, tokens: usedTokens, trimmed };
-}
-
-/**
  * Apply global context limits in one place (sanitize + truncate)
  * @param {string} text - Raw context text
  * @returns {string} Safe, capped text
@@ -274,14 +217,6 @@ async function sendMessageWithFallback(tabId) {
 }
 
 /**
- * Get the currently cached context without fetching
- * @returns {{text: string, ts: number, tabId: number|null, isRestricted: boolean}}
- */
-export function getCachedContext() {
-  return cachedContext;
-}
-
-/**
  * Build the final prompt with context, attachments, and system rules
  * Uses cached headers and efficient string building to reduce churn.
  * @param {string} userText - User's query
@@ -364,54 +299,3 @@ export async function buildPromptWithContext(userText, contextOverride = '', att
   return { prompt, tokenEstimate: totalTokens };
 }
 
-/**
- * Format conversation history for inclusion in prompts
- * Applies sliding window and formats messages efficiently.
- * @param {Array<{role: string, text: string}>} messages - Full conversation history
- * @param {number} tokenBudget - Max tokens for history (uses LIMITS.HISTORY_BUDGET by default)
- * @returns {{formatted: string, tokens: number, trimmed: number, included: number}}
- */
-export function formatConversationHistory(messages, tokenBudget = LIMITS.HISTORY_BUDGET) {
-  if (!messages || !messages.length) {
-    return { formatted: '', tokens: 0, trimmed: 0, included: 0 };
-  }
-
-  const { messages: windowedMsgs, tokens, trimmed } = applySlidingWindow(messages, tokenBudget);
-
-  if (!windowedMsgs.length) {
-    return { formatted: '', tokens: 0, trimmed: messages.length, included: 0 };
-  }
-
-  // Efficient formatting: pre-calculate size and build in one pass
-  const formattedParts = new Array(windowedMsgs.length);
-
-  for (let i = 0; i < windowedMsgs.length; i++) {
-    const msg = windowedMsgs[i];
-    const role = msg.role === 'user' ? 'User' : 'Assistant';
-    formattedParts[i] = `${role}: ${msg.text}`;
-  }
-
-  const formatted = formattedParts.join('\n\n');
-
-  return {
-    formatted,
-    tokens,
-    trimmed,
-    included: windowedMsgs.length
-  };
-}
-
-/**
- * Get current token budget status for debugging/UI
- * @returns {{context: number, history: number, query: number, total: number}}
- */
-export function getTokenBudgets() {
-  return {
-    context: LIMITS.CONTEXT_BUDGET,
-    history: LIMITS.HISTORY_BUDGET,
-    query: LIMITS.USER_QUERY_BUDGET,
-    attachment: LIMITS.ATTACHMENT_BUDGET,
-    system: LIMITS.SYSTEM_PROMPT_BUDGET,
-    total: LIMITS.TOTAL_TOKEN_BUDGET
-  };
-}

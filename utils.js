@@ -1,6 +1,6 @@
 // utils.js - General utility functions
 
-import { VALIDATION, LIMITS } from './constants.js';
+import { VALIDATION } from './constants.js';
 
 /**
  * Query selector helper
@@ -135,49 +135,6 @@ export function nanoid(size = 10) {
 }
 
 /**
- * Resize image file to max width while maintaining aspect ratio
- * @param {File} file - Image file to resize
- * @param {number} maxWidth - Maximum width in pixels
- * @returns {Promise<string>} Base64 encoded image data URL
- */
-export function resizeImage(file, maxWidth = LIMITS.IMAGE_DEFAULT_MAX_WIDTH) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-        if (width > maxWidth) {
-          height = Math.round(height * (maxWidth / width));
-          width = maxWidth;
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.7));
-      };
-      img.onerror = reject;
-      img.src = e.target.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-/**
- * Convert data URL to Blob for AI model input
- * @param {string} dataUrl - Data URL string
- * @returns {Promise<Blob>} Image blob
- */
-export async function dataUrlToBlob(dataUrl) {
-  const res = await fetch(dataUrl);
-  return await res.blob();
-}
-
-/**
  * PRODUCTION READY MARKDOWN SANITIZER
  * Convert markdown to HTML with strict sanitization
  * @param {string} md - Markdown text
@@ -218,12 +175,36 @@ export function markdownToHtml(md) {
  * @returns {string} Escaped HTML
  */
 export function escapeHtml(unsafe) {
-  return unsafe
+  return String(unsafe)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+/**
+ * Extract hostname from URL
+ * @param {string} url - URL string
+ * @returns {string} Hostname or empty string
+ */
+export function getSnapshotHost(url = '') {
+  try {
+    return url ? new URL(url).hostname : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Clamp text to a maximum length with ellipsis
+ * @param {string} text - Text to clamp
+ * @param {number} max - Maximum length
+ * @returns {string} Clamped text
+ */
+export function clampLabel(text = '', max = 80) {
+  if (!text) return 'Saved page';
+  return text.length > max ? text.slice(0, max - 1) + '...' : text;
 }
 
 /**

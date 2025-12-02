@@ -17,9 +17,6 @@ export const TIMING = {
   DELETE_CONFIRM_TIMEOUT_MS: 3_000,
   MIC_SETUP_DELAY_MS: 500, // Delay before auto-triggering mic on setup
 
-  // Model warmup
-  WARMUP_DELAY_MS: 0, // Delay before model warmup (0 = immediate)
-
   // Storage persistence
   SAVE_STATE_DEBOUNCE_MS: 500 // Debounce for IndexedDB writes to avoid thrash
 };
@@ -43,8 +40,6 @@ export const LIMITS = {
 
   // Image processing
   IMAGE_MAX_WIDTH: 1_024,
-  IMAGE_MAX_WIDTH_DESCRIPTION: 512, // Smaller size for image description requests
-  IMAGE_QUALITY: 0.7, // JPEG compression quality (0-1)
   MAX_ATTACHMENTS: 3,
 
   // PDF processing
@@ -53,7 +48,6 @@ export const LIMITS = {
 
   // Storage
   MAX_SESSIONS: 100,
-  MIN_TEXT_LENGTH: 2, // Minimum text length for content scraping
 
   // Context truncation
   TRUNCATE_CLEAN_CUT_THRESHOLD: 0.8, // If period is within last 20%, cut there
@@ -229,7 +223,6 @@ export const VALIDATION = {
   // URL protocols
   ALLOWED_PAGE_PROTOCOLS: /^(https?|file):/i,
   ALLOWED_IMAGE_PROTOCOLS: ['http:', 'https:'],
-  BLOCKED_URL_SCHEMES: ['javascript:', 'data:', 'file:', 'chrome:', 'edge:', 'about:'],
 
   // Message roles
   VALID_MESSAGE_ROLES: ['user', 'ai'],
@@ -270,20 +263,7 @@ export const SPEECH = {
   LANGUAGE: 'en-US',
 
   // Error types that are expected user actions (don't log as errors)
-  EXPECTED_ERROR_TYPES: ['canceled', 'interrupted'],
-
-  // Actual error types to log
-  ACTUAL_ERROR_TYPES: [
-    'audio-busy',
-    'audio-hardware',
-    'network',
-    'synthesis-unavailable',
-    'synthesis-failed',
-    'language-unavailable',
-    'voice-unavailable',
-    'text-too-long',
-    'invalid-argument'
-  ]
+  EXPECTED_ERROR_TYPES: ['canceled', 'interrupted']
 };
 
 // ============================================================================
@@ -384,13 +364,3 @@ export const USER_ERROR_MESSAGES = {
   GENERIC_ERROR: 'Something went wrong. Please try again.'
 };
 
-// ============================================================================
-// CONSOLE LOG PREFIXES (for easy filtering)
-// ============================================================================
-
-export const LOG_PREFIX = {
-  INFO: 'Nano Prompt:',
-  WARN: 'Nano Prompt [WARN]:',
-  ERROR: 'Nano Prompt [ERROR]:',
-  DEBUG: 'Nano Prompt [DEBUG]:'
-};

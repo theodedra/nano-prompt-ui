@@ -1,7 +1,7 @@
 // pdf.js - PDF text extraction using Mozilla's pdf.js library (local)
 // This module handles PDF file processing for attachment support
 
-import { LIMITS, validateAttachment } from './constants.js';
+import { LIMITS } from './constants.js';
 
 const PDF_CHAR_SAFETY_MARGIN = 2_000;
 
@@ -190,43 +190,3 @@ async function loadPdfJs() {
   });
 }
 
-/**
- * Check if a file is a PDF (delegates to centralized validation)
- * @param {File} file - File to check
- * @returns {boolean} True if PDF
- */
-export function isPdfFile(file) {
-  const result = validateAttachment(file);
-  return result.valid && result.fileType === 'pdf';
-}
-
-/**
- * Create a preview/summary of PDF metadata
- * @param {File} file - PDF file
- * @returns {Promise<string>} PDF summary
- */
-export async function getPdfSummary(file) {
-  try {
-    if (!window.pdfjsLib) {
-      await loadPdfJs();
-    }
-
-    const arrayBuffer = await file.arrayBuffer();
-    const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer });
-    const pdf = await loadingTask.promise;
-
-    const metadata = await pdf.getMetadata().catch(() => null);
-
-    let summary = `PDF: ${file.name}\n`;
-    summary += `Pages: ${pdf.numPages}\n`;
-
-    if (metadata?.info) {
-      if (metadata.info.Title) summary += `Title: ${metadata.info.Title}\n`;
-      if (metadata.info.Author) summary += `Author: ${metadata.info.Author}\n`;
-    }
-
-    return summary;
-  } catch (error) {
-    return `PDF: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
-  }
-}
