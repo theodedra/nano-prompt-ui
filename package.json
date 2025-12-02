@@ -1,0 +1,16 @@
+{
+  "name": "nano-prompt-ui",
+  "version": "1.2.0",
+  "description": "Side Panel UI for Chrome's on-device Prompt API (Gemini Nano)",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "globals": "^15.9.0"
+  }
+}
+

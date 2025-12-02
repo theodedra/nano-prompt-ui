@@ -23,20 +23,20 @@ export { BLANK_TEMPLATE_ID, DEFAULT_TEMPLATES };
  * Application state object (internal - use getter/setter API below)
  */
 const appState = {
-  sessions: {},           // Loaded sessions (full data)
-  sessionMeta: {},        // Session metadata only (id, title, timestamp)
+  sessions: {}, // Loaded sessions (full data)
+  sessionMeta: {}, // Session metadata only (id, title, timestamp)
   sessionOrder: [],
   currentSessionId: null,
   templates: DEFAULT_TEMPLATES.slice(),
   pendingAttachments: [], // Attachments queued for the next message only
   contextDraft: '',
-  contextSnapshots: [],   // Saved page contexts
+  contextSnapshots: [], // Saved page contexts
   activeSnapshotId: null, // Currently applied snapshot id
   availability: 'unknown',
   availabilityCheckedAt: null,
   settings: { ...DEFAULT_SETTINGS },
   model: null,
-  lazyLoadEnabled: true   // Enable lazy loading when MAX_SESSIONS is high
+  lazyLoadEnabled: true // Enable lazy loading when MAX_SESSIONS is high
 };
 
 // ============================================================================
@@ -102,7 +102,7 @@ export function addTemplate(label, text) {
 export function updateTemplate(id, patch) {
   const template = appState.templates.find(t => t.id === id);
   if (!template) return false;
-  
+
   if (typeof patch.label === 'string') {
     template.label = patch.label.trim() || template.label;
   }
@@ -120,7 +120,7 @@ export function updateTemplate(id, patch) {
 export function deleteTemplate(id) {
   // Don't allow deleting the blank template
   if (id === BLANK_TEMPLATE_ID) return false;
-  
+
   const before = appState.templates.length;
   appState.templates = appState.templates.filter(t => t.id !== id);
   return appState.templates.length < before;
@@ -185,8 +185,8 @@ export function isLazyLoadEnabled() {
 }
 
 const dirtySessions = new Set();
-const markMetaDirty = () => { metaDirty = true; };
 let metaDirty = false;
+const markMetaDirty = () => { metaDirty = true; };
 const MAX_CONTEXT_SNAPSHOTS = 15;
 
 /**
@@ -693,7 +693,7 @@ let savePromise = null;
 
 export function scheduleSaveState() {
   if (saveTimeout) return;
-  
+
   saveTimeout = setTimeout(async () => {
     saveTimeout = null;
     savePromise = saveState();

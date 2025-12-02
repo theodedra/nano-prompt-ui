@@ -1,6 +1,6 @@
 /**
  * Settings Handlers
- * 
+ *
  * Handles settings UI interactions via controller layer.
  */
 
@@ -79,15 +79,15 @@ export async function handleDiagnosticsRefresh() {
   UI.setDiagnosticsBusy('availability', true);
   try {
     UI.updateDiagnostics({ availabilityLabel: 'checking…' });
-    
+
     const result = await Model.checkAvailability({
       forceCheck: true,
       cachedAvailability: Controller.getAvailability(),
       cachedCheckedAt: Controller.getAvailabilityCheckedAt()
     });
-    
+
     Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
-    
+
     const diag = await Model.getDiagnostics({
       availability: result.status,
       availabilityCheckedAt: result.checkedAt
@@ -103,10 +103,10 @@ export async function handleWarmupClick() {
   try {
     UI.updateDiagnostics({ lastWarmupStatus: 'running' });
     const result = await Model.warmUpModel();
-    
+
     Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
     UI.updateDiagnostics(result.diag);
-    
+
     if (result.warmupStatus === 'success') {
       toast.success('Warmup completed');
     } else if (result.warmupStatus === 'awaiting-download') {
@@ -156,7 +156,7 @@ export async function handleSaveSettings() {
   Model.resetModel();
 
   UI.closeModal();
-  
+
   // Refresh availability
   const result = await Model.checkAvailability({
     forceCheck: false,
@@ -164,7 +164,7 @@ export async function handleSaveSettings() {
     cachedCheckedAt: Controller.getAvailabilityCheckedAt()
   });
   Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
-  
+
   toast.success('Settings saved');
 }
 

@@ -1,6 +1,6 @@
 /**
  * Controller Layer
- * 
+ *
  * Mediates between Model (AI), Storage, and UI layers.
  * - Model knows nothing about UI or storage
  * - UI handlers dispatch here instead of touching storage directly
@@ -59,10 +59,6 @@ import {
 import { toast } from './toast.js';
 import {
   UI_MESSAGES,
-  USER_ERROR_MESSAGES,
-  DEFAULT_SETTINGS,
-  LIMITS,
-  TIMING,
   getSettingOrDefault
 } from './constants.js';
 
@@ -149,8 +145,8 @@ export function renderSmartReplies(replies) {
 
 /**
  * Add a message to a session
- * @param {string} sessionId 
- * @param {{role: string, text: string, ts: number, attachments?: Array}} message 
+ * @param {string} sessionId
+ * @param {{role: string, text: string, ts: number, attachments?: Array}} message
  */
 export function addMessage(sessionId, message) {
   upsertMessage(sessionId, message);
@@ -278,7 +274,7 @@ export function updateAvailabilityDisplay(status, checkedAt, diag = {}) {
   const label = describeAvailability(status);
   setAvailability(status);
   setAvailabilityCheckedAt(checkedAt);
-  
+
   UI.setStatusText(label);
   UI.setHardwareStatus(`Gemini Nano: ${label}`);
   UI.updateDiagnostics({
@@ -287,7 +283,7 @@ export function updateAvailabilityDisplay(status, checkedAt, diag = {}) {
     availabilityCheckedAt: checkedAt,
     availabilityLabel: label
   });
-  
+
   return label;
 }
 
@@ -320,8 +316,8 @@ export function hasCachedAvailability() {
 
 /**
  * Update the last message bubble in the UI (streaming or final)
- * @param {string} text 
- * @param {{streaming?: boolean}} options 
+ * @param {string} text
+ * @param {{streaming?: boolean}} options
  */
 export function updateLastBubble(text, options = {}) {
   const session = getCurrentSessionSync();

@@ -9,19 +9,19 @@ export const TIMING = {
 
   // Network timeouts
   IMAGE_FETCH_TIMEOUT_MS: 5_000,
-  PANEL_READY_DELAY_MS: 1_000,        // Delay before sending queued actions to panel
+  PANEL_READY_DELAY_MS: 1_000, // Delay before sending queued actions to panel
 
   // UI feedback
   TOAST_DURATION_MS: 2_500,
   TOAST_ANIMATION_MS: 300,
   DELETE_CONFIRM_TIMEOUT_MS: 3_000,
-  MIC_SETUP_DELAY_MS: 500,            // Delay before auto-triggering mic on setup
+  MIC_SETUP_DELAY_MS: 500, // Delay before auto-triggering mic on setup
 
   // Model warmup
-  WARMUP_DELAY_MS: 0,                 // Delay before model warmup (0 = immediate)
+  WARMUP_DELAY_MS: 0, // Delay before model warmup (0 = immediate)
 
   // Storage persistence
-  SAVE_STATE_DEBOUNCE_MS: 500,        // Debounce for IndexedDB writes to avoid thrash
+  SAVE_STATE_DEBOUNCE_MS: 500 // Debounce for IndexedDB writes to avoid thrash
 };
 
 // ============================================================================
@@ -30,40 +30,40 @@ export const TIMING = {
 
 export const LIMITS = {
   // Token and context limits
-  MAX_CONTEXT_TOKENS: 3_000,          // Reserve space for system prompt + user query
-  TOKEN_TO_CHAR_RATIO: 4,             // Approximate: 1 token ≈ 4 characters
+  MAX_CONTEXT_TOKENS: 3_000, // Reserve space for system prompt + user query
+  TOKEN_TO_CHAR_RATIO: 4, // Approximate: 1 token ≈ 4 characters
 
   // Token budgets for prompt building (Gemini Nano ~32k context)
-  TOTAL_TOKEN_BUDGET: 28_000,         // Leave headroom below 32k limit
-  SYSTEM_PROMPT_BUDGET: 500,          // Budget for system prompt/rules
-  CONTEXT_BUDGET: 6_000,              // Budget for page context
-  HISTORY_BUDGET: 18_000,             // Budget for conversation history (sliding window)
-  USER_QUERY_BUDGET: 2_000,           // Budget for current user query
-  ATTACHMENT_BUDGET: 1_500,           // Budget for attachment text content
+  TOTAL_TOKEN_BUDGET: 28_000, // Leave headroom below 32k limit
+  SYSTEM_PROMPT_BUDGET: 500, // Budget for system prompt/rules
+  CONTEXT_BUDGET: 6_000, // Budget for page context
+  HISTORY_BUDGET: 18_000, // Budget for conversation history (sliding window)
+  USER_QUERY_BUDGET: 2_000, // Budget for current user query
+  ATTACHMENT_BUDGET: 1_500, // Budget for attachment text content
 
   // Image processing
   IMAGE_MAX_WIDTH: 1_024,
-  IMAGE_MAX_WIDTH_DESCRIPTION: 512,   // Smaller size for image description requests
-  IMAGE_QUALITY: 0.7,                 // JPEG compression quality (0-1)
+  IMAGE_MAX_WIDTH_DESCRIPTION: 512, // Smaller size for image description requests
+  IMAGE_QUALITY: 0.7, // JPEG compression quality (0-1)
   MAX_ATTACHMENTS: 3,
 
   // PDF processing
   PDF_MAX_PAGES: 50,
-  PDF_MAX_CHARS: 50_000,              // ~12,500 tokens
+  PDF_MAX_CHARS: 50_000, // ~12,500 tokens
 
   // Storage
   MAX_SESSIONS: 100,
-  MIN_TEXT_LENGTH: 2,                 // Minimum text length for content scraping
+  MIN_TEXT_LENGTH: 2, // Minimum text length for content scraping
 
   // Context truncation
-  TRUNCATE_CLEAN_CUT_THRESHOLD: 0.8,  // If period is within last 20%, cut there
+  TRUNCATE_CLEAN_CUT_THRESHOLD: 0.8, // If period is within last 20%, cut there
 
   // UI
-  SHORT_QUERY_THRESHOLD: 60,          // Queries under this length might not need context
+  SHORT_QUERY_THRESHOLD: 60, // Queries under this length might not need context
 
   // Title generation
   TITLE_MAX_LENGTH: 50,
-  TITLE_GENERATION_MAX_CHARS: 500,    // Max chars from conversation to use for title generation
+  TITLE_GENERATION_MAX_CHARS: 500 // Max chars from conversation to use for title generation
 };
 
 // ============================================================================
@@ -73,18 +73,18 @@ export const LIMITS = {
 export const MODEL_CONFIG = {
   expectedInputs: [
     { type: 'text', languages: ['en'] },
-    { type: 'image' }  // Multimodal support for image analysis
+    { type: 'image' } // Multimodal support for image analysis
   ],
   expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }]
 };
 
 export const DEFAULT_SETTINGS = {
-  temperature: 1.0,  // Default creativity level (0.0-2.0, 1.0 is balanced)
-  topK: 64,          // Default diversity setting (1-128, 64 is balanced)
+  temperature: 1.0, // Default creativity level (0.0-2.0, 1.0 is balanced)
+  topK: 64, // Default diversity setting (1-128, 64 is balanced)
   systemPrompt: 'You are a helpful assistant. Provide thorough, detailed responses.',
   tone: 'balanced',
-  language: 'en',    // Default language: English (en, es, ja supported)
-  theme: 'auto'      // Theme preference: 'auto' (system), 'dark', or 'light'
+  language: 'en', // Default language: English (en, es, ja supported)
+  theme: 'auto' // Theme preference: 'auto' (system), 'dark', or 'light'
 };
 
 /**
@@ -122,8 +122,8 @@ Title:`;
 // ============================================================================
 
 export const STORAGE_KEYS = {
-  SYNC: 'nanoPromptUI.settings.v1',      // Chrome sync storage for settings
-  SESSION_DRAFT: 'nanoPromptUI.draft',   // Session storage for context draft
+  SYNC: 'nanoPromptUI.settings.v1', // Chrome sync storage for settings
+  SESSION_DRAFT: 'nanoPromptUI.draft', // Session storage for context draft
   DB_NAME: 'NanoPromptDB',
   DB_VERSION: 2,
   STORES: {
@@ -173,7 +173,7 @@ export const UI_MESSAGES = {
   STOPPED: '*(stopped)*',
   TRUNCATED: '\n\n[...Content truncated due to length...]',
   SYSTEM_PAGE_AI_DISABLED: '[System Page: AI disabled for security.]',
-  RESTRICTED_PAGE: '[Error: Could not read page. Refresh the tab.]',
+  RESTRICTED_PAGE: '[Error: Could not read page. Refresh the tab.]'
 };
 
 // ============================================================================
@@ -242,7 +242,7 @@ export const VALIDATION = {
   ALLOWED_LINK_ATTRIBUTES: ['href', 'target', 'rel'],
 
   // Content type validation
-  IMAGE_CONTENT_TYPE_PREFIX: 'image/',
+  IMAGE_CONTENT_TYPE_PREFIX: 'image/'
 };
 
 // ============================================================================
@@ -252,7 +252,7 @@ export const VALIDATION = {
 export const INTENT_PATTERNS = {
   page: /summari|page|article|tab|website|context|window/,
   time: /time|date|today|now/,
-  location: /where|location|lat|long/,
+  location: /where|location|lat|long/
 };
 
 export const INTENT_TYPES = {
@@ -283,7 +283,7 @@ export const SPEECH = {
     'voice-unavailable',
     'text-too-long',
     'invalid-argument'
-  ],
+  ]
 };
 
 // ============================================================================
@@ -293,7 +293,7 @@ export const SPEECH = {
 export const ICONS = {
   MIC: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>`,
 
-  STOP: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect></svg>`,
+  STOP: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" stroke="none" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2" ry="2"></rect></svg>`
 };
 
 // ============================================================================
@@ -307,14 +307,14 @@ export const ATTACHMENT = {
     'image/jpeg',
     'image/png',
     'image/gif',
-    'image/webp',
+    'image/webp'
   ],
 
   // Maximum file sizes (in bytes)
   MAX_FILE_SIZE_MB: 10,
-  MAX_FILE_SIZE_BYTES: 10 * 1024 * 1024,  // 10 MB
-  MAX_IMAGE_SIZE_BYTES: 5 * 1024 * 1024,  // 5 MB for images
-  MAX_PDF_SIZE_BYTES: 10 * 1024 * 1024,   // 10 MB for PDFs
+  MAX_FILE_SIZE_BYTES: 10 * 1024 * 1024, // 10 MB
+  MAX_IMAGE_SIZE_BYTES: 5 * 1024 * 1024, // 5 MB for images
+  MAX_PDF_SIZE_BYTES: 10 * 1024 * 1024 // 10 MB for PDFs
 };
 
 /**
@@ -381,7 +381,7 @@ export const USER_ERROR_MESSAGES = {
   SPEECH_FAILED: 'Speech recognition failed. Please try again.',
 
   NETWORK_ERROR: 'Network error. Please check your connection.',
-  GENERIC_ERROR: 'Something went wrong. Please try again.',
+  GENERIC_ERROR: 'Something went wrong. Please try again.'
 };
 
 // ============================================================================
@@ -392,5 +392,5 @@ export const LOG_PREFIX = {
   INFO: 'Nano Prompt:',
   WARN: 'Nano Prompt [WARN]:',
   ERROR: 'Nano Prompt [ERROR]:',
-  DEBUG: 'Nano Prompt [DEBUG]:',
+  DEBUG: 'Nano Prompt [DEBUG]:'
 };

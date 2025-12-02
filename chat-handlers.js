@@ -1,6 +1,6 @@
 /**
  * Chat Handlers - UI Event Handlers
- * 
+ *
  * Handles user interactions and dispatches to controller.
  * Does NOT directly access storage or model - only through controller.
  */
@@ -219,7 +219,7 @@ export async function handleSnapshotListClick(event) {
  */
 export async function bootstrap() {
   registerContextMenuHandlers();
-  
+
   // Load state is handled by storage module import
   const { loadState, getSettings, getTemplates, getContextDraft, getPendingAttachments, BLANK_TEMPLATE_ID } = await import('./storage.js');
   await loadState();
@@ -227,11 +227,11 @@ export async function bootstrap() {
   Controller.applyTheme(getSettingOrDefault(getSettings(), 'theme'));
 
   Controller.setSessionSearchTerm(Controller.getSessionSearchTerm());
-  
+
   // Import UI for template initialization
   const UI = await import('./ui.js');
   UI.updateTemplates(getTemplates(), BLANK_TEMPLATE_ID);
-  
+
   Controller.renderSessionsList();
   Controller.setContextText(getContextDraft());
   UI.renderPendingAttachments(getPendingAttachments());
@@ -260,29 +260,29 @@ export async function bootstrap() {
 async function executePrompt(text, contextOverride, attachments, displayText = null) {
   const session = Controller.getCurrentSession();
   const settings = Controller.getSettings();
-  
+
   Controller.renderSmartReplies([]);
-  
-  const userMessage = { 
-    role: 'user', 
-    text: displayText || text, 
-    ts: Date.now(), 
-    attachments 
+
+  const userMessage = {
+    role: 'user',
+    text: displayText || text,
+    ts: Date.now(),
+    attachments
   };
   Controller.addMessage(session.id, userMessage);
   Controller.refreshLog();
-  
+
   // Set up AI message placeholder
   Controller.setBusy(true);
   Controller.setStopEnabled(true);
   Controller.setStatus('Thinking...');
-  
+
   const aiMessageIndex = session.messages.length;
   Controller.addMessage(session.id, { role: 'ai', text: '', ts: Date.now() });
   Controller.refreshLog();
-  
+
   let lastAiText = '';
-  
+
   const result = await Model.runPrompt({
     sessionId: session.id,
     text,
@@ -308,7 +308,7 @@ async function executePrompt(text, contextOverride, attachments, displayText = n
     onAbort: () => {
       const currentMessage = session.messages[aiMessageIndex];
       const currentText = currentMessage?.text || '';
-      
+
       if (currentText && currentText.trim().length > 0) {
         const stoppedText = currentText + '\n\n' + UI_MESSAGES.STOPPED;
         Controller.patchMessage(session.id, aiMessageIndex, { text: stoppedText });
@@ -319,16 +319,16 @@ async function executePrompt(text, contextOverride, attachments, displayText = n
       }
     }
   });
-  
+
   Controller.setBusy(false);
   Controller.setStopEnabled(false);
   Controller.setStatus('Ready to chat.');
   await Controller.persistState();
-  
+
   if (!result.aborted && lastAiText) {
     generateSmartRepliesBackground(session.id, userMessage.text, lastAiText, aiMessageIndex);
   }
-  
+
   if (session.messages.length === 2) {
     generateTitleBackground(session.id);
   }
@@ -339,7 +339,7 @@ async function generateSmartRepliesBackground(sessionId, userText, aiText, aiInd
     const settings = Controller.getSettings();
     const replies = await Model.generateSmartReplies(userText, aiText, settings);
     Controller.patchMessage(sessionId, aiIndex, { smartReplies: replies });
-    
+
     if (Controller.getCurrentSessionId() === sessionId) {
       Controller.renderSmartReplies(replies);
     }
@@ -354,11 +354,11 @@ async function generateTitleBackground(sessionId) {
     const session = Controller.getSession(sessionId);
     if (!session || session.messages.length < 2) return;
     if (session.title !== 'New chat' && !session.title.endsWith('copy')) return;
-    
+
     const userMsg = session.messages.find(m => m.role === 'user');
     const aiMsg = session.messages.find(m => m.role === 'ai');
     if (!userMsg || !aiMsg) return;
-    
+
     const title = await Model.generateTitle(userMsg.text, aiMsg.text);
     if (title) {
       await Controller.updateSessionTitle(sessionId, title);
@@ -387,8 +387,7 @@ export async function handleAskClick(overrideText = null) {
 
   if (text.length < LIMITS.SHORT_QUERY_THRESHOLD && intent === INTENT_TYPES.NONE) {
     contextOverride = '';
-  }
-  else if (contextOverride.includes('[System Page]')) {
+  } else if (contextOverride.includes('[System Page]')) {
      contextOverride = await refreshContextDraft(true);
      if (contextOverride.includes('[System Page]') && intent !== INTENT_TYPES.PAGE) {
        contextOverride = '';
@@ -551,7 +550,7 @@ export async function handleSessionMenuClick(event) {
       await saveInlineRename(id, newTitle);
       return;
     }
-    
+
     if (btn.dataset.action === 'cancel-rename') {
       cancelInlineRename();
       return;
@@ -564,12 +563,12 @@ export async function handleSessionMenuClick(event) {
     }
     return;
   }
-  
+
   // Don't switch session if we're currently editing
   if (editingSessionId) {
     return;
   }
-  
+
   if (row) await switchSessionHandler(row);
 }
 
@@ -581,9 +580,9 @@ export async function handleSessionMenuClick(event) {
 export async function handleRenameInputKeyDown(event) {
   const input = event.target.closest('.session-rename-input');
   if (!input) return;
-  
+
   const id = input.dataset.id;
-  
+
   if (event.key === 'Enter') {
     event.preventDefault();
     event.stopPropagation();
@@ -683,16 +682,16 @@ export async function handleLogClick(event) {
 
   const idx = btn.dataset.idx;
   const session = Controller.getCurrentSession();
-  
+
   if (btn.classList.contains('bubble-copy')) {
     const msg = session.messages[idx];
-    if(msg) {
+    if (msg) {
       await navigator.clipboard.writeText(msg.text);
       Controller.showToast('success', 'Message copied');
     }
   } else if (btn.classList.contains('speak')) {
     const msg = session.messages[idx];
-    if(msg) {
+    if (msg) {
       Model.speakText(msg.text, {
         onStart: () => Controller.setStopEnabled(true),
         onEnd: () => Controller.setStopEnabled(false),
@@ -740,12 +739,12 @@ async function cancelTemplateEdit() {
 async function saveTemplateEdit(id) {
   const UI = await import('./ui.js');
   const values = UI.getTemplateEditValues(id);
-  
+
   if (!values || !values.label) {
     Controller.showToast('error', 'Template name is required');
     return;
   }
-  
+
   const success = Controller.patchTemplate(id, values);
   if (success) {
     editingTemplateId = null;
@@ -786,12 +785,12 @@ async function startAddTemplate() {
 async function saveNewTemplate() {
   const UI = await import('./ui.js');
   const values = UI.getTemplateEditValues(null);
-  
+
   if (!values || !values.label) {
     Controller.showToast('error', 'Template name is required');
     return;
   }
-  
+
   Controller.addTemplate(values.label, values.text);
   isAddingTemplate = false;
   UI.setAddingNewTemplate(false);
@@ -816,61 +815,60 @@ async function cancelNewTemplate() {
  */
 export async function handleTemplateMenuClick(event) {
   const btn = event.target.closest('button');
-  const row = event.target.closest('.template-row');
   const input = event.target.closest('input, textarea');
-  
+
   // If clicking on an input, don't close menu
   if (input) {
     event.stopPropagation();
     return;
   }
-  
+
   if (btn) {
     const action = btn.dataset.action;
     const id = btn.dataset.id;
-    
+
     if (action === 'edit-template') {
       event.stopPropagation();
       startTemplateEdit(id);
       return;
     }
-    
+
     if (action === 'delete-template') {
       event.stopPropagation();
       await deleteTemplate(id);
       return;
     }
-    
+
     if (action === 'save-template') {
       event.stopPropagation();
       await saveTemplateEdit(id);
       return;
     }
-    
+
     if (action === 'cancel-template') {
       event.stopPropagation();
       cancelTemplateEdit();
       return;
     }
-    
+
     if (action === 'add-template') {
       event.stopPropagation();
       await startAddTemplate();
       return;
     }
-    
+
     if (action === 'save-new-template') {
       event.stopPropagation();
       await saveNewTemplate();
       return;
     }
-    
+
     if (action === 'cancel-new-template') {
       event.stopPropagation();
       await cancelNewTemplate();
       return;
     }
-    
+
     // Handle template selection (use the template)
     if (btn.classList.contains('template-select')) {
       const text = btn.dataset.text;
@@ -892,9 +890,9 @@ export async function handleTemplateMenuClick(event) {
 export async function handleTemplateEditKeyDown(event) {
   const input = event.target.closest('.template-edit-label, .template-edit-text');
   if (!input) return;
-  
+
   const id = input.dataset.id;
-  
+
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopPropagation();
@@ -904,7 +902,7 @@ export async function handleTemplateEditKeyDown(event) {
       await cancelNewTemplate();
     }
   }
-  
+
   // Only save on Enter if it's the label input (not textarea)
   if (event.key === 'Enter' && input.classList.contains('template-edit-label')) {
     event.preventDefault();
@@ -1156,7 +1154,7 @@ export async function runImageDescription(url) {
     Controller.setStatus(UI_MESSAGES.ERROR);
     Controller.showToast('error', USER_ERROR_MESSAGES.IMAGE_PROCESSING_FAILED);
     Model.resetModel(session.id);
-    
+
     Controller.addMessage(session.id, {
       role: 'ai',
       text: `**Image Error:** ${e.message}.`,
@@ -1179,9 +1177,9 @@ export async function refreshAvailability({ forceCheck = false } = {}) {
     cachedAvailability: Controller.getAvailability(),
     cachedCheckedAt: Controller.getAvailabilityCheckedAt()
   });
-  
+
   Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
-  
+
   // Update model status chip with diagnostic summary
   try {
     const modelStatus = await getModelStatusSummary(result.status);
@@ -1189,7 +1187,7 @@ export async function refreshAvailability({ forceCheck = false } = {}) {
   } catch (e) {
     console.warn('Failed to get model status summary:', e);
   }
-  
+
   return result;
 }
 

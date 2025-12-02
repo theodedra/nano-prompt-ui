@@ -1,6 +1,6 @@
 /**
  * Side Panel Entry Point
- * 
+ *
  * Wires up UI event bindings and bootstraps the application.
  */
 
@@ -18,16 +18,16 @@ function bind(selector, event, handler) {
 document.addEventListener('DOMContentLoaded', async () => {
   UI.initUI();
   await ChatHandlers.bootstrap();
-  
+
   const availabilityResult = await ChatHandlers.refreshAvailability({ forceCheck: true });
-  
+
   // Handle download states: 'after-download' OR 'downloading'
-  const needsDownload = availabilityResult?.status === 'after-download' || 
+  const needsDownload = availabilityResult?.status === 'after-download' ||
                         availabilityResult?.status === 'downloading';
-  
+
   if (needsDownload) {
     UI.setStatusText('Downloading model...');
-    
+
     performSessionWarmup().then((result) => {
       if (result.success || result.downloaded) {
         const statusEl = document.getElementById('model-status');
@@ -46,7 +46,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }).catch(() => {
       ChatHandlers.refreshAvailability({ forceCheck: true });
     });
-    
+
   } else {
     performSessionWarmup().catch(() => {});
   }
@@ -58,7 +58,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     { sel: '#copy', ev: 'click', fn: ChatHandlers.handleCopyChatClick },
     { sel: '#save-md', ev: 'click', fn: ChatHandlers.handleSaveMarkdown },
     { sel: '#log', ev: 'click', fn: ChatHandlers.handleLogClick },
-    
+
     // Dropdown Triggers (Generic)
     { sel: '#templates-trigger', ev: 'click', fn: ChatHandlers.handleTemplatesTriggerClick },
     { sel: '#templates-menu', ev: 'click', fn: ChatHandlers.handleTemplateMenuClick },
@@ -78,7 +78,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     { sel: '#mic', ev: 'click', fn: ChatHandlers.handleMicClick },
     { sel: '#speak-last', ev: 'click', fn: ChatHandlers.handleSpeakLast },
     { sel: '#stop', ev: 'click', fn: ChatHandlers.handleStopClick },
-    
+
     // Context
     { sel: '#toggle-context', ev: 'click', fn: ChatHandlers.handleToggleContext },
     { sel: '#context-text', ev: 'input', fn: ChatHandlers.handleContextInput },
@@ -99,14 +99,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Setup Guide
     { sel: '#open-setup-guide', ev: 'click', fn: SettingsHandlers.handleOpenSetupGuide },
     { sel: '#setup-guide-modal', ev: 'click', fn: ChatHandlers.handleModalClick },
-    
+
     // Model Status Chip (click to open setup guide when issues exist)
     { sel: '#model-status', ev: 'click', fn: () => UI.handleModelStatusChipClick() }
   ];
 
   // --- APPLY BINDINGS ---
   bindings.forEach(b => bind(b.sel, b.ev, b.fn));
-  
+
   // --- GLOBAL LISTENERS ---
   document.addEventListener('click', (e) => {
     ChatHandlers.handleDocumentClick(e);
@@ -117,7 +117,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('keydown', ChatHandlers.handleDocumentKeyDown, true);
   document.getElementById('session-menu')?.addEventListener('keydown', ChatHandlers.handleRenameInputKeyDown);
   document.getElementById('templates-menu')?.addEventListener('keydown', ChatHandlers.handleTemplateEditKeyDown);
-  
+
   chrome.runtime.onMessage.addListener((message) => {
     if (message.action === 'MODEL_READY') {
       console.log('Nano Prompt: Received MODEL_READY from background');

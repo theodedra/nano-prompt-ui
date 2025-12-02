@@ -23,7 +23,7 @@ function yieldToMain() {
 /**
  * Extract text content from a PDF file with chunked processing.
  * Yields to the UI between pages to prevent jank.
- * 
+ *
  * @param {File} file - PDF file object
  * @param {Object} options - Optional configuration
  * @param {function(number, number): void} [options.onProgress] - Progress callback (currentPage, totalPages)

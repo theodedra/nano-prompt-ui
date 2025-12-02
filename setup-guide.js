@@ -37,7 +37,8 @@ async function tryCreateSession(createFn) {
       session.destroy();
       return true;
     }
-  } catch (e) {
+  } catch {
+    // Session creation failed - API not fully available
   }
   return false;
 }
@@ -138,7 +139,7 @@ async function checkPromptAPI() {
 
     // Don't check multilingual support during download (would block)
     const canCheckMultilingual = isAvailable && status !== 'downloading' && status !== 'after-download';
-    
+
     return {
       available: isAvailable,
       status: actuallyWorks ? 'working' : status,
@@ -439,7 +440,7 @@ function getBrowserInfo() {
     chromeVersion,
     isChrome: chromeVersion > 0,
     meetsMinimumVersion: chromeVersion >= 128, // Minimum version for AI APIs
-    recommendedVersion: chromeVersion >= 138  // Recommended version for all features
+    recommendedVersion: chromeVersion >= 138 // Recommended version for all features
   };
 }
 
@@ -485,13 +486,13 @@ export async function getSetupStatus() {
 export async function getModelStatusSummary(availability = 'unknown') {
   const promptAPI = await checkPromptAPI();
   const browserInfo = getBrowserInfo();
-  
+
   // Determine level: ok | limited | broken
   let level = 'ok';
   let label = 'Ready';
   let tooltip = 'Gemini Nano is ready';
   let showGuideLink = false;
-  
+
   if (!browserInfo.isChrome) {
     level = 'broken';
     label = 'Unsupported';
@@ -524,7 +525,7 @@ export async function getModelStatusSummary(availability = 'unknown') {
     tooltip = `Gemini Nano ready${promptAPI.multilingual ? ' (multilingual)' : ''}`;
     showGuideLink = false;
   }
-  
+
   return {
     level,
     label,

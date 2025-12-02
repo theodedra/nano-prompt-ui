@@ -1,6 +1,6 @@
 /**
  * Context Menu Handlers
- * 
+ *
  * Handles context menu actions from background script.
  * Routes to chat-handlers for prompt execution.
  */

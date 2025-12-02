@@ -69,12 +69,12 @@ export class VirtualScroller {
    */
   updateRange() {
     const { start, end } = this.getVisibleRange(this.messages.length);
-    
+
     // Skip if range hasn't changed (common during micro-scrolls)
     if (start === this.currentRange.start && end === this.currentRange.end) {
       return;
     }
-    
+
     this.render();
   }
 

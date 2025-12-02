@@ -1,6 +1,6 @@
 /**
  * Attachment Handlers
- * 
+ *
  * Handles file attachment UI interactions via controller layer.
  */
 

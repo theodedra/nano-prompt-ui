@@ -175,5 +175,5 @@ export const toast = {
   success: (message, duration) => showToast(message, 'success', duration),
   warning: (message, duration) => showToast(message, 'warning', duration),
   error: (message, duration) => showToast(message, 'error', duration),
-  progress: (message, current, total) => showProgressToast(message, current, total),
+  progress: (message, current, total) => showProgressToast(message, current, total)
 };

@@ -239,14 +239,14 @@ export function setRestrictedState(isRestricted) {
   ];
 
   if (isRestricted) {
-    interactive.forEach(el => { if(el) el.disabled = true; });
+    interactive.forEach(el => { if (el) el.disabled = true; });
     // TAB SWITCH FIX: Don't disable stop button if something is running
     // Stop button should remain functional even on restricted pages if narration/generation is active
     if (els.input) els.input.placeholder = UI_MESSAGES.INPUT_PLACEHOLDER_DISABLED;
     setStatusText(UI_MESSAGES.SYSTEM_PAGE);
   } else {
-    interactive.forEach(el => { if(el) el.disabled = false; });
-    if(els.stop) els.stop.disabled = !isSystemBusy;
+    interactive.forEach(el => { if (el) el.disabled = false; });
+    if (els.stop) els.stop.disabled = !isSystemBusy;
     if (els.input) els.input.placeholder = UI_MESSAGES.INPUT_PLACEHOLDER;
     setStatusText(lastStatus === UI_MESSAGES.SYSTEM_PAGE ? UI_MESSAGES.READY : lastStatus);
   }
@@ -255,14 +255,14 @@ export function setRestrictedState(isRestricted) {
 export function trapFocus(e, container) {
   const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
   const focusableContent = container.querySelectorAll(focusableSelector);
-  
+
   if (focusableContent.length === 0) return false;
   const first = focusableContent[0];
   const last = focusableContent[focusableContent.length - 1];
 
-  if (e.shiftKey) { 
+  if (e.shiftKey) {
     if (document.activeElement === first) { last.focus(); e.preventDefault(); return true; }
-  } else { 
+  } else {
     if (document.activeElement === last) { first.focus(); e.preventDefault(); return true; }
   }
   return false;
@@ -275,7 +275,7 @@ export function getTrapContainer() {
 
 export function setBusy(isBusy) {
   isSystemBusy = isBusy;
-  
+
   // Centralized state: toggle on containers
   if (wrapEl) wrapEl.classList.toggle('is-busy', isBusy);
   if (chatCardEl) chatCardEl.classList.toggle('is-streaming', isBusy);
@@ -310,18 +310,18 @@ let currentModelStatus = null;
  */
 export function updateModelStatusChip(status) {
   if (!els.avail || !status) return;
-  
+
   currentModelStatus = status;
-  
+
   // Update chip text (respects busy state)
   lastStatus = status.label;
   if (!isSystemBusy) {
     els.avail.textContent = status.label;
   }
-  
+
   // Update tooltip
   els.avail.title = status.tooltip;
-  
+
   // Update data attributes for styling hooks (no colors, just structure)
   // CSS handles cursor via [data-clickable="true"] selector
   els.avail.dataset.level = status.level;
@@ -476,9 +476,9 @@ export function renderSessions({
     // Use metadata if available (lazy loading), otherwise full session
     const session = sessions[id] || sessionMeta[id];
     if (!session) return;
-    
+
     const isEditing = id === editingId;
-    
+
     const row = document.createElement('li');
     row.className = 'session-row';
     if (id === currentSessionId) row.classList.add('is-active');
@@ -487,7 +487,7 @@ export function renderSessions({
 
     const info = document.createElement('div');
     info.className = 'session-info';
-    
+
     if (isEditing) {
       // Inline rename input
       const input = document.createElement('input');
@@ -498,9 +498,9 @@ export function renderSessions({
       input.setAttribute('aria-label', 'Rename session');
       input.setAttribute('autocomplete', 'off');
       info.appendChild(input);
-      
+
       editingInputRef = input;
-      
+
       const titleDiv = document.createElement('div');
       titleDiv.className = 'session-title';
       titleDiv.textContent = session.title || 'Untitled';
@@ -511,12 +511,12 @@ export function renderSessions({
       titleDiv.textContent = session.title || 'Untitled';
       info.appendChild(titleDiv);
     }
-    
+
     row.appendChild(info);
 
     const actions = document.createElement('div');
     actions.className = isEditing ? 'session-rename-actions' : 'session-actions';
-    
+
     if (isEditing) {
       const saveBtn = document.createElement('button');
       saveBtn.className = 'action-btn save';
@@ -525,7 +525,7 @@ export function renderSessions({
       saveBtn.dataset.id = id;
       saveBtn.dataset.action = 'save-rename';
       actions.appendChild(saveBtn);
-      
+
       const cancelBtn = document.createElement('button');
       cancelBtn.className = 'action-btn cancel';
       cancelBtn.textContent = '✕';
@@ -561,7 +561,7 @@ export function renderSessions({
   });
 
   els.sessionMenu.appendChild(fragment);
-  
+
   // Focus the input after DOM is updated
   if (editingInputRef && editingId) {
     requestAnimationFrame(() => {
@@ -672,7 +672,7 @@ export function closeMenu(menuName) {
 function createMessageActions(msg, idx) {
   const actions = document.createElement('div');
   actions.className = 'copy1';
-  
+
   const copyBtn = document.createElement('button');
   copyBtn.textContent = 'Copy';
   copyBtn.dataset.idx = idx;
@@ -802,13 +802,13 @@ function createMessageElement(m, idx) {
 /**
  * Render the full chat log for a session.
  * NOT used during streaming - use updateLastMessageBubble() for that.
- * 
+ *
  * Called on:
  * - Session switch (full re-render)
  * - Initial load
  * - Message deletion/reset
  * - When virtual scroller needs full refresh
- * 
+ *
  * For virtual scrolling mode: delegates to VirtualScroller.render()
  * which uses cached nodes (no re-parsing markdown on each call).
  */
@@ -902,12 +902,12 @@ export function renderSmartReplies(replies = []) {
 /**
  * Update the last AI message bubble with new content.
  * Used for streaming updates - does NOT re-render the full log.
- * 
+ *
  * Architecture:
  * - When streaming=true: uses fast textContent path (no markdown parsing)
  * - When streaming=false: parses markdown once at completion
  * - Always finds the last node via VirtualScroller when enabled (no DOM scan)
- * 
+ *
  * @param {Object} session - Current session
  * @param {string} markdownText - Text content to display
  * @param {{streaming?: boolean}} options - If streaming, skip markdown parsing
@@ -1026,24 +1026,24 @@ let isAddingNewTemplate = false;
 export function updateTemplates(templates, blankTemplateId = null, editingId = null) {
   if (!els.templatesMenu) return;
   els.templatesMenu.innerHTML = '';
-  
+
   const fragment = document.createDocumentFragment();
-  
+
   templates.forEach(t => {
     if (blankTemplateId && t.id === blankTemplateId) return;
-    
+
     const isEditing = t.id === editingId;
-    
+
     const item = document.createElement('li');
     item.className = 'template-row';
     if (isEditing) item.classList.add('is-editing');
     item.dataset.id = t.id;
-    
+
     if (isEditing) {
       // Inline edit mode
       const editContainer = document.createElement('div');
       editContainer.className = 'template-edit-form';
-      
+
       const labelInput = document.createElement('input');
       labelInput.type = 'text';
       labelInput.className = 'template-edit-label';
@@ -1054,7 +1054,7 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
       labelInput.setAttribute('aria-label', 'Template name');
       labelInput.setAttribute('autocomplete', 'off');
       editContainer.appendChild(labelInput);
-      
+
       const textInput = document.createElement('textarea');
       textInput.className = 'template-edit-text';
       textInput.value = t.text || '';
@@ -1064,45 +1064,45 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
       textInput.setAttribute('aria-label', 'Template prompt');
       textInput.rows = 3;
       editContainer.appendChild(textInput);
-      
+
       const actions = document.createElement('div');
       actions.className = 'template-edit-actions';
-      
+
       const saveBtn = document.createElement('button');
       saveBtn.className = 'action-btn save';
       saveBtn.textContent = '✓ Save';
       saveBtn.dataset.id = t.id;
       saveBtn.dataset.action = 'save-template';
       actions.appendChild(saveBtn);
-      
+
       const cancelBtn = document.createElement('button');
       cancelBtn.className = 'action-btn cancel';
       cancelBtn.textContent = '✕ Cancel';
       cancelBtn.dataset.id = t.id;
       cancelBtn.dataset.action = 'cancel-template';
       actions.appendChild(cancelBtn);
-      
+
       editContainer.appendChild(actions);
       item.appendChild(editContainer);
-      
+
       editingTemplateInputRef = labelInput;
     } else {
       // Normal display mode
       const content = document.createElement('div');
       content.className = 'template-content';
-      
+
       const btn = document.createElement('button');
       btn.className = 'dropdown-item template-select';
       btn.textContent = t.label;
       btn.dataset.text = t.text;
       btn.dataset.id = t.id;
       content.appendChild(btn);
-      
+
       item.appendChild(content);
-      
+
       const actions = document.createElement('div');
       actions.className = 'template-actions';
-      
+
       const editBtn = document.createElement('button');
       editBtn.className = 'action-btn edit';
       editBtn.textContent = '✎';
@@ -1110,7 +1110,7 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
       editBtn.dataset.id = t.id;
       editBtn.dataset.action = 'edit-template';
       actions.appendChild(editBtn);
-      
+
       const delBtn = document.createElement('button');
       delBtn.className = 'action-btn delete';
       delBtn.textContent = '✕';
@@ -1118,33 +1118,33 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
       delBtn.dataset.id = t.id;
       delBtn.dataset.action = 'delete-template';
       actions.appendChild(delBtn);
-      
+
       item.appendChild(actions);
     }
-    
+
     fragment.appendChild(item);
   });
-  
+
   if (!editingId && !isAddingNewTemplate) {
     const addRow = document.createElement('li');
     addRow.className = 'template-add-row';
-    
+
     const addBtn = document.createElement('button');
     addBtn.className = 'dropdown-item template-add';
     addBtn.dataset.action = 'add-template';
     addBtn.textContent = '+ Add new template';
     addRow.appendChild(addBtn);
-    
+
     fragment.appendChild(addRow);
   }
-  
+
   if (isAddingNewTemplate) {
     const addFormRow = document.createElement('li');
     addFormRow.className = 'template-row is-editing new-template';
-    
+
     const editContainer = document.createElement('div');
     editContainer.className = 'template-edit-form';
-    
+
     const labelInput = document.createElement('input');
     labelInput.type = 'text';
     labelInput.className = 'template-edit-label';
@@ -1154,7 +1154,7 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     labelInput.setAttribute('aria-label', 'New template name');
     labelInput.setAttribute('autocomplete', 'off');
     editContainer.appendChild(labelInput);
-    
+
     const textInput = document.createElement('textarea');
     textInput.className = 'template-edit-text';
     textInput.id = 'new-template-text';
@@ -1163,31 +1163,31 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     textInput.setAttribute('aria-label', 'New template prompt');
     textInput.rows = 3;
     editContainer.appendChild(textInput);
-    
+
     const actions = document.createElement('div');
     actions.className = 'template-edit-actions';
-    
+
     const saveBtn = document.createElement('button');
     saveBtn.className = 'action-btn save';
     saveBtn.textContent = '✓ Save';
     saveBtn.dataset.action = 'save-new-template';
     actions.appendChild(saveBtn);
-    
+
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'action-btn cancel';
     cancelBtn.textContent = '✕ Cancel';
     cancelBtn.dataset.action = 'cancel-new-template';
     actions.appendChild(cancelBtn);
-    
+
     editContainer.appendChild(actions);
     addFormRow.appendChild(editContainer);
     fragment.appendChild(addFormRow);
-    
+
     editingTemplateInputRef = labelInput;
   }
-  
+
   els.templatesMenu.appendChild(fragment);
-  
+
   // Focus the input after DOM is updated
   if (editingTemplateInputRef && (editingId || isAddingNewTemplate)) {
     requestAnimationFrame(() => {
@@ -1268,7 +1268,7 @@ export function setEditingTemplateId(id) {
 export function setMicState(active) {
   // Centralized state: toggle on input-card container
   if (inputCardEl) inputCardEl.classList.toggle('is-recording', active);
-  
+
   if (els.mic) {
     els.mic.setAttribute('aria-pressed', active ? 'true' : 'false');
     els.mic.innerHTML = active ? ICON_STOP : ICON_MIC;

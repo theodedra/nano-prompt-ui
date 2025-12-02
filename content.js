@@ -31,8 +31,8 @@ const SCRAPING_CONSTANTS = {
 // Keep in sync with LIMITS.MAX_CONTEXT_TOKENS * LIMITS.TOKEN_TO_CHAR_RATIO in constants.js (≈12k chars)
 const CONTEXT_MAX_CHARS = 12_000;
 const TREEWALKER_SAFETY_MARGIN = 2_000; // Allows slight overshoot before final clamp upstream
-const MAX_VISITED_TEXT_NODES = 8_000;    // High cap to avoid worst-case pages without trimming usable context
-const SCRAPE_CACHE_TTL_MS = 30_000;      // Cache same-page scrapes briefly to avoid repeated DOM walks
+const MAX_VISITED_TEXT_NODES = 8_000; // High cap to avoid worst-case pages without trimming usable context
+const SCRAPE_CACHE_TTL_MS = 30_000; // Cache same-page scrapes briefly to avoid repeated DOM walks
 
 let lastScrapeCache = {
   url: '',

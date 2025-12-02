@@ -4,7 +4,7 @@
 const MODEL_CONFIG = {
   expectedInputs: [
     { type: 'text', languages: ['en'] },
-    { type: 'image' }  // Multimodal support for image analysis
+    { type: 'image' } // Multimodal support for image analysis
   ],
   expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }]
 };
@@ -83,7 +83,7 @@ async function warmUpModel() {
       console.log(LOG_PREFIX.INFO, 'Model downloading/needs download. Status:', status);
       return;
     }
-    
+
     if (status === 'readily') {
       console.log(LOG_PREFIX.INFO, 'Triggering background model warmup...');
       try {
@@ -94,10 +94,10 @@ async function warmUpModel() {
             expectedOutputs: MODEL_CONFIG.expectedOutputs
         });
         session.destroy();
-        
+
         await setWarmupFlag(true);
         console.log(LOG_PREFIX.INFO, UI_MESSAGES.WARMUP_SUCCESS);
-        
+
         try {
           chrome.runtime.sendMessage({ action: 'MODEL_READY' }).catch(() => {});
         } catch (e) {
@@ -174,8 +174,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'ping') {
     sendResponse({ status: 'alive' });
-  }
-  else if (message.action === 'PANEL_READY') {
+  } else if (message.action === 'PANEL_READY') {
       if (pendingAction) {
           console.log(LOG_PREFIX.INFO, 'Sending queued action', pendingAction);
           chrome.runtime.sendMessage(pendingAction);

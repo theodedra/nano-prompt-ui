@@ -1,17 +1,16 @@
 /**
  * Model Layer - Pure AI Operations
- * 
+ *
  * This module handles all AI/LLM interactions without knowledge of UI or storage.
  * All side effects are handled via callbacks passed by the controller.
  */
 
-import { buildPromptWithContext, estimateTokens, applySlidingWindow } from './context.js';
+import { buildPromptWithContext } from './context.js';
 import { throttle } from './utils.js';
 import {
   MODEL_CONFIG,
   LIMITS,
   TIMING,
-  UI_MESSAGES,
   USER_ERROR_MESSAGES,
   VALIDATION,
   SPEECH,
@@ -134,23 +133,23 @@ class LocalAI {
     if (sessionId) {
       const session = this.sessions.get(sessionId);
       if (session) {
-        try { session.destroy(); } catch(e) {}
+        try { session.destroy(); } catch { /* Already destroyed */ }
       }
       this.sessions.delete(sessionId);
       if (this.controller) {
-        try { this.controller.abort(); } catch(e) {}
+        try { this.controller.abort(); } catch { /* Already aborted */ }
         this.controller = null;
       }
       return;
     }
 
     this.sessions.forEach((session) => {
-      try { session.destroy(); } catch(e) {}
+      try { session.destroy(); } catch { /* Already destroyed */ }
     });
     this.sessions.clear();
 
     if (this.controller) {
-      try { this.controller.abort(); } catch(e) {}
+      try { this.controller.abort(); } catch { /* Already aborted */ }
       this.controller = null;
     }
   }
@@ -179,7 +178,7 @@ class LocalAI {
         ...MODEL_CONFIG,
         systemPrompt: 'Ready'
       });
-      
+
       // Immediately destroy - we just wanted to prime the engine
       if (session?.destroy) {
         session.destroy();
@@ -240,7 +239,7 @@ async function clearPageModelSessions(sessionId = null) {
       func: (id) => {
         const store = window.__nanoPageSessions || {};
         const destroySession = (sess) => {
-          try { sess.destroy(); } catch {}
+          try { sess.destroy(); } catch { /* Ignore cleanup errors */ }
         };
 
         if (id) {
@@ -308,7 +307,7 @@ export async function checkAvailability({ forceCheck = false, cachedAvailability
 
   const hasCached = Boolean(rawStatus && rawStatus !== 'unknown' && checkedAt);
   const shouldCheck = forceCheck || !hasCached;
-  
+
   if (shouldCheck) {
     rawStatus = await localAI.getAvailability();
     checkedAt = Date.now();
@@ -328,24 +327,24 @@ export async function checkAvailability({ forceCheck = false, cachedAvailability
  */
 export function startDownloadPolling(onStatusChange) {
   stopDownloadPolling();
-  
+
   downloadStatusCallback = onStatusChange;
   let attempts = 0;
-  
+
   const poll = async () => {
     attempts++;
-    
+
     try {
       // Add timeout to availability check to prevent blocking
-      const timeoutPromise = new Promise((_, reject) => 
+      const timeoutPromise = new Promise((_, reject) =>
         setTimeout(() => reject(new Error('Availability check timeout')), 5000)
       );
-      
+
       let status = await Promise.race([
         localAI.getAvailability(),
         timeoutPromise
       ]);
-      
+
       // Chrome's availability() can be stale - if still 'after-download',
       // try creating a test session to check if model is actually ready
       if (status === 'after-download' && attempts % 3 === 0) {
@@ -369,20 +368,20 @@ export function startDownloadPolling(onStatusChange) {
           console.log('Nano Prompt: Session creation test failed, still downloading');
         }
       }
-      
+
       if (status === 'readily' || status === 'no') {
         console.log('Nano Prompt: Model download complete, status:', status);
-        
+
         // Save callback BEFORE stopping (stopDownloadPolling clears it)
         const callback = downloadStatusCallback;
         stopDownloadPolling();
-        
+
         // Also update diagnostics
         await saveDiagnosticsState({
           availability: status,
           availabilityCheckedAt: Date.now()
         });
-        
+
         // Invoke callback after diagnostics are updated
         if (callback) {
           try {
@@ -391,10 +390,10 @@ export function startDownloadPolling(onStatusChange) {
             console.warn('Nano Prompt: Status change callback error:', e);
           }
         }
-        
+
         return;
       }
-      
+
       // Still downloading - continue polling (unless we've hit max attempts)
       if (attempts < DOWNLOAD_POLL_MAX_ATTEMPTS) {
         downloadPollTimer = setTimeout(poll, DOWNLOAD_POLL_INTERVAL_MS);
@@ -412,11 +411,11 @@ export function startDownloadPolling(onStatusChange) {
       }
     }
   };
-  
+
   // Start polling immediately (don't wait for first interval)
   // Use setTimeout(0) to avoid blocking the caller
   downloadPollTimer = setTimeout(poll, 0);
-  
+
   return stopDownloadPolling;
 }
 
@@ -512,7 +511,7 @@ async function syncWarmupFlag(value) {
  */
 async function checkWarmupFlag() {
   if (hasWarmedUp) return true;
-  
+
   try {
     const result = await chrome.storage.session.get(SESSION_WARMUP_KEY);
     if (result[SESSION_WARMUP_KEY]) {
@@ -522,7 +521,7 @@ async function checkWarmupFlag() {
   } catch (e) {
     // Non-critical: fall back to in-memory flag
   }
-  
+
   return false;
 }
 
@@ -537,7 +536,7 @@ async function checkWarmupFlag() {
  */
 export async function performSessionWarmup(callbacks = {}) {
   const { onDownloadStart, onDownloadProgress, onDownloadComplete } = callbacks;
-  
+
   // Check both in-memory and session storage flags
   const alreadyWarmed = await checkWarmupFlag();
   if (alreadyWarmed) {
@@ -545,11 +544,11 @@ export async function performSessionWarmup(callbacks = {}) {
   }
 
   const availability = await localAI.getAvailability();
-  
+
   // Handle both 'after-download' and 'downloading' states
   if (availability === 'after-download' || availability === 'downloading') {
     if (onDownloadStart) onDownloadStart();
-    
+
     try {
       // Create a session - this triggers download and waits for completion
       const session = await localAI.engine.create({
@@ -561,23 +560,23 @@ export async function performSessionWarmup(callbacks = {}) {
           });
         }
       });
-      
+
       if (session?.destroy) {
         session.destroy();
       }
-      
+
       hasWarmedUp = true;
       syncWarmupFlag(true);
-      
+
       if (onDownloadComplete) onDownloadComplete();
-      
+
       return { skipped: false, success: true, downloaded: true };
-      
+
     } catch (e) {
       return { skipped: false, success: false, error: e?.message || 'Download failed' };
     }
   }
-  
+
   // Normal warmup path (model already available)
   const result = await localAI.ensureEngine();
 
@@ -757,7 +756,7 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
         const storeKey = '__nanoPageSessions';
         const store = window[storeKey] || {};
         if (uiSessionId && store[uiSessionId]) {
-          try { store[uiSessionId].destroy(); } catch {}
+          try { store[uiSessionId].destroy(); } catch { /* Ignore cleanup errors */ }
           delete store[uiSessionId];
         }
         window[storeKey] = store;
@@ -790,7 +789,7 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
  */
 export async function runPrompt({ sessionId, text, contextOverride, attachments, settings }, callbacks = {}) {
   const { onChunk, onComplete, onError, onAbort } = callbacks;
-  
+
   // RACE CONDITION FIX: Cancel any existing generation before starting new one
   if (localAI.controller) {
     try {
@@ -952,7 +951,7 @@ AI: ${aiText.slice(0, LIMITS.TITLE_GENERATION_MAX_CHARS)}`;
 
     let title = generatedTitle.trim()
       .replace(/^["']|["']$/g, '') // Remove quotes
-      .replace(/[.!?]$/, '')        // Remove ending punctuation
+      .replace(/[.!?]$/, '') // Remove ending punctuation
       .slice(0, LIMITS.TITLE_MAX_LENGTH);
 
     // Add timestamp variation to avoid duplicates
@@ -1008,7 +1007,7 @@ function buildSmartReplyPrompt(userText, aiText) {
  */
 export async function generateSmartReplies(userText, aiText, settings) {
   if (!localAI.engine) return [];
-  
+
   const prompt = buildSmartReplyPrompt(userText, aiText);
   const baseConfig = getSessionConfig(settings);
   const config = {
@@ -1023,7 +1022,7 @@ export async function generateSmartReplies(userText, aiText, settings) {
     const raw = await suggestionSession.prompt(prompt);
     return normalizeSmartReplies(raw);
   } finally {
-    try { await suggestionSession.destroy(); } catch {}
+    try { await suggestionSession.destroy(); } catch { /* Ignore cleanup errors */ }
   }
 }
 
@@ -1038,7 +1037,7 @@ export async function generateSmartReplies(userText, aiText, settings) {
  */
 export async function translateText(text, targetLang, callbacks = {}) {
   const { onStatusUpdate } = callbacks;
-  
+
   // Check if Translation API is available
   if (!self.Translator || !self.LanguageDetector) {
     throw new Error('Translation API not available. Please enable chrome://flags/#translation-api');
@@ -1047,7 +1046,7 @@ export async function translateText(text, targetLang, callbacks = {}) {
   // Step 1: Detect source language
   let sourceLang = 'en';
   if (onStatusUpdate) onStatusUpdate('Detecting language...');
-  
+
   try {
     const detectorAvailability = await self.LanguageDetector.availability();
     if (detectorAvailability !== 'no') {
@@ -1063,17 +1062,17 @@ export async function translateText(text, targetLang, callbacks = {}) {
   }
 
   if (sourceLang === targetLang) {
-    return { 
-      translatedText: text, 
-      sourceLang, 
+    return {
+      translatedText: text,
+      sourceLang,
       targetLang,
-      sameLanguage: true 
+      sameLanguage: true
     };
   }
 
   // Step 2: Check if translation is available for this language pair
   if (onStatusUpdate) onStatusUpdate('Preparing translator...');
-  
+
   const translatorAvailability = await self.Translator.availability({
     sourceLanguage: sourceLang,
     targetLanguage: targetLang
@@ -1085,7 +1084,7 @@ export async function translateText(text, targetLang, callbacks = {}) {
 
   // Step 3: Create translator and translate
   if (onStatusUpdate) onStatusUpdate('Translating...');
-  
+
   const translator = await self.Translator.create({
     sourceLanguage: sourceLang,
     targetLanguage: targetLang,
@@ -1111,7 +1110,7 @@ export async function translateText(text, targetLang, callbacks = {}) {
  */
 export function speakText(text, callbacks = {}) {
   const { onStart, onEnd, onError } = callbacks;
-  
+
   if (!('speechSynthesis' in window)) {
     if (onError) onError(new Error('Speech synthesis not supported'));
     return;
@@ -1126,7 +1125,7 @@ export function speakText(text, callbacks = {}) {
 
   utterance.onerror = (event) => {
     const errorType = event.error || 'unknown';
-    
+
     // EXPECTED USER ACTIONS: Don't report as errors
     if (SPEECH.EXPECTED_ERROR_TYPES.includes(errorType)) {
       if (onEnd) onEnd();
