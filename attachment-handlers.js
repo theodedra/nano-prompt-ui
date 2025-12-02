@@ -26,7 +26,6 @@ export function handleFileInputChange(event) {
   files.slice(0, LIMITS.MAX_ATTACHMENTS).forEach(async (file) => {
     let progressToast = null;
 
-    // Validate attachment before processing
     const validation = validateAttachment(file);
     if (!validation.valid) {
       toast.warning(validation.error);
@@ -35,7 +34,6 @@ export function handleFileInputChange(event) {
 
     try {
       if (validation.fileType === 'pdf') {
-        // Create a progress toast for PDF processing
         progressToast = toast.progress(`Processing: ${file.name}`, 0, 1);
 
         const { text: pdfText, meta: pdfMeta } = await extractPdfText(file, {
@@ -48,7 +46,6 @@ export function handleFileInputChange(event) {
           }
         });
 
-        // Dismiss progress toast before showing success
         progressToast.dismiss();
         progressToast = null;
 
@@ -73,7 +70,6 @@ export function handleFileInputChange(event) {
         toast.success('Image processed successfully');
       }
     } catch (e) {
-      // Dismiss progress toast on error
       if (progressToast) {
         progressToast.dismiss();
       }
