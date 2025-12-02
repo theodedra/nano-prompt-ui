@@ -331,7 +331,7 @@ export function updateModelStatusChip(status) {
 
 function describeAvailability(status) {
   if (status === 'readily') return UI_MESSAGES.READY;
-  if (status === 'after-download') return 'After download';
+  if (status === 'after-download' || status === 'downloading') return 'Downloading...';
   if (status === 'no') return UI_MESSAGES.PAGE_MODE;
   if (!status) return 'Unknown';
   return status;

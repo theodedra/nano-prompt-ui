@@ -57,6 +57,7 @@ async function setWarmupFlag(value) {
 /**
  * Warm up the AI model for faster first use
  * Checks shared session flag to avoid redundant warmups
+ * For 'after-download' status, triggers download with progress notification
  * @returns {Promise<void>}
  */
 async function warmUpModel() {
@@ -78,7 +79,14 @@ async function warmUpModel() {
 
     const status = typeof availabilityResult === 'object' ? availabilityResult.availability : availabilityResult;
 
-    if (status === 'after-download' || status === 'readily') {
+    if (status === 'after-download' || status === 'downloading') {
+      // Model needs download or is downloading - let sidepanel handle it
+      // Don't block here as download can take minutes
+      console.log(LOG_PREFIX.INFO, 'Model downloading/needs download. Status:', status);
+      return;
+    }
+    
+    if (status === 'readily') {
       console.log(LOG_PREFIX.INFO, 'Triggering background model warmup...');
       try {
         const session = await LanguageModel.create({
@@ -92,6 +100,13 @@ async function warmUpModel() {
         // Mark warmup complete in shared session storage
         await setWarmupFlag(true);
         console.log(LOG_PREFIX.INFO, UI_MESSAGES.WARMUP_SUCCESS);
+        
+        // Notify sidepanel that warmup is complete
+        try {
+          chrome.runtime.sendMessage({ action: 'MODEL_READY' }).catch(() => {});
+        } catch (e) {
+          // Sidepanel may not be open, that's fine
+        }
       } catch (e) {
         console.warn(LOG_PREFIX.WARN, 'Warmup failed (non-critical):', e);
       }

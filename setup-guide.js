@@ -115,10 +115,12 @@ async function checkPromptAPI() {
 
     // If status check returns 'no' or something unexpected, try to actually create a session
     // This handles cases where flag is "Enabled multilingual" or "Enabled Bypass" etc.
-    let isAvailable = status === 'readily' || status === 'after-download';
+    // Note: 'downloading' means model is being downloaded - don't try to create session (would block)
+    let isAvailable = status === 'readily' || status === 'after-download' || status === 'downloading';
     let actuallyWorks = false;
 
-    if (!isAvailable) {
+    // Only try to create a test session if status is 'no' - don't block on 'downloading'
+    if (!isAvailable && status !== 'downloading') {
       actuallyWorks = await tryCreateSession(() => LanguageModel.create({
         systemPrompt: 'test',
         temperature: 1.0,
@@ -138,6 +140,9 @@ async function checkPromptAPI() {
       message = getStatusMessage(status, actuallyWorks);
     }
 
+    // Don't check multilingual support during download (would block)
+    const canCheckMultilingual = isAvailable && status !== 'downloading' && status !== 'after-download';
+    
     return {
       available: isAvailable,
       status: actuallyWorks ? 'working' : status,
@@ -145,7 +150,7 @@ async function checkPromptAPI() {
       flag: 'chrome://flags/#prompt-api-for-gemini-nano',
       flagValue: 'Enabled, Enabled multilingual, or Enabled Bypass',
       required: true,
-      multilingual: isAvailable ? await checkMultilingualSupport() : false
+      multilingual: canCheckMultilingual ? await checkMultilingualSupport() : false
     };
   } catch (e) {
     console.error('[Setup Guide] Error checking Prompt API:', e);
@@ -514,10 +519,10 @@ export async function getModelStatusSummary(availability = 'unknown') {
     label = 'Setup needed';
     tooltip = promptAPI.message || 'Prompt API not available. Click for setup guide.';
     showGuideLink = true;
-  } else if (availability === 'after-download') {
+  } else if (availability === 'after-download' || availability === 'downloading') {
     level = 'limited';
-    label = 'Downloading';
-    tooltip = 'Model will download on first use';
+    label = 'Downloading...';
+    tooltip = 'Model is downloading. This may take a few minutes on first use.';
     showGuideLink = false;
   } else if (availability === 'no' || availability === 'unknown') {
     // API exists but availability check failed - may still work

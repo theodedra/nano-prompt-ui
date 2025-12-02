@@ -24,6 +24,8 @@ import {
 const STREAMING_THROTTLE_MS = 100;
 const DIAGNOSTICS_KEY = 'nanoPrompt.diagnostics';
 const SESSION_WARMUP_KEY = 'nanoPrompt.warmedUp';
+const DOWNLOAD_POLL_INTERVAL_MS = 2000; // Poll every 2 seconds during download
+const DOWNLOAD_POLL_MAX_ATTEMPTS = 180; // Max 6 minutes of polling
 let diagnosticsCache = null;
 const SMART_REPLY_LIMIT = 3;
 const SMART_REPLY_CONTEXT_CHARS = 600;
@@ -31,6 +33,10 @@ const SMART_REPLY_MAX_LENGTH = 120;
 
 // In-memory warmup flag - resets when Chrome restarts (sidepanel context reloads)
 let hasWarmedUp = false;
+
+// Download state tracking
+let downloadPollTimer = null;
+let downloadStatusCallback = null;
 
 // --- LOCAL AI WRAPPER ---
 /**
@@ -53,7 +59,7 @@ class LocalAI {
 
   /**
    * Check AI availability status
-   * @returns {Promise<string>} Availability status ('readily', 'after-download', 'no')
+   * @returns {Promise<string>} Availability status ('readily', 'after-download', 'downloading', 'no')
    */
   async getAvailability() {
     if (!this.engine) return 'no';
@@ -167,7 +173,7 @@ class LocalAI {
       if (availability === 'no') {
         return { success: false, error: 'AI not available' };
       }
-      if (availability === 'after-download') {
+      if (availability === 'after-download' || availability === 'downloading') {
         return { success: false, error: 'Model still downloading' };
       }
 
@@ -319,6 +325,126 @@ export async function checkAvailability({ forceCheck = false, cachedAvailability
 }
 
 /**
+ * Start polling for availability changes when status is 'after-download'
+ * @param {Function} onStatusChange - Callback when status changes
+ * @returns {Function} Stop polling function
+ */
+export function startDownloadPolling(onStatusChange) {
+  // Stop any existing polling
+  stopDownloadPolling();
+  
+  downloadStatusCallback = onStatusChange;
+  let attempts = 0;
+  
+  const poll = async () => {
+    attempts++;
+    
+    try {
+      // Add timeout to availability check to prevent blocking
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Availability check timeout')), 5000)
+      );
+      
+      let status = await Promise.race([
+        localAI.getAvailability(),
+        timeoutPromise
+      ]);
+      
+      // Chrome's availability() can be stale - if still 'after-download',
+      // try creating a test session to check if model is actually ready
+      if (status === 'after-download' && attempts % 3 === 0) {
+        try {
+          console.log('Nano Prompt: Testing if model is ready via session creation...');
+          const testSession = await Promise.race([
+            localAI.engine.create({
+              ...MODEL_CONFIG,
+              systemPrompt: 'test',
+              temperature: 1.0,
+              topK: 1
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
+          ]);
+          // If we get here, session creation succeeded - model is ready!
+          if (testSession?.destroy) testSession.destroy();
+          status = 'readily';
+          console.log('Nano Prompt: Session creation succeeded, model is ready!');
+        } catch (e) {
+          // Session creation failed or timed out - still downloading
+          console.log('Nano Prompt: Session creation test failed, still downloading');
+        }
+      }
+      
+      // If status changed from 'after-download' to something else, we're done
+      if (status === 'readily' || status === 'no') {
+        console.log('Nano Prompt: Model download complete, status:', status);
+        
+        // Save callback BEFORE stopping (stopDownloadPolling clears it)
+        const callback = downloadStatusCallback;
+        stopDownloadPolling();
+        
+        // Also update diagnostics
+        await saveDiagnosticsState({
+          availability: status,
+          availabilityCheckedAt: Date.now()
+        });
+        
+        // Invoke callback after diagnostics are updated
+        if (callback) {
+          try {
+            await callback(status);
+          } catch (e) {
+            console.warn('Nano Prompt: Status change callback error:', e);
+          }
+        }
+        
+        return;
+      }
+      
+      // Still downloading - continue polling (unless we've hit max attempts)
+      if (attempts < DOWNLOAD_POLL_MAX_ATTEMPTS) {
+        downloadPollTimer = setTimeout(poll, DOWNLOAD_POLL_INTERVAL_MS);
+      } else {
+        console.warn('Nano Prompt: Download polling timed out after', attempts, 'attempts');
+        stopDownloadPolling();
+      }
+    } catch (e) {
+      // Timeout or other error - continue polling
+      if (e.message !== 'Availability check timeout') {
+        console.warn('Nano Prompt: Download poll error:', e);
+      }
+      if (attempts < DOWNLOAD_POLL_MAX_ATTEMPTS) {
+        downloadPollTimer = setTimeout(poll, DOWNLOAD_POLL_INTERVAL_MS);
+      }
+    }
+  };
+  
+  // Start polling immediately (don't wait for first interval)
+  // Use setTimeout(0) to avoid blocking the caller
+  downloadPollTimer = setTimeout(poll, 0);
+  
+  return stopDownloadPolling;
+}
+
+/**
+ * Stop download polling
+ */
+export function stopDownloadPolling() {
+  if (downloadPollTimer) {
+    clearTimeout(downloadPollTimer);
+    downloadPollTimer = null;
+  }
+  downloadStatusCallback = null;
+}
+
+/**
+ * Check if download polling is active
+ * @returns {boolean}
+ */
+export function isDownloadPolling() {
+  return downloadPollTimer !== null;
+}
+
+/**
  * Get diagnostics snapshot
  * @param {{availability?: string, availabilityCheckedAt?: number}} cached - Cached values
  * @returns {Promise<Object>} Diagnostics payload
@@ -347,9 +473,9 @@ export async function warmUpModel() {
 
   if (!localAI.engine || availability === 'no') {
     warmupError = 'Prompt API not available in this Chrome build.';
-  } else if (availability === 'after-download') {
+  } else if (availability === 'after-download' || availability === 'downloading') {
     warmupStatus = 'awaiting-download';
-    warmupError = 'Model needs to finish downloading before warmup.';
+    warmupError = 'Model is still downloading.';
   } else {
     warmupStatus = 'success';
     try {
@@ -416,24 +542,63 @@ async function checkWarmupFlag() {
 /**
  * One-time session warmup - runs ensureEngine() on first sidepanel open
  * Skips warmup if already performed in this browser session.
- * @returns {Promise<{skipped: boolean, success?: boolean, error?: string}>}
+ * @param {Object} callbacks - Optional callbacks for status updates
+ * @param {Function} callbacks.onDownloadStart - Called when model download starts
+ * @param {Function} callbacks.onDownloadProgress - Called with download progress (0-1)
+ * @param {Function} callbacks.onDownloadComplete - Called when download completes
+ * @returns {Promise<{skipped: boolean, success?: boolean, error?: string, downloaded?: boolean}>}
  */
-export async function performSessionWarmup() {
+export async function performSessionWarmup(callbacks = {}) {
+  const { onDownloadStart, onDownloadProgress, onDownloadComplete } = callbacks;
+  
   // Check both in-memory and session storage flags
   const alreadyWarmed = await checkWarmupFlag();
   if (alreadyWarmed) {
     return { skipped: true };
   }
 
-  console.log('Nano Prompt: Performing first-open session warmup...');
+  // First check availability
+  const availability = await localAI.getAvailability();
+  
+  // Handle both 'after-download' and 'downloading' states
+  if (availability === 'after-download' || availability === 'downloading') {
+    if (onDownloadStart) onDownloadStart();
+    
+    try {
+      // Create a session - this triggers download and waits for completion
+      const session = await localAI.engine.create({
+        ...MODEL_CONFIG,
+        systemPrompt: 'Warmup',
+        monitor(m) {
+          m.addEventListener('downloadprogress', (e) => {
+            if (onDownloadProgress) onDownloadProgress(e.loaded);
+          });
+        }
+      });
+      
+      // Download complete, destroy the warmup session
+      if (session?.destroy) {
+        session.destroy();
+      }
+      
+      hasWarmedUp = true;
+      syncWarmupFlag(true);
+      
+      if (onDownloadComplete) onDownloadComplete();
+      
+      return { skipped: false, success: true, downloaded: true };
+      
+    } catch (e) {
+      return { skipped: false, success: false, error: e?.message || 'Download failed' };
+    }
+  }
+  
+  // Normal warmup path (model already available)
   const result = await localAI.ensureEngine();
 
   if (result.success) {
     hasWarmedUp = true;
     syncWarmupFlag(true);
-    console.log('Nano Prompt: Session warmup complete.');
-  } else {
-    console.warn('Nano Prompt: Session warmup skipped -', result.error);
   }
 
   return { skipped: false, ...result };

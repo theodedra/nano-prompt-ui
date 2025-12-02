@@ -17,13 +17,42 @@ function bind(selector, event, handler) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   UI.initUI();
-  
-  // Trigger one-time model warmup on first sidepanel open (non-blocking)
-  // This primes the AI engine for faster first-prompt response
-  performSessionWarmup().catch(e => console.warn('Warmup error:', e));
-  
   await ChatHandlers.bootstrap();
-  await ChatHandlers.refreshAvailability({ forceCheck: true });
+  
+  // Check availability
+  const availabilityResult = await ChatHandlers.refreshAvailability({ forceCheck: true });
+  
+  // Handle download states: 'after-download' OR 'downloading'
+  const needsDownload = availabilityResult?.status === 'after-download' || 
+                        availabilityResult?.status === 'downloading';
+  
+  if (needsDownload) {
+    UI.setStatusText('Downloading model...');
+    
+    // Start warmup which will wait for download to complete
+    performSessionWarmup().then((result) => {
+      if (result.success || result.downloaded) {
+        const statusEl = document.getElementById('model-status');
+        if (statusEl) {
+          statusEl.textContent = 'Ready';
+          statusEl.title = 'Gemini Nano ready';
+          statusEl.dataset.level = 'ok';
+          statusEl.dataset.clickable = 'false';
+        }
+        setTimeout(() => {
+          ChatHandlers.refreshAvailability({ forceCheck: true });
+        }, 1000);
+      } else {
+        ChatHandlers.refreshAvailability({ forceCheck: true });
+      }
+    }).catch(() => {
+      ChatHandlers.refreshAvailability({ forceCheck: true });
+    });
+    
+  } else {
+    // Model readily available or other status - do normal warmup
+    performSessionWarmup().catch(() => {});
+  }
 
   // --- EVENT BINDINGS ---
   const bindings = [
@@ -95,4 +124,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   
   // Handle keyboard events for template editing
   document.getElementById('templates-menu')?.addEventListener('keydown', ChatHandlers.handleTemplateEditKeyDown);
+  
+  // Listen for model status messages from background script
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.action === 'MODEL_READY') {
+      console.log('Nano Prompt: Received MODEL_READY from background');
+      // Update DOM directly first
+      const statusEl = document.getElementById('model-status');
+      if (statusEl) {
+        statusEl.textContent = 'Ready';
+        statusEl.title = 'Gemini Nano ready';
+        statusEl.dataset.level = 'ok';
+        statusEl.dataset.clickable = 'false';
+      }
+      // Refresh availability after a delay
+      setTimeout(() => {
+        ChatHandlers.refreshAvailability({ forceCheck: true });
+      }, 1000);
+    }
+  });
 });

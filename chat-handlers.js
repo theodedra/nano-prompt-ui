@@ -1180,6 +1180,7 @@ export async function runImageDescription(url) {
 /**
  * Refresh AI availability status
  * @param {{forceCheck?: boolean}} options
+ * @returns {Promise<{status: string, checkedAt: number, diag: object}>}
  */
 export async function refreshAvailability({ forceCheck = false } = {}) {
   const result = await Model.checkAvailability({
@@ -1197,5 +1198,7 @@ export async function refreshAvailability({ forceCheck = false } = {}) {
   } catch (e) {
     console.warn('Failed to get model status summary:', e);
   }
+  
+  return result;
 }
 
