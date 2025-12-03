@@ -5,7 +5,6 @@
  * - TIMING.PANEL_READY_DELAY_MS → constants.js:12
  * - UI_MESSAGES.WARMUP_SUCCESS → constants.js:160
  * - LOG_PREFIX → unique to background.js
- * - SESSION_WARMUP_KEY → unique to background.js
  */
 const MODEL_CONFIG = {
   expectedInputs: [
@@ -29,49 +28,15 @@ const UI_MESSAGES = {
   WARMUP_SUCCESS: 'Nano Prompt: Warmup successful.'
 };
 
-// Session warmup key shared with model.js for cross-context sync
-const SESSION_WARMUP_KEY = 'nanoPrompt.warmedUp';
-
 let pendingAction = null;
 
 /**
- * Check if warmup has already been performed this session
- * @returns {Promise<boolean>}
- */
-async function checkWarmupFlag() {
-  try {
-    const result = await chrome.storage.session.get(SESSION_WARMUP_KEY);
-    return Boolean(result[SESSION_WARMUP_KEY]);
-  } catch (e) {
-    return false;
-  }
-}
-
-/**
- * Set the warmup flag in session storage
- * @param {boolean} value
- */
-async function setWarmupFlag(value) {
-  try {
-    await chrome.storage.session.set({ [SESSION_WARMUP_KEY]: value });
-  } catch (e) {
-    // Non-critical
-  }
-}
-
-/**
- * Warm up the AI model for faster first use
- * Checks shared session flag to avoid redundant warmups
- * For 'after-download' status, triggers download with progress notification
+ * Warm up the AI model for faster first use.
+ * For 'after-download' status, triggers download with progress notification.
  * @returns {Promise<void>}
  */
 async function warmUpModel() {
   try {
-    if (await checkWarmupFlag()) {
-      console.log(LOG_PREFIX.INFO, 'Model already warmed up this session, skipping.');
-      return;
-    }
-
     // Check if LanguageModel API is available (global constructor in Chrome extensions)
     if (typeof LanguageModel === 'undefined') return;
 
@@ -84,9 +49,40 @@ async function warmUpModel() {
     const status = typeof availabilityResult === 'object' ? availabilityResult.availability : availabilityResult;
 
     if (status === 'after-download' || status === 'downloading') {
-      // Model needs download or is downloading - let sidepanel handle it
-      // Don't block here as download can take minutes
-      console.log(LOG_PREFIX.INFO, 'Model downloading/needs download. Status:', status);
+      console.log(LOG_PREFIX.INFO, 'Model downloading/needs download. Starting background download.', status);
+      let session;
+      try {
+        session = await LanguageModel.create({
+          ...MODEL_CONFIG,
+          systemPrompt: 'Warmup',
+          temperature: 1.0,
+          topK: 40,
+          monitor: (monitorHandle) => {
+            if (!monitorHandle?.addEventListener) return;
+            monitorHandle.addEventListener('downloadprogress', (e) => {
+              const loaded = typeof e?.loaded === 'number' ? e.loaded : 0;
+              const total = typeof e?.total === 'number' ? e.total : 1;
+              const ratio = total ? loaded / total : 0;
+              const pct = Math.min(100, Math.max(0, Math.round(ratio * 100)));
+              const text = Number.isFinite(pct) ? `${pct}%` : '';
+              chrome.action.setBadgeText({ text }).catch(() => {});
+            });
+          }
+        });
+
+        console.log(LOG_PREFIX.INFO, UI_MESSAGES.WARMUP_SUCCESS);
+
+        try {
+          chrome.runtime.sendMessage({ action: 'MODEL_READY' }).catch(() => {});
+        } catch (e) {
+          // Sidepanel may not be open, that's fine
+        }
+      } catch (e) {
+        console.warn(LOG_PREFIX.WARN, 'Background download failed (non-critical):', e);
+      } finally {
+        try { await chrome.action.setBadgeText({ text: '' }); } catch { /* ignore */ }
+        try { await session?.destroy(); } catch { /* ignore */ }
+      }
       return;
     }
 
@@ -101,7 +97,6 @@ async function warmUpModel() {
         });
         session.destroy();
 
-        await setWarmupFlag(true);
         console.log(LOG_PREFIX.INFO, UI_MESSAGES.WARMUP_SUCCESS);
 
         try {

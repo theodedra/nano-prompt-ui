@@ -7,6 +7,7 @@
 import * as Controller from '../controller/controller.js';
 import { fetchContext } from '../core/context.js';
 import { getSnapshotHost, clampLabel } from '../utils/utils.js';
+import { getContextSnapshots } from '../core/storage.js';
 
 let isSnapshotBusy = false;
 
@@ -81,7 +82,7 @@ export async function handleDeleteSnapshot(id) {
 
   if (wasActive) {
     // Get first remaining snapshot
-    const snapshots = Controller.getSession(Controller.getCurrentSessionId())?.contextSnapshots || [];
+    const snapshots = getContextSnapshots() || [];
     if (snapshots[0]) {
       await applySnapshot(snapshots[0]);
     } else {

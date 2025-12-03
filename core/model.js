@@ -1,8 +1,8 @@
 /**
  * Model Layer - Pure AI Operations
  *
- * This module handles all AI/LLM interactions without knowledge of UI or storage.
- * All side effects are handled via callbacks passed by the controller.
+ * Handles all AI/LLM interactions without UI or storage knowledge.
+ * Side effects are performed via callbacks supplied by the controller.
  */
 
 import { buildPromptWithContext } from './context.js';
@@ -22,42 +22,31 @@ import {
 
 const STREAMING_THROTTLE_MS = 100;
 const DIAGNOSTICS_KEY = 'nanoPrompt.diagnostics';
-const SESSION_WARMUP_KEY = 'nanoPrompt.warmedUp';
-const DOWNLOAD_POLL_INTERVAL_MS = 2000; // Poll every 2 seconds during download
-const DOWNLOAD_POLL_MAX_ATTEMPTS = 180; // Max 6 minutes of polling
-let diagnosticsCache = null;
 const SMART_REPLY_LIMIT = 3;
 const SMART_REPLY_CONTEXT_CHARS = 600;
 const SMART_REPLY_MAX_LENGTH = 120;
 
-// In-memory warmup flag - resets when Chrome restarts (sidepanel context reloads)
-let hasWarmedUp = false;
+let diagnosticsCache = null;
 
-// Download state tracking
-let downloadPollTimer = null;
-let downloadStatusCallback = null;
-
-// --- LOCAL AI WRAPPER ---
 /**
- * Wrapper class for Chrome's AI language model API
+ * Wrapper class for Chrome's AI language model API.
  */
 class LocalAI {
   constructor() {
     this.sessions = new Map();
     this.controller = null;
+    this.lastPrimedAt = 0;
   }
 
   get engine() {
-    // In Chrome extensions, LanguageModel is a global constructor
     if (typeof LanguageModel !== 'undefined') {
       return LanguageModel;
     }
-    // Fallback for older implementations
     return self.ai?.languageModel || self.LanguageModel;
   }
 
   /**
-   * Check AI availability status
+   * Check AI availability status.
    * @returns {Promise<string>} Availability status ('readily', 'after-download', 'downloading', 'no')
    */
   async getAvailability() {
@@ -65,12 +54,13 @@ class LocalAI {
     try {
       const status = await this.engine.availability(MODEL_CONFIG);
       return typeof status === 'object' ? status.availability : status;
-    } catch (e) { return 'no'; }
+    } catch (e) {
+      return 'no';
+    }
   }
 
   /**
-   * Create a new AI session with configuration
-   * Sessions are scoped to UI session IDs to avoid cross-chat bleed
+   * Create or reuse an AI session.
    * @param {string} sessionId - UI session ID
    * @param {object} params - Session parameters
    * @returns {Promise<object>} AI session object
@@ -79,6 +69,7 @@ class LocalAI {
     if (!sessionId) throw new Error('Missing session id');
     if (this.sessions.has(sessionId)) return this.sessions.get(sessionId);
     if (!this.engine) throw new Error('AI not supported');
+
     const config = { ...MODEL_CONFIG, ...params };
     const session = await this.engine.create(config);
     this.sessions.set(sessionId, session);
@@ -86,28 +77,18 @@ class LocalAI {
   }
 
   /**
-   * Non-streaming prompt for faster responses (used for images)
-   * @param {string} sessionId - UI session ID to route to the right LM session
-   * @param {string|Array} input - Prompt text or array with text and blobs
-   * @param {AbortSignal} signal - Abort signal for cancellation
-   * @returns {Promise<string>} Complete response text
+   * Non-streaming prompt.
    */
   async prompt(sessionId, input, signal, params = {}) {
     const session = await this.getOrCreateSession(sessionId, params);
-    return await session.prompt(input, { signal });
+    return session.prompt(input, { signal });
   }
 
   /**
-   * Stream AI response with real-time updates
-   * @param {string} sessionId - UI session ID to route to the right LM session
-   * @param {string|Array} input - Prompt text or array with text and blobs
-   * @param {AbortSignal} signal - Abort signal for cancellation
-   * @param {Function} onUpdate - Callback for each chunk
-   * @returns {Promise<string>} Complete response text
+   * Streaming prompt helper.
    */
   async promptStreaming(sessionId, input, signal, onUpdate, params = {}) {
     const session = await this.getOrCreateSession(sessionId, params);
-
     const stream = await session.promptStreaming(input, { signal });
     const reader = stream.getReader();
 
@@ -117,11 +98,10 @@ class LocalAI {
       const { value, done } = await reader.read();
       if (done) break;
       if (value) {
-        // Smart Accumulator logic
         if (fullText.length > 0 && value.startsWith(fullText)) {
-            fullText = value;
+          fullText = value;
         } else {
-            fullText += value;
+          fullText += value;
         }
         onUpdate(fullText);
       }
@@ -129,64 +109,94 @@ class LocalAI {
     return fullText;
   }
 
-    destroy(sessionId = null) {
+  destroy(sessionId = null) {
     if (sessionId) {
       const session = this.sessions.get(sessionId);
       if (session) {
-        try { session.destroy(); } catch { /* Already destroyed */ }
+        try { session.destroy(); } catch { /* ignore */ }
       }
       this.sessions.delete(sessionId);
       if (this.controller) {
-        try { this.controller.abort(); } catch { /* Already aborted */ }
+        try { this.controller.abort(); } catch { /* ignore */ }
         this.controller = null;
       }
       return;
     }
 
     this.sessions.forEach((session) => {
-      try { session.destroy(); } catch { /* Already destroyed */ }
+      try { session.destroy(); } catch { /* ignore */ }
     });
     this.sessions.clear();
 
     if (this.controller) {
-      try { this.controller.abort(); } catch { /* Already aborted */ }
+      try { this.controller.abort(); } catch { /* ignore */ }
       this.controller = null;
     }
   }
 
+  needsPriming() {
+    return Date.now() - this.lastPrimedAt > TIMING.MODEL_PRIME_TTL_MS;
+  }
+
   /**
-   * Lightweight warmup: create and immediately destroy a minimal session
-   * to prime the engine for faster first-prompt response.
-   * @returns {Promise<{success: boolean, error?: string}>}
+   * Lightweight priming pass for faster first response.
+   * @returns {Promise<boolean>} True when a priming run executed.
    */
-  async ensureEngine() {
-    if (!this.engine) {
-      return { success: false, error: 'AI engine not available' };
+  async prime() {
+    if (!this.engine || !this.needsPriming()) return false;
+
+    const availability = await this.getAvailability();
+    if (availability === 'after-download' || availability === 'downloading' || availability === 'no') {
+      return false;
     }
 
+    let session;
     try {
-      const availability = await this.getAvailability();
-      if (availability === 'no') {
-        return { success: false, error: 'AI not available' };
-      }
-      if (availability === 'after-download' || availability === 'downloading') {
-        return { success: false, error: 'Model still downloading' };
-      }
-
-      // Create minimal warmup session
-      const session = await this.engine.create({
+      session = await this.engine.create({
         ...MODEL_CONFIG,
-        systemPrompt: 'Ready'
+        systemPrompt: ' '
       });
-
-      // Immediately destroy - we just wanted to prime the engine
+      this.lastPrimedAt = Date.now();
+      return true;
+    } finally {
       if (session?.destroy) {
-        session.destroy();
+        try { await session.destroy(); } catch { /* ignore */ }
       }
+    }
+  }
 
-      return { success: true };
-    } catch (e) {
-      return { success: false, error: e?.message || 'Warmup failed' };
+  /**
+   * Ensure the model is downloaded, reporting progress when available.
+   * @param {Function} onProgress - (loaded, total) progress callback
+   * @returns {Promise<{status: string, downloaded: boolean}>}
+   */
+  async ensureModelDownloaded(onProgress) {
+    if (!this.engine) throw new Error('AI engine not available');
+
+    const availability = await this.getAvailability();
+    if (availability !== 'after-download' && availability !== 'downloading') {
+      return { status: availability, downloaded: false };
+    }
+
+    let session;
+    try {
+      session = await this.engine.create({
+        ...MODEL_CONFIG,
+        systemPrompt: ' ',
+        monitor: (monitorHandle) => {
+          if (typeof onProgress !== 'function') return;
+          monitorHandle.addEventListener('downloadprogress', (e) => {
+            const loaded = typeof e?.loaded === 'number' ? e.loaded : 0;
+            const total = typeof e?.total === 'number' ? e.total : 1;
+            onProgress(loaded, total);
+          });
+        }
+      });
+      return { status: 'readily', downloaded: true };
+    } finally {
+      if (session?.destroy) {
+        try { await session.destroy(); } catch { /* ignore */ }
+      }
     }
   }
 }
@@ -194,8 +204,7 @@ class LocalAI {
 const localAI = new LocalAI();
 
 /**
- * Load diagnostics state from storage (cached)
- * @returns {Promise<Object>} Diagnostics state
+ * Load diagnostics state from storage (cached).
  */
 async function getDiagnosticsState() {
   if (diagnosticsCache) return diagnosticsCache;
@@ -209,24 +218,19 @@ async function getDiagnosticsState() {
 }
 
 /**
- * Persist diagnostics state
- * @param {Object} partial - Partial update
- * @returns {Promise<Object>} Updated state
+ * Persist diagnostics state.
  */
 async function saveDiagnosticsState(partial = {}) {
   const current = await getDiagnosticsState();
   diagnosticsCache = { ...current, ...partial };
   try {
     await chrome.storage.local.set({ [DIAGNOSTICS_KEY]: diagnosticsCache });
-  } catch (e) {
-    // Non-critical: ignore storage errors
-  }
+  } catch (e) { /* ignore */ }
   return diagnosticsCache;
 }
 
 /**
- * Clear page-context AI sessions used by the fallback path
- * @param {string|null} sessionId - Specific UI session to clear (or all)
+ * Clear page-context AI sessions used by the fallback path.
  */
 async function clearPageModelSessions(sessionId = null) {
   try {
@@ -239,7 +243,7 @@ async function clearPageModelSessions(sessionId = null) {
       func: (id) => {
         const store = window.__nanoPageSessions || {};
         const destroySession = (sess) => {
-          try { sess.destroy(); } catch { /* Ignore cleanup errors */ }
+          try { sess.destroy(); } catch { /* ignore */ }
         };
 
         if (id) {
@@ -260,15 +264,10 @@ async function clearPageModelSessions(sessionId = null) {
 }
 
 /**
- * Get session configuration from settings
- * @param {object} settings - App settings
- * @returns {{topK: number, temperature: number, systemPrompt: string, expectedInputs: Array, expectedOutputs: Array}}
+ * Build model session config from settings.
  */
 function getSessionConfig(settings) {
   const userLanguage = getSettingOrDefault(settings, 'language');
-
-  // Gemini Nano only supports en, es, ja
-  // For other languages, fallback to English for Prompt API
   const supportedLanguages = ['en', 'es', 'ja'];
   const language = supportedLanguages.includes(userLanguage) ? userLanguage : 'en';
 
@@ -285,8 +284,7 @@ function getSessionConfig(settings) {
 }
 
 /**
- * Reset/destroy AI model session
- * @param {string|null} sessionId - Session to reset
+ * Reset/destroy AI model session(s).
  */
 export function resetModel(sessionId = null) {
   localAI.destroy(sessionId);
@@ -296,9 +294,7 @@ export function resetModel(sessionId = null) {
 }
 
 /**
- * Check AI availability and return status
- * @param {{forceCheck?: boolean, cachedAvailability?: string, cachedCheckedAt?: number}} options
- * @returns {Promise<{status: string, checkedAt: number, diag: object}>}
+ * Check AI availability and return status.
  */
 export async function checkAvailability({ forceCheck = false, cachedAvailability, cachedCheckedAt } = {}) {
   let diag = await getDiagnosticsState();
@@ -321,116 +317,7 @@ export async function checkAvailability({ forceCheck = false, cachedAvailability
 }
 
 /**
- * Start polling for availability changes when status is 'after-download'
- * @param {Function} onStatusChange - Callback when status changes
- * @returns {Function} Stop polling function
- */
-export function startDownloadPolling(onStatusChange) {
-  stopDownloadPolling();
-
-  downloadStatusCallback = onStatusChange;
-  let attempts = 0;
-
-  const poll = async () => {
-    attempts++;
-
-    try {
-      // Add timeout to availability check to prevent blocking
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Availability check timeout')), 5000)
-      );
-
-      let status = await Promise.race([
-        localAI.getAvailability(),
-        timeoutPromise
-      ]);
-
-      // Chrome's availability() can be stale - if still 'after-download',
-      // try creating a test session to check if model is actually ready
-      if (status === 'after-download' && attempts % 3 === 0) {
-        try {
-          console.log('Nano Prompt: Testing if model is ready via session creation...');
-          const testSession = await Promise.race([
-            localAI.engine.create({
-              ...MODEL_CONFIG,
-              systemPrompt: 'test',
-              temperature: 1.0,
-              topK: 1
-            }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000))
-          ]);
-          // If we get here, session creation succeeded - model is ready!
-          if (testSession?.destroy) testSession.destroy();
-          status = 'readily';
-          console.log('Nano Prompt: Session creation succeeded, model is ready!');
-        } catch (e) {
-          // Session creation failed or timed out - still downloading
-          console.log('Nano Prompt: Session creation test failed, still downloading');
-        }
-      }
-
-      if (status === 'readily' || status === 'no') {
-        console.log('Nano Prompt: Model download complete, status:', status);
-
-        // Save callback BEFORE stopping (stopDownloadPolling clears it)
-        const callback = downloadStatusCallback;
-        stopDownloadPolling();
-
-        // Also update diagnostics
-        await saveDiagnosticsState({
-          availability: status,
-          availabilityCheckedAt: Date.now()
-        });
-
-        // Invoke callback after diagnostics are updated
-        if (callback) {
-          try {
-            await callback(status);
-          } catch (e) {
-            console.warn('Nano Prompt: Status change callback error:', e);
-          }
-        }
-
-        return;
-      }
-
-      // Still downloading - continue polling (unless we've hit max attempts)
-      if (attempts < DOWNLOAD_POLL_MAX_ATTEMPTS) {
-        downloadPollTimer = setTimeout(poll, DOWNLOAD_POLL_INTERVAL_MS);
-      } else {
-        console.warn('Nano Prompt: Download polling timed out after', attempts, 'attempts');
-        stopDownloadPolling();
-      }
-    } catch (e) {
-      // Timeout or other error - continue polling
-      if (e.message !== 'Availability check timeout') {
-        console.warn('Nano Prompt: Download poll error:', e);
-      }
-      if (attempts < DOWNLOAD_POLL_MAX_ATTEMPTS) {
-        downloadPollTimer = setTimeout(poll, DOWNLOAD_POLL_INTERVAL_MS);
-      }
-    }
-  };
-
-  // Start polling immediately (don't wait for first interval)
-  // Use setTimeout(0) to avoid blocking the caller
-  downloadPollTimer = setTimeout(poll, 0);
-
-  return stopDownloadPolling;
-}
-
-export function stopDownloadPolling() {
-  if (downloadPollTimer) {
-    clearTimeout(downloadPollTimer);
-    downloadPollTimer = null;
-  }
-  downloadStatusCallback = null;
-}
-
-/**
- * Get diagnostics snapshot
- * @param {{availability?: string, availabilityCheckedAt?: number}} cached - Cached values
- * @returns {Promise<Object>} Diagnostics payload
+ * Get diagnostics snapshot.
  */
 export async function getDiagnostics(cached = {}) {
   const diag = await getDiagnosticsState();
@@ -445,8 +332,7 @@ export async function getDiagnostics(cached = {}) {
 }
 
 /**
- * Trigger an on-demand warmup and record diagnostics
- * @returns {Promise<{status: string, checkedAt: number, diag: object, warmupStatus: string, warmupError: string}>}
+ * Trigger an on-demand warmup and record diagnostics.
  */
 export async function warmUpModel() {
   const now = Date.now();
@@ -457,25 +343,22 @@ export async function warmUpModel() {
   if (!localAI.engine || availability === 'no') {
     warmupError = 'Prompt API not available in this Chrome build.';
   } else if (availability === 'after-download' || availability === 'downloading') {
-    warmupStatus = 'awaiting-download';
-    warmupError = 'Model is still downloading.';
-  } else {
-    warmupStatus = 'success';
     try {
-      const session = await localAI.engine.create({
-        ...MODEL_CONFIG,
-        systemPrompt: 'Warmup check'
-      });
-      if (session?.destroy) await session.destroy();
+      await localAI.ensureModelDownloaded();
+      await localAI.prime();
+      warmupStatus = 'success';
+    } catch (e) {
+      warmupStatus = 'awaiting-download';
+      warmupError = e?.message || 'Model is still downloading.';
+    }
+  } else {
+    try {
+      await localAI.prime();
+      warmupStatus = 'success';
     } catch (e) {
       warmupStatus = 'error';
-      warmupError = e?.message || e?.toString() || 'Warmup failed';
+      warmupError = e?.message || 'Warmup failed';
     }
-  }
-
-  if (warmupStatus === 'success') {
-    hasWarmedUp = true;
-    syncWarmupFlag(true);
   }
 
   const diag = await saveDiagnosticsState({
@@ -490,112 +373,12 @@ export async function warmUpModel() {
 }
 
 /**
- * Sync warmup flag to chrome.storage.session for cross-context sharing
- * @param {boolean} value - Warmup state to persist
- */
-async function syncWarmupFlag(value) {
-  try {
-    await chrome.storage.session.set({ [SESSION_WARMUP_KEY]: value });
-  } catch (e) {
-    // Non-critical: session storage may not be available
-  }
-}
-
-/**
- * Check if warmup has already been performed (checks storage for cross-context sync)
- * @returns {Promise<boolean>}
- */
-async function checkWarmupFlag() {
-  if (hasWarmedUp) return true;
-
-  try {
-    const result = await chrome.storage.session.get(SESSION_WARMUP_KEY);
-    if (result[SESSION_WARMUP_KEY]) {
-      hasWarmedUp = true;
-      return true;
-    }
-  } catch (e) {
-    // Non-critical: fall back to in-memory flag
-  }
-
-  return false;
-}
-
-/**
- * One-time session warmup - runs ensureEngine() on first sidepanel open
- * Skips warmup if already performed in this browser session.
- * @param {Object} callbacks - Optional callbacks for status updates
- * @param {Function} callbacks.onDownloadStart - Called when model download starts
- * @param {Function} callbacks.onDownloadProgress - Called with download progress (0-1)
- * @param {Function} callbacks.onDownloadComplete - Called when download completes
- * @returns {Promise<{skipped: boolean, success?: boolean, error?: string, downloaded?: boolean}>}
- */
-export async function performSessionWarmup(callbacks = {}) {
-  const { onDownloadStart, onDownloadProgress, onDownloadComplete } = callbacks;
-
-  // Check both in-memory and session storage flags
-  const alreadyWarmed = await checkWarmupFlag();
-  if (alreadyWarmed) {
-    return { skipped: true };
-  }
-
-  const availability = await localAI.getAvailability();
-
-  // Handle both 'after-download' and 'downloading' states
-  if (availability === 'after-download' || availability === 'downloading') {
-    if (onDownloadStart) onDownloadStart();
-
-    try {
-      // Create a session - this triggers download and waits for completion
-      const session = await localAI.engine.create({
-        ...MODEL_CONFIG,
-        systemPrompt: 'Warmup',
-        monitor(m) {
-          m.addEventListener('downloadprogress', (e) => {
-            if (onDownloadProgress) onDownloadProgress(e.loaded);
-          });
-        }
-      });
-
-      if (session?.destroy) {
-        session.destroy();
-      }
-
-      hasWarmedUp = true;
-      syncWarmupFlag(true);
-
-      if (onDownloadComplete) onDownloadComplete();
-
-      return { skipped: false, success: true, downloaded: true };
-
-    } catch (e) {
-      return { skipped: false, success: false, error: e?.message || 'Download failed' };
-    }
-  }
-
-  // Normal warmup path (model already available)
-  const result = await localAI.ensureEngine();
-
-  if (result.success) {
-    hasWarmedUp = true;
-    syncWarmupFlag(true);
-  }
-
-  return { skipped: false, ...result };
-}
-
-/**
- * Fetch image with retry and fallback strategies
- * @param {string} url - Image URL to fetch
- * @returns {Promise<Blob>} Image blob
- * @throws {Error} If image cannot be fetched
+ * Fetch image with retry and fallback strategies.
  */
 async function fetchImageWithRetry(url) {
-  // Validate URL before processing
   let parsedUrl;
   try {
     parsedUrl = new URL(url);
-    // Only allow http/https protocols
     if (!VALIDATION.ALLOWED_IMAGE_PROTOCOLS.includes(parsedUrl.protocol)) {
       throw new Error(USER_ERROR_MESSAGES.IMAGE_INVALID_URL);
     }
@@ -603,7 +386,6 @@ async function fetchImageWithRetry(url) {
     throw new Error(USER_ERROR_MESSAGES.IMAGE_INVALID_URL);
   }
 
-  // 1. Extension Fetch (Safer - no arbitrary code execution)
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), TIMING.IMAGE_FETCH_TIMEOUT_MS);
@@ -620,7 +402,6 @@ async function fetchImageWithRetry(url) {
     console.warn('Direct fetch failed:', e);
   }
 
-  // 2. Page Proxy Fetch (fallback for CORS-blocked images)
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     if (!tab || !tab.url || !/^https?:/.test(tab.url)) {
@@ -658,10 +439,7 @@ async function fetchImageWithRetry(url) {
 }
 
 /**
- * Convert blob to canvas (required for Prompt API image input)
- * @param {Blob} blob - Image blob
- * @param {number} maxWidth - Maximum width for resizing
- * @returns {Promise<HTMLCanvasElement>}
+ * Convert blob to canvas (required for Prompt API image input).
  */
 async function blobToCanvas(blob, maxWidth) {
   return new Promise((resolve, reject) => {
@@ -696,12 +474,7 @@ async function blobToCanvas(blob, maxWidth) {
 }
 
 /**
- * Fallback: Run prompt using window.ai in page context
- * @param {string} prompt - Prompt text
- * @param {string} sessionId - UI session ID for per-chat isolation
- * @param {string} systemPrompt - System prompt
- * @param {Array} attachments - Attached files
- * @returns {Promise<string>} AI response
+ * Fallback: Run prompt using window.ai in page context.
  */
 async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []) {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -733,21 +506,20 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
 
         let input = p;
         if (atts && atts.length > 0) {
-            const blobs = await Promise.all(atts.map(async (att) => {
-                const res = await fetch(att.data);
-                return await res.blob();
-            }));
-            input = [p, ...blobs];
+          const blobs = await Promise.all(atts.map(async (att) => {
+            const res = await fetch(att.data);
+            return await res.blob();
+          }));
+          input = [p, ...blobs];
         }
 
         const r = await sess.prompt(input);
         return { ok: true, data: r };
       } catch (e) {
-        // Clean up failed sessions so future calls can recreate cleanly
         const storeKey = '__nanoPageSessions';
         const store = window[storeKey] || {};
         if (uiSessionId && store[uiSessionId]) {
-          try { store[uiSessionId].destroy(); } catch { /* Ignore cleanup errors */ }
+          try { store[uiSessionId].destroy(); } catch { /* ignore */ }
           delete store[uiSessionId];
         }
         window[storeKey] = store;
@@ -764,30 +536,15 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
 }
 
 /**
- * Run AI prompt with streaming
- * @param {object} params - Prompt parameters
- * @param {string} params.sessionId - Session ID
- * @param {string} params.text - Prompt text
- * @param {string} params.contextOverride - Context override
- * @param {Array} params.attachments - Attachments
- * @param {object} params.settings - App settings
- * @param {object} callbacks - Callback functions
- * @param {Function} callbacks.onChunk - Called with each streaming chunk
- * @param {Function} callbacks.onComplete - Called when complete with final text
- * @param {Function} callbacks.onError - Called on error with error object
- * @param {Function} callbacks.onAbort - Called when generation is aborted
- * @returns {Promise<{text: string, aborted: boolean}>}
+ * Run AI prompt with streaming.
  */
 export async function runPrompt({ sessionId, text, contextOverride, attachments, settings }, callbacks = {}) {
   const { onChunk, onComplete, onError, onAbort } = callbacks;
 
-  // Cancel any existing generation before starting new one
   if (localAI.controller) {
     try {
       localAI.controller.abort();
-    } catch (e) {
-      // Ignore abort errors
-    }
+    } catch (e) { /* ignore */ }
   }
 
   const controller = new AbortController();
@@ -796,20 +553,20 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
   let generationAborted = false;
 
   try {
+    await localAI.ensureModelDownloaded().catch(() => {});
+    await localAI.prime().catch(() => {});
+
     const sessionConfig = getSessionConfig(settings);
     const { prompt: finalText, tokenEstimate } = await buildPromptWithContext(text, contextOverride, attachments);
 
-    // Log token estimate for debugging long sessions
     if (tokenEstimate > LIMITS.TOTAL_TOKEN_BUDGET * 0.8) {
       console.warn(`Nano Prompt: High token usage (${tokenEstimate}/${LIMITS.TOTAL_TOKEN_BUDGET})`);
     }
 
-    // Separate images from PDFs (PDFs are already text, included in finalText)
     const imageAttachments = attachments?.filter(att => att.type.startsWith('image/')) || [];
 
     let promptInput = finalText;
     if (imageAttachments.length > 0) {
-      // att.data is now a Blob (for IndexedDB storage), convert to canvas for Prompt API
       try {
         const canvases = await Promise.all(
           imageAttachments.map(async (att) => {
@@ -818,7 +575,6 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
           })
         );
 
-        // Prompt API multimodal format: message with role and content array
         promptInput = [{
           role: "user",
           content: [
@@ -859,13 +615,11 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
         throw new Error(USER_ERROR_MESSAGES.AI_SYSTEM_PAGE);
       }
 
-      // Try fallback for non-image prompts (images don't work in page context)
       if (imageAttachments.length === 0) {
         const fallback = await runPromptInPage(finalText, sessionId, settings.systemPrompt, attachments);
         lastAiText = fallback;
         if (onComplete) onComplete(fallback);
       } else {
-        // Image prompts failed - can't use page fallback
         console.error("Image prompt failed, cannot use fallback. Original error:", err);
         throw new Error(`Image analysis failed: ${err?.message || 'Unknown error'}`);
       }
@@ -884,7 +638,6 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
       if (onError) onError(err);
     }
   } finally {
-    // Only clear controller if it's still the active one (avoids race conditions)
     if (localAI.controller === controller) {
       localAI.controller = null;
     }
@@ -894,9 +647,7 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
 }
 
 /**
- * Run image description
- * @param {string} url - Image URL
- * @returns {Promise<Blob>} Image blob ready for prompt
+ * Run image description.
  */
 export async function fetchImage(url) {
   return await fetchImageWithRetry(url);
@@ -914,10 +665,7 @@ export function isGenerating() {
 }
 
 /**
- * Generate a title for a session based on conversation
- * @param {string} userText - First user message
- * @param {string} aiText - First AI response
- * @returns {Promise<string|null>} Generated title or null
+ * Generate a title for a session based on conversation.
  */
 export async function generateTitle(userText, aiText) {
   if (!localAI.engine) return null;
@@ -941,15 +689,13 @@ AI: ${aiText.slice(0, LIMITS.TITLE_GENERATION_MAX_CHARS)}`;
     if (!generatedTitle) return null;
 
     let title = generatedTitle.trim()
-      .replace(/^["']|["']$/g, '') // Remove quotes
-      .replace(/[.!?]$/, '') // Remove ending punctuation
+      .replace(/^["']|["']$/g, '')
+      .replace(/[.!?]$/, '')
       .slice(0, LIMITS.TITLE_MAX_LENGTH);
 
-    // Add timestamp variation to avoid duplicates
     const now = new Date();
     const timeVariation = `${now.getHours()}:${now.getMinutes().toString().padStart(2, '0')}`;
 
-    // Only add time if title is very generic or might duplicate
     const genericTerms = ['conversation', 'chat', 'question', 'help', 'discussion'];
     const isGeneric = genericTerms.some(term => title.toLowerCase().includes(term));
 
@@ -990,11 +736,7 @@ function buildSmartReplyPrompt(userText, aiText) {
 }
 
 /**
- * Generate smart reply suggestions
- * @param {string} userText - User's message
- * @param {string} aiText - AI's response
- * @param {object} settings - App settings
- * @returns {Promise<string[]>} Array of reply suggestions
+ * Generate smart reply suggestions.
  */
 export async function generateSmartReplies(userText, aiText, settings) {
   if (!localAI.engine) return [];
@@ -1013,28 +755,22 @@ export async function generateSmartReplies(userText, aiText, settings) {
     const raw = await suggestionSession.prompt(prompt);
     return normalizeSmartReplies(raw);
   } finally {
-    try { await suggestionSession.destroy(); } catch { /* Ignore cleanup errors */ }
+    try { await suggestionSession.destroy(); } catch { /* ignore */ }
   }
 }
 
 // --- TRANSLATION ---
 
 /**
- * Translate text using Chrome Translation API
- * @param {string} text - Text to translate
- * @param {string} targetLang - Target language code
- * @param {object} callbacks - Callback functions
- * @returns {Promise<{translatedText: string, sourceLang: string, usedFallback: boolean}>}
+ * Translate text using Chrome Translation API.
  */
 export async function translateText(text, targetLang, callbacks = {}) {
   const { onStatusUpdate } = callbacks;
 
-  // Check if Translation API is available
   if (!self.Translator || !self.LanguageDetector) {
     throw new Error('Translation API not available. Please enable chrome://flags/#translation-api');
   }
 
-  // Step 1: Detect source language
   let sourceLang = 'en';
   if (onStatusUpdate) onStatusUpdate('Detecting language...');
 
@@ -1061,7 +797,6 @@ export async function translateText(text, targetLang, callbacks = {}) {
     };
   }
 
-  // Step 2: Check if translation is available for this language pair
   if (onStatusUpdate) onStatusUpdate('Preparing translator...');
 
   const translatorAvailability = await self.Translator.availability({
@@ -1073,7 +808,6 @@ export async function translateText(text, targetLang, callbacks = {}) {
     throw new Error(`Translation from ${sourceLang} to ${targetLang} is not supported`);
   }
 
-  // Step 3: Create translator and translate
   if (onStatusUpdate) onStatusUpdate('Translating...');
 
   const translator = await self.Translator.create({
@@ -1094,11 +828,6 @@ export async function translateText(text, targetLang, callbacks = {}) {
 
 // --- SPEECH SYNTHESIS ---
 
-/**
- * Speak text using browser's speech synthesis
- * @param {string} text - Text to speak
- * @param {object} callbacks - Callback functions
- */
 export function speakText(text, callbacks = {}) {
   const { onStart, onEnd, onError } = callbacks;
 
@@ -1117,7 +846,6 @@ export function speakText(text, callbacks = {}) {
   utterance.onerror = (event) => {
     const errorType = event.error || 'unknown';
 
-    // Ignore expected user actions (cancel, interrupt)
     if (SPEECH.EXPECTED_ERROR_TYPES.includes(errorType)) {
       if (onEnd) onEnd();
       return;
@@ -1150,5 +878,17 @@ export function isSomethingRunning() {
   return isSpeaking() || isGenerating();
 }
 
-// --- EXPORTS FOR LANGUAGE NAMES (used by controller) ---
+// Expose language names for controller usage.
 export { LANGUAGE_NAMES };
+
+// Expose LocalAI helpers.
+export const modelClient = localAI;
+export function needsModelPriming() {
+  return localAI.needsPriming();
+}
+export function primeModel() {
+  return localAI.prime();
+}
+export function ensureModelDownloaded(onProgress) {
+  return localAI.ensureModelDownloaded(onProgress);
+}

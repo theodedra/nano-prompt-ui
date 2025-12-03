@@ -138,6 +138,16 @@ export function handleInputKeyDown(event) {
 }
 
 /**
+ * Prime the model when the input gains focus (warm VRAM cache).
+ */
+export function handleInputFocus() {
+  const primeFn = Model.prime || Model.primeModel;
+  if (typeof primeFn === 'function') {
+    primeFn().catch(() => {});
+  }
+}
+
+/**
  * Handle global keyboard shortcuts
  * @param {KeyboardEvent} event - Keyboard event
  */
@@ -254,6 +264,36 @@ export async function handleContextBlur(event) {
 }
 
 // --- AVAILABILITY (called from sidepanel.js) ---
+
+/**
+ * Deferred startup handler for tab switches or late availability checks.
+ * @returns {Promise<void>}
+ */
+export async function handleDeferredStartup() {
+  try {
+    const availability = await Model.checkAvailability({ forceCheck: true });
+
+    if (availability?.status === 'readily') {
+      const status = await getModelStatusSummary('readily');
+      Controller.updateModelStatusChip(status);
+      Controller.setStatus(UI_MESSAGES.READY);
+      return;
+    }
+
+    if (availability?.status === 'after-download') {
+      await Model.ensureModelDownloaded((loaded, total) => {
+        const ratio = total ? loaded / total : 0;
+        const percent = Math.min(100, Math.max(0, Math.round(ratio * 100)));
+        Controller.setStatus(`Downloading model... ${percent}%`);
+      });
+      const status = await getModelStatusSummary('readily');
+      Controller.updateModelStatusChip(status);
+      Controller.setStatus(UI_MESSAGES.READY);
+    }
+  } catch (e) {
+    console.warn('Deferred startup failed', e);
+  }
+}
 
 /**
  * Refresh AI availability status

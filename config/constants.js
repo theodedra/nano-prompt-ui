@@ -5,6 +5,7 @@
 export const TIMING = {
   // Context caching and refresh
   CONTEXT_CACHE_MS: 15_000,
+  MODEL_PRIME_TTL_MS: 60_000, // How long the model stays warmed up
   TAB_UPDATE_DEBOUNCE_MS: 300,
 
   // Network timeouts
@@ -362,4 +363,3 @@ export const USER_ERROR_MESSAGES = {
   NETWORK_ERROR: 'Network error. Please check your connection.',
   GENERIC_ERROR: 'Something went wrong. Please try again.'
 };
-

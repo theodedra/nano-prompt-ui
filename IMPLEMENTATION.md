@@ -17,11 +17,10 @@ Complete technical documentation for NanoPromptUI Chrome extension features and 
 9. [Lazy Session Loading](#lazy-session-loading)
 10. [Storage Architecture](#storage-architecture)
 11. [Smart Replies](#smart-replies)
-12. [Session Warmup](#session-warmup)
-13. [Context Snapshots](#context-snapshots)
-14. [Speech Synthesis](#speech-synthesis)
-15. [Setup Guide](#setup-guide)
-16. [HTML Sanitization Trade-offs](#html-sanitization-trade-offs)
+12. [Context Snapshots](#context-snapshots)
+13. [Speech Synthesis](#speech-synthesis)
+14. [Setup Guide](#setup-guide)
+15. [HTML Sanitization Trade-offs](#html-sanitization-trade-offs)
 
 ---
 
@@ -764,37 +763,6 @@ export async function generateSmartReplies(userText, aiText, settings) {
   
   const raw = await suggestionSession.prompt(prompt);
   return normalizeSmartReplies(raw); // Parse, filter, truncate
-}
-```
-
----
-
-## Session Warmup
-
-### Overview
-
-Pre-warms the AI engine on first sidepanel open for faster first response.
-
-**File:** `core/model.js`
-
-### Flow
-
-1. Check in-memory flag (`hasWarmedUp`) and session storage
-2. If not warmed up, create minimal session and immediately destroy
-3. Mark warmed up in both memory and `chrome.storage.session`
-4. Warmup persists across sidepanel reopens within same browser session
-
-```javascript
-export async function performSessionWarmup() {
-  const alreadyWarmed = await checkWarmupFlag();
-  if (alreadyWarmed) return { skipped: true };
-
-  const result = await localAI.ensureEngine();
-  if (result.success) {
-    hasWarmedUp = true;
-    syncWarmupFlag(true);
-  }
-  return { skipped: false, ...result };
 }
 ```
 

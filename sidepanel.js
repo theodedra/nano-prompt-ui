@@ -8,48 +8,15 @@ import * as UI from './ui/index.js';
 import * as ChatHandlers from './handlers/chat-handlers.js';
 import * as AttachmentHandlers from './handlers/attachment-handlers.js';
 import * as SettingsHandlers from './handlers/settings-handlers.js';
-import { performSessionWarmup } from './core/model.js';
 
 function bind(selector, event, handler) {
   const el = document.querySelector(selector);
   if (el) el.addEventListener(event, handler);
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
+document.addEventListener('DOMContentLoaded', () => {
   UI.initUI();
-  await ChatHandlers.bootstrap();
-
-  const availabilityResult = await ChatHandlers.refreshAvailability({ forceCheck: true });
-
-  // Handle download states: 'after-download' OR 'downloading'
-  const needsDownload = availabilityResult?.status === 'after-download' ||
-                        availabilityResult?.status === 'downloading';
-
-  if (needsDownload) {
-    UI.setStatusText('Downloading model...');
-
-    performSessionWarmup().then((result) => {
-      if (result.success || result.downloaded) {
-        const statusEl = document.getElementById('model-status');
-        if (statusEl) {
-          statusEl.textContent = 'Ready';
-          statusEl.title = 'Gemini Nano ready';
-          statusEl.dataset.level = 'ok';
-          statusEl.dataset.clickable = 'false';
-        }
-        setTimeout(() => {
-          ChatHandlers.refreshAvailability({ forceCheck: true });
-        }, 1000);
-      } else {
-        ChatHandlers.refreshAvailability({ forceCheck: true });
-      }
-    }).catch(() => {
-      ChatHandlers.refreshAvailability({ forceCheck: true });
-    });
-
-  } else {
-    performSessionWarmup().catch(() => {});
-  }
+  ChatHandlers.bootstrap().catch(err => console.error('Bootstrap failed', err));
 
   // --- EVENT BINDINGS ---
   const bindings = [
@@ -78,6 +45,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     { sel: '#mic', ev: 'click', fn: ChatHandlers.handleMicClick },
     { sel: '#speak-last', ev: 'click', fn: ChatHandlers.handleSpeakLast },
     { sel: '#stop', ev: 'click', fn: ChatHandlers.handleStopClick },
+    { sel: '#in', ev: 'focus', fn: ChatHandlers.handleInputFocus },
 
     // Context
     { sel: '#toggle-context', ev: 'click', fn: ChatHandlers.handleToggleContext },
@@ -133,4 +101,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       }, 1000);
     }
   });
+
+  setTimeout(() => ChatHandlers.handleDeferredStartup(), 100);
 });
