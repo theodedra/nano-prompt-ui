@@ -18,10 +18,10 @@ function initPdfJs() {
   }
   
   // Import pdf.js library
-  importScripts('lib/pdf.min.js');
+  importScripts('./lib/pdf.min.js');
   
-  // Configure worker source
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js';
+  // Configure worker source (path relative to extension root)
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf/lib/pdf.worker.min.js';
 }
 
 /**
@@ -156,4 +156,5 @@ self.onmessage = async (e) => {
     });
   }
 };
+
 

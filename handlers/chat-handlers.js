@@ -8,12 +8,12 @@
  * remaining shared handlers for bootstrap, navigation, and misc UI.
  */
 
-import * as Controller from '../controller.js';
+import * as Controller from '../controller/index.js';
 import * as Model from '../model.js';
 import * as Storage from '../storage.js';
 import * as UI from '../ui/index.js';
 import { fetchContext } from '../context.js';
-import { debounce } from '../utils.js';
+import { debounce } from '../utils/utils.js';
 import {
   TIMING,
   UI_MESSAGES,
@@ -21,6 +21,7 @@ import {
 } from '../constants.js';
 import { registerContextMenuHandlers } from './context-menu-handlers.js';
 import { getModelStatusSummary } from '../setup-guide.js';
+import { setToastFunction } from '../utils/errors.js';
 
 // Re-export all handlers from modular files
 export * from './session-handlers.js';
@@ -36,6 +37,8 @@ import { handleMicClick } from './voice-handlers.js';
 import { refreshContextDraft, handleAskClick } from './prompt-handlers.js';
 
 let tabListenersAttached = false;
+// Cache: track last URL per tab to avoid unnecessary refreshes
+const tabUrlCache = new Map(); // tabId -> url
 
 /**
  * Set up tab listeners for automatic context synchronization
@@ -48,9 +51,37 @@ function ensureTabContextSync() {
     refreshContextDraft(false, false);
   }, TIMING.TAB_UPDATE_DEBOUNCE_MS);
 
-  chrome.tabs.onActivated.addListener(() => debouncedUpdate());
+  chrome.tabs.onActivated.addListener(async (activeInfo) => {
+    try {
+      const tab = await chrome.tabs.get(activeInfo.tabId);
+      if (!tab?.url) return;
+      
+      const currentUrl = tab.url;
+      const cachedUrl = tabUrlCache.get(activeInfo.tabId);
+      
+      // Only refresh if URL has changed for this tab
+      if (cachedUrl !== currentUrl) {
+        tabUrlCache.set(activeInfo.tabId, currentUrl);
+        debouncedUpdate();
+      }
+  } catch (e) {
+    // Tab might be closed or inaccessible, skip silently
+    // This is expected behavior, not an error worth logging
+  }
+  });
+
   chrome.tabs.onUpdated.addListener((id, info, tab) => {
-    if (tab?.active && info.status === 'complete') debouncedUpdate();
+    // Only process when page is fully loaded and tab is active
+    if (tab?.active && info.status === 'complete' && tab.url) {
+      const currentUrl = tab.url;
+      const cachedUrl = tabUrlCache.get(id);
+      
+      // Only refresh if URL has changed
+      if (cachedUrl !== currentUrl) {
+        tabUrlCache.set(id, currentUrl);
+        debouncedUpdate();
+      }
+    }
   });
   tabListenersAttached = true;
 }
@@ -72,6 +103,9 @@ function getSessionPlaintext(sessionId) {
  * @returns {Promise<void>}
  */
 export async function bootstrap() {
+  // Initialize error handling with toast function
+  setToastFunction((type, message) => Controller.showToast(type, message));
+  
   registerContextMenuHandlers();
 
   // Load state from storage module
@@ -274,9 +308,14 @@ export async function refreshAvailability({ forceCheck = false } = {}) {
     const modelStatus = await getModelStatusSummary(result.status);
     Controller.updateModelStatusChip(modelStatus);
   } catch (e) {
-    console.warn('Failed to get model status summary:', e);
+    handleError(e, {
+      operation: 'Get model status summary',
+      showToast: false, // Non-critical background operation
+      logError: true
+    });
   }
 
   return result;
 }
+
 

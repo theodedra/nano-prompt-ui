@@ -1,7 +1,7 @@
 import { getEls } from './core.js';
+import { uiState } from './state.js';
 
 let editingTemplateInputRef = null;
-let isAddingNewTemplate = false;
 
 export function updateTemplates(templates, blankTemplateId = null, editingId = null) {
   const els = getEls();
@@ -106,7 +106,7 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     fragment.appendChild(item);
   });
 
-  if (!editingId && !isAddingNewTemplate) {
+  if (!editingId && !uiState.isAddingNewTemplate) {
     const addRow = document.createElement('li');
     addRow.className = 'template-add-row';
 
@@ -119,7 +119,7 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     fragment.appendChild(addRow);
   }
 
-  if (isAddingNewTemplate) {
+  if (uiState.isAddingNewTemplate) {
     const addFormRow = document.createElement('li');
     addFormRow.className = 'template-row is-editing new-template';
 
@@ -170,7 +170,7 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
   els.templatesMenu.appendChild(fragment);
 
   // Focus the input after DOM is updated
-  if (editingTemplateInputRef && (editingId || isAddingNewTemplate)) {
+  if (editingTemplateInputRef && (editingId || uiState.isAddingNewTemplate)) {
     requestAnimationFrame(() => {
       if (editingTemplateInputRef) {
         editingTemplateInputRef.focus();
@@ -214,9 +214,10 @@ export function getTemplateEditValues(id) {
  * @param {boolean} adding
  */
 export function setAddingNewTemplate(adding) {
-  isAddingNewTemplate = adding;
+  uiState.isAddingNewTemplate = adding;
   if (!adding) {
     editingTemplateInputRef = null;
   }
 }
+
 

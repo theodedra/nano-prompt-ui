@@ -4,13 +4,11 @@
  * Handles session switching, renaming, deletion, and search.
  */
 
-import * as Controller from '../controller.js';
+import * as Controller from '../controller/index.js';
 import * as Model from '../model.js';
-import { debounce } from '../utils.js';
+import { uiState } from '../ui/state.js';
+import { debounce } from '../utils/utils.js';
 import { TIMING } from '../constants.js';
-
-let confirmingDeleteId = null;
-let editingSessionId = null;
 
 // Debounced session search to avoid excessive re-renders
 const debouncedSessionSearch = debounce((value) => {
@@ -35,17 +33,17 @@ export async function handleNewSessionClick() {
  * @returns {Promise<void>}
  */
 export async function deleteSessionHandler(btn, id) {
-  if (id === confirmingDeleteId) {
+  if (id === uiState.confirmingDeleteId) {
     Model.cancelGeneration();
     Model.resetModel(id);
     await Controller.removeSession(id);
-    confirmingDeleteId = null;
+    uiState.confirmingDeleteId = null;
   } else {
-    confirmingDeleteId = id;
-    Controller.renderSessionsList(confirmingDeleteId);
+    uiState.confirmingDeleteId = id;
+    Controller.renderSessionsList(uiState.confirmingDeleteId);
     setTimeout(() => {
-      if (confirmingDeleteId === id) {
-        confirmingDeleteId = null;
+      if (uiState.confirmingDeleteId === id) {
+        uiState.confirmingDeleteId = null;
         Controller.renderSessionsList();
       }
     }, TIMING.DELETE_CONFIRM_TIMEOUT_MS);
@@ -57,7 +55,7 @@ export async function deleteSessionHandler(btn, id) {
  * @param {string} id - Session ID to rename
  */
 export function startInlineRename(id) {
-  editingSessionId = id;
+  uiState.editingSessionId = id;
   Controller.renderSessionsList(null, id);
 }
 
@@ -65,7 +63,7 @@ export function startInlineRename(id) {
  * Cancel inline rename
  */
 export function cancelInlineRename() {
-  editingSessionId = null;
+  uiState.editingSessionId = null;
   Controller.renderSessionsList();
 }
 
@@ -76,7 +74,7 @@ export function cancelInlineRename() {
  * @returns {Promise<void>}
  */
 export async function saveInlineRename(id, newTitle) {
-  editingSessionId = null;
+  uiState.editingSessionId = null;
   const trimmed = (newTitle || '').trim();
   if (trimmed) {
     await Controller.renameSessionById(id, trimmed);
@@ -156,7 +154,7 @@ export async function handleSessionMenuClick(event) {
   }
 
   // Don't switch session if we're currently editing
-  if (editingSessionId) {
+  if (uiState.editingSessionId) {
     return;
   }
 
@@ -190,7 +188,7 @@ export async function handleRenameInputKeyDown(event) {
  * @returns {boolean}
  */
 export function isSessionEditingActive() {
-  return editingSessionId !== null;
+  return uiState.editingSessionId !== null;
 }
 
 /**
@@ -198,6 +196,7 @@ export function isSessionEditingActive() {
  * @returns {string|null}
  */
 export function getEditingSessionId() {
-  return editingSessionId;
+  return uiState.editingSessionId;
 }
+
 

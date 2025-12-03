@@ -1,6 +1,9 @@
 // UI Module - Re-exports all public APIs from the split UI modules
 // This provides a single entry point for backwards compatibility
 
+// UI State
+export { uiState } from './state.js';
+
 // Core state and initialization
 export {
   initUI,
@@ -105,4 +108,5 @@ import { createMessageElement } from './log-renderer.js';
 setOpenSetupGuideModalCallback(openSetupGuideModal);
 setBuildContextSnapshotUICallback(buildContextSnapshotUI);
 setCreateMessageElementCallback(createMessageElement);
+
 

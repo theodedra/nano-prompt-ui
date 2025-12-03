@@ -1,5 +1,5 @@
 import { getEls } from './core.js';
-import { formatDate, getSnapshotHost, clampLabel } from '../utils.js';
+import { formatDate, getSnapshotHost, clampLabel } from '../utils/utils.js';
 
 export function buildContextSnapshotUI() {
   const els = getEls();
@@ -132,4 +132,5 @@ export function renderContextSnapshots(
   const activeSnapshot = snapshots.find(s => s.id === activeId);
   setContextSourceLabel(activeSnapshot || null);
 }
+
 

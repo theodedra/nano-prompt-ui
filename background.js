@@ -1,12 +1,14 @@
 /**
  * INLINED CONSTANTS (Service worker cannot use ES modules)
+ * Source of truth: constants.js
  * Keep in sync with constants.js:
- * - MODEL_CONFIG → constants.js:67-73
- * - TIMING.PANEL_READY_DELAY_MS → constants.js:12
- * - UI_MESSAGES.WARMUP_SUCCESS → constants.js:160
- * - LOG_PREFIX → unique to background.js
- * - SESSION_WARMUP_KEY → unique to background.js
+ * - MODEL_CONFIG → constants.js → MODEL_CONFIG
+ * - TIMING.PANEL_READY_DELAY_MS → constants.js → TIMING.PANEL_READY_DELAY_MS
+ * - UI_MESSAGES.WARMUP_SUCCESS → constants.js → UI_MESSAGES.WARMUP_SUCCESS
+ * - SESSION_WARMUP_KEY → constants.js → STORAGE_KEYS.SESSION_WARMUP
+ * - LOG_PREFIX → unique to background.js (logging only)
  */
+// Source of truth: constants.js → MODEL_CONFIG
 const MODEL_CONFIG = {
   expectedInputs: [
     { type: 'text', languages: ['en'] },
@@ -15,6 +17,7 @@ const MODEL_CONFIG = {
   expectedOutputs: [{ type: 'text', format: 'plain-text', languages: ['en'] }]
 };
 
+// Source of truth: constants.js → TIMING.PANEL_READY_DELAY_MS
 const TIMING = {
   PANEL_READY_DELAY_MS: 1000
 };
@@ -30,6 +33,7 @@ const UI_MESSAGES = {
 };
 
 // Session warmup key shared with model.js for cross-context sync
+// Source of truth: constants.js → STORAGE_KEYS.SESSION_WARMUP
 const SESSION_WARMUP_KEY = 'nanoPrompt.warmedUp';
 
 let pendingAction = null;
@@ -90,7 +94,9 @@ async function warmUpModel() {
       return;
     }
 
-    if (status === 'readily') {
+    // Handle both 'readily' and 'available' as ready states
+    // 'available' may be returned by some Chrome versions/flag configurations
+    if (status === 'readily' || status === 'available') {
       console.log(LOG_PREFIX.INFO, 'Triggering background model warmup...');
       try {
         const session = await LanguageModel.create({

@@ -57,3 +57,4 @@ export function triggerFilePicker() {
   document.getElementById('file-input')?.click();
 }
 
+

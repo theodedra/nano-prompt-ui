@@ -4,11 +4,9 @@
  * Handles template selection, editing, creation, and deletion.
  */
 
-import * as Controller from '../controller.js';
+import * as Controller from '../controller/index.js';
 import * as UI from '../ui/index.js';
-
-let editingTemplateId = null;
-let isAddingTemplate = false;
+import { uiState } from '../ui/state.js';
 
 /**
  * Handle templates trigger click (open/close templates menu)
@@ -24,8 +22,8 @@ export function handleTemplatesTriggerClick(event) {
  * @param {string} id - Template ID
  */
 export function startTemplateEdit(id) {
-  editingTemplateId = id;
-  isAddingTemplate = false;
+  uiState.editingTemplateId = id;
+  uiState.isAddingNewTemplate = false;
   Controller.updateTemplatesUI(id);
 }
 
@@ -33,8 +31,8 @@ export function startTemplateEdit(id) {
  * Cancel template editing
  */
 export function cancelTemplateEdit() {
-  editingTemplateId = null;
-  isAddingTemplate = false;
+  uiState.editingTemplateId = null;
+  uiState.isAddingNewTemplate = false;
   UI.setAddingNewTemplate(false);
   Controller.updateTemplatesUI();
 }
@@ -53,7 +51,7 @@ export function saveTemplateEdit(id) {
 
   const success = Controller.patchTemplate(id, values);
   if (success) {
-    editingTemplateId = null;
+    uiState.editingTemplateId = null;
     Controller.updateTemplatesUI();
     Controller.showToast('success', 'Template saved');
   } else {
@@ -77,8 +75,8 @@ export function deleteTemplate(id) {
  * Start adding a new template
  */
 export function startAddTemplate() {
-  editingTemplateId = null;
-  isAddingTemplate = true;
+  uiState.editingTemplateId = null;
+  uiState.isAddingNewTemplate = true;
   UI.setAddingNewTemplate(true);
   Controller.updateTemplatesUI();
 }
@@ -95,7 +93,7 @@ export function saveNewTemplate() {
   }
 
   Controller.addTemplate(values.label, values.text);
-  isAddingTemplate = false;
+  uiState.isAddingNewTemplate = false;
   UI.setAddingNewTemplate(false);
   Controller.updateTemplatesUI();
   Controller.showToast('success', 'Template created');
@@ -105,7 +103,7 @@ export function saveNewTemplate() {
  * Cancel adding new template
  */
 export function cancelNewTemplate() {
-  isAddingTemplate = false;
+  uiState.isAddingNewTemplate = false;
   UI.setAddingNewTemplate(false);
   Controller.updateTemplatesUI();
 }
@@ -220,6 +218,6 @@ export function handleTemplateEditKeyDown(event) {
  * @returns {boolean}
  */
 export function isTemplateEditingActive() {
-  return editingTemplateId !== null || isAddingTemplate;
+  return uiState.editingTemplateId !== null || uiState.isAddingNewTemplate;
 }
 

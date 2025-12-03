@@ -505,9 +505,9 @@ MAX_ATTACHMENTS: 3,                 // Max attachments per message
 
 ### Overview
 
-Extracts text from PDF files using Mozilla's pdf.js library (local copy in `lib/`), running entirely off the main thread via a Web Worker to keep the UI responsive.
+Extracts text from PDF files using Mozilla's pdf.js library (local copy in `pdf/lib/`), running entirely off the main thread via a Web Worker to keep the UI responsive.
 
-**Files:** `pdf.js` (coordinator), `pdf-worker.js` (Web Worker)
+**Files:** `pdf/pdf.js` (coordinator), `pdf/pdf-worker.js` (Web Worker)
 
 ### Limits
 
@@ -521,10 +521,10 @@ PDF_MAX_CHARS: 50_000,    // Maximum characters (~12,500 tokens)
 ### Architecture
 
 ```
-┌─────────────────┐         ┌─────────────────┐
-│   pdf.js        │ ──────▶ │  pdf-worker.js  │
-│   (main thread) │ ◀────── │  (Web Worker)   │
-└─────────────────┘         └─────────────────┘
+┌─────────────────┐         ┌──────────────────┐
+│   pdf/pdf.js    │ ──────▶ │  pdf/pdf-worker  │
+│   (main thread) │ ◀────── │  .js (Worker)    │
+└─────────────────┘         └──────────────────┘
      │                              │
      │ postMessage({arrayBuffer})   │
      │ ◀─ progress updates ─────────│
@@ -534,7 +534,7 @@ PDF_MAX_CHARS: 50_000,    // Maximum characters (~12,500 tokens)
 ### Extraction Flow
 
 1. `extractPdfText()` sends `ArrayBuffer` to worker via `postMessage`
-2. Worker loads pdf.js via `importScripts()`
+2. Worker loads pdf.js library from `pdf/lib/` via `importScripts()`
 3. Worker parses pages sequentially, sending progress updates
 4. Worker respects character budget with safety margin (`PDF_CHAR_SAFETY_MARGIN = 2_000`)
 5. Worker posts completion message with text and metadata
@@ -925,12 +925,13 @@ All other APIs are optional with clear fallback explanations:
 |------|---------|
 | `model.js` | AI operations, streaming, translation, speech |
 | `storage.js` | IndexedDB, session management, attachments, markdown caching |
-| `controller.js` | Mediates between Model, Storage, and UI |
+| `controller/` | Mediates between Model, Storage, and UI (modular controllers) |
 | `virtual-scroll.js` | Performance optimization for large logs |
-| `pdf.js` | PDF extraction coordinator (delegates to Web Worker) |
-| `pdf-worker.js` | Web Worker for off-thread PDF text extraction |
+| `pdf/pdf.js` | PDF extraction coordinator (delegates to Web Worker) |
+| `pdf/pdf-worker.js` | Web Worker for off-thread PDF text extraction |
 | `constants.js` | All configuration values and limits |
 | `context.js` | Context fetching, intent classification, token estimation |
+| `prompt-builder.js` | Prompt assembly and token budget management |
 
 ### Handler Modules (`handlers/`)
 
@@ -958,6 +959,7 @@ All other APIs are optional with clear fallback explanations:
 | `snapshot-renderer.js` | Context snapshot rendering |
 | `modal-manager.js` | Modal open/close, focus trapping |
 | `attachment-renderer.js` | Attachment chip rendering |
+| `state.js` | UI state management |
 
 ### Other Modules
 
@@ -967,6 +969,8 @@ All other APIs are optional with clear fallback explanations:
 | `sidepanel.js` | Main entry point, event wiring |
 | `background.js` | Service worker, context menus, warmup |
 | `content.js` | Page scraping with SPA cache invalidation |
+| `utils/utils.js` | Markdown → HTML, sanitization, utilities |
+| `utils/errors.js` | Standardized error handling |
 
 ---
 
@@ -974,7 +978,7 @@ All other APIs are optional with clear fallback explanations:
 
 ### Overview
 
-The `markdownToHtml()` function in `utils.js` converts AI responses from markdown to HTML with sanitization. This section documents the intentional trade-off between maximum security and preserving useful output formatting.
+The `markdownToHtml()` function in `utils/utils.js` converts AI responses from markdown to HTML with sanitization. This section documents the intentional trade-off between maximum security and preserving useful output formatting.
 
 ### The Trade-off: Safety vs. SPA Context
 
@@ -1035,11 +1039,11 @@ If considering changes:
 1. Document the specific threat you're addressing
 2. Test with real AI responses that reference SPA content
 3. Verify that code blocks, lists, and explanatory formatting still render correctly
-4. Update this section and the inline comments in `utils.js`
+4. Update this section and the inline comments in `utils/utils.js`
 
 **Files involved:**
-- `utils.js` - `markdownToHtml()`, `sanitizeHtmlString()`
-- `ui.js` - Calls to `markdownToHtml()` in message rendering
+- `utils/utils.js` - `markdownToHtml()`, `sanitizeHtmlString()`
+- `ui/log-renderer.js` - Calls to `markdownToHtml()` in message rendering
 - `constants.js` - `VALIDATION.ALLOWED_HTML_TAGS`, `VALIDATION.ALLOWED_LINK_ATTRIBUTES`
 
 ---

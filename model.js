@@ -6,7 +6,7 @@
  */
 
 import { buildPromptWithContext } from './context.js';
-import { throttle } from './utils.js';
+import { throttle } from './utils/utils.js';
 import {
   MODEL_CONFIG,
   LIMITS,
@@ -17,14 +17,13 @@ import {
   DEFAULT_SETTINGS,
   TITLE_GENERATION_PROMPT,
   LANGUAGE_NAMES,
+  STORAGE_KEYS,
   getSettingOrDefault
 } from './constants.js';
+import { handleError } from './utils/errors.js';
 
-const STREAMING_THROTTLE_MS = 100;
 const DIAGNOSTICS_KEY = 'nanoPrompt.diagnostics';
-const SESSION_WARMUP_KEY = 'nanoPrompt.warmedUp';
-const DOWNLOAD_POLL_INTERVAL_MS = 2000; // Poll every 2 seconds during download
-const DOWNLOAD_POLL_MAX_ATTEMPTS = 180; // Max 6 minutes of polling
+const SESSION_WARMUP_KEY = STORAGE_KEYS.SESSION_WARMUP;
 let diagnosticsCache = null;
 const SMART_REPLY_LIMIT = 3;
 const SMART_REPLY_CONTEXT_CHARS = 600;
@@ -44,6 +43,8 @@ let downloadStatusCallback = null;
 class LocalAI {
   constructor() {
     this.sessions = new Map();
+    this.sessionAccessOrder = []; // Track access order for LRU cleanup
+    this.maxSessions = 10; // Maximum number of sessions to keep in memory
     this.controller = null;
   }
 
@@ -69,19 +70,56 @@ class LocalAI {
   }
 
   /**
+   * Clean up old sessions when limit is reached (LRU eviction)
+   * @private
+   */
+  _cleanupOldSessions() {
+    // Remove oldest sessions until we're under the limit
+    while (this.sessions.size >= this.maxSessions && this.sessionAccessOrder.length > 0) {
+      const oldestId = this.sessionAccessOrder.shift();
+      const session = this.sessions.get(oldestId);
+      if (session) {
+        try {
+          session.destroy();
+        } catch {
+          // Already destroyed, ignore
+        }
+      }
+      this.sessions.delete(oldestId);
+    }
+  }
+
+  /**
    * Create a new AI session with configuration
    * Sessions are scoped to UI session IDs to avoid cross-chat bleed
+   * Automatically cleans up old sessions when limit is reached
    * @param {string} sessionId - UI session ID
    * @param {object} params - Session parameters
    * @returns {Promise<object>} AI session object
    */
   async getOrCreateSession(sessionId, params = {}) {
     if (!sessionId) throw new Error('Missing session id');
-    if (this.sessions.has(sessionId)) return this.sessions.get(sessionId);
+    
+    // If session exists, update access order and return it
+    if (this.sessions.has(sessionId)) {
+      // Move to end of access order (most recently used)
+      const index = this.sessionAccessOrder.indexOf(sessionId);
+      if (index > -1) {
+        this.sessionAccessOrder.splice(index, 1);
+      }
+      this.sessionAccessOrder.push(sessionId);
+      return this.sessions.get(sessionId);
+    }
+    
     if (!this.engine) throw new Error('AI not supported');
+    
+    // Clean up old sessions before creating a new one
+    this._cleanupOldSessions();
+    
     const config = { ...MODEL_CONFIG, ...params };
     const session = await this.engine.create(config);
     this.sessions.set(sessionId, session);
+    this.sessionAccessOrder.push(sessionId);
     return session;
   }
 
@@ -112,30 +150,84 @@ class LocalAI {
     const reader = stream.getReader();
 
     let fullText = '';
+    let lastReadTime = Date.now();
 
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      if (value) {
-        // Smart Accumulator logic
-        if (fullText.length > 0 && value.startsWith(fullText)) {
-            fullText = value;
-        } else {
-            fullText += value;
+    // Helper to read from stream with timeout
+    const readWithTimeout = async () => {
+      // Check if already aborted
+      if (signal?.aborted) {
+        throw new DOMException('Operation aborted', 'AbortError');
+      }
+
+      let timeoutId = null;
+      
+      // Create a timeout promise
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => {
+          reject(new Error(`Stream read timeout: no data received for ${TIMING.AI_STREAM_READ_TIMEOUT_MS}ms`));
+        }, TIMING.AI_STREAM_READ_TIMEOUT_MS);
+
+        // Clear timeout if signal is aborted
+        if (signal) {
+          signal.addEventListener('abort', () => {
+            if (timeoutId) clearTimeout(timeoutId);
+            reject(new DOMException('Operation aborted', 'AbortError'));
+          }, { once: true });
         }
-        onUpdate(fullText);
+      });
+
+      // Race between read and timeout
+      const readPromise = reader.read().then(result => {
+        // Clear timeout if read succeeds
+        if (timeoutId) clearTimeout(timeoutId);
+        lastReadTime = Date.now();
+        return result;
+      }).catch(err => {
+        // Clear timeout on read error
+        if (timeoutId) clearTimeout(timeoutId);
+        throw err;
+      });
+
+      return Promise.race([readPromise, timeoutPromise]);
+    };
+
+    try {
+      while (true) {
+        const { value, done } = await readWithTimeout();
+        if (done) break;
+        if (value) {
+          // Smart Accumulator logic
+          if (fullText.length > 0 && value.startsWith(fullText)) {
+              fullText = value;
+          } else {
+              fullText += value;
+          }
+          onUpdate(fullText);
+        }
+      }
+      return fullText;
+    } finally {
+      // Ensure reader is released even on timeout/error
+      try {
+        reader.releaseLock();
+      } catch (e) {
+        // Reader may already be released, ignore
       }
     }
-    return fullText;
   }
 
-    destroy(sessionId = null) {
+  destroy(sessionId = null) {
     if (sessionId) {
       const session = this.sessions.get(sessionId);
       if (session) {
         try { session.destroy(); } catch { /* Already destroyed */ }
       }
       this.sessions.delete(sessionId);
+      // Remove from access order
+      const index = this.sessionAccessOrder.indexOf(sessionId);
+      if (index > -1) {
+        this.sessionAccessOrder.splice(index, 1);
+      }
       if (this.controller) {
         try { this.controller.abort(); } catch { /* Already aborted */ }
         this.controller = null;
@@ -147,6 +239,7 @@ class LocalAI {
       try { session.destroy(); } catch { /* Already destroyed */ }
     });
     this.sessions.clear();
+    this.sessionAccessOrder = [];
 
     if (this.controller) {
       try { this.controller.abort(); } catch { /* Already aborted */ }
@@ -157,15 +250,18 @@ class LocalAI {
   /**
    * Lightweight warmup: create and immediately destroy a minimal session
    * to prime the engine for faster first-prompt response.
+   * @param {string} [cachedAvailability] - Pre-checked availability status to avoid redundant check
    * @returns {Promise<{success: boolean, error?: string}>}
    */
-  async ensureEngine() {
+  async ensureEngine(cachedAvailability = null) {
     if (!this.engine) {
       return { success: false, error: 'AI engine not available' };
     }
 
     try {
-      const availability = await this.getAvailability();
+      // Use cached availability if provided, otherwise check
+      const availability = cachedAvailability || await this.getAvailability();
+      
       if (availability === 'no') {
         return { success: false, error: 'AI not available' };
       }
@@ -173,7 +269,14 @@ class LocalAI {
         return { success: false, error: 'Model still downloading' };
       }
 
-      // Create minimal warmup session
+      // If model is already ready, warmup is optional - skip it for speed
+      // The first prompt will be fast enough without warmup
+      if (availability === 'readily' || availability === 'available') {
+        // Skip actual warmup - model is ready, first prompt will be fast
+        return { success: true, skipped: true };
+      }
+
+      // Create minimal warmup session only if needed
       const session = await this.engine.create({
         ...MODEL_CONFIG,
         systemPrompt: 'Ready'
@@ -369,7 +472,7 @@ export function startDownloadPolling(onStatusChange) {
         }
       }
 
-      if (status === 'readily' || status === 'no') {
+      if (status === 'readily' || status === 'available' || status === 'no') {
         console.log('Nano Prompt: Model download complete, status:', status);
 
         // Save callback BEFORE stopping (stopDownloadPolling clears it)
@@ -395,8 +498,8 @@ export function startDownloadPolling(onStatusChange) {
       }
 
       // Still downloading - continue polling (unless we've hit max attempts)
-      if (attempts < DOWNLOAD_POLL_MAX_ATTEMPTS) {
-        downloadPollTimer = setTimeout(poll, DOWNLOAD_POLL_INTERVAL_MS);
+      if (attempts < TIMING.DOWNLOAD_POLL_MAX_ATTEMPTS) {
+        downloadPollTimer = setTimeout(poll, TIMING.DOWNLOAD_POLL_INTERVAL_MS);
       } else {
         console.warn('Nano Prompt: Download polling timed out after', attempts, 'attempts');
         stopDownloadPolling();
@@ -406,8 +509,8 @@ export function startDownloadPolling(onStatusChange) {
       if (e.message !== 'Availability check timeout') {
         console.warn('Nano Prompt: Download poll error:', e);
       }
-      if (attempts < DOWNLOAD_POLL_MAX_ATTEMPTS) {
-        downloadPollTimer = setTimeout(poll, DOWNLOAD_POLL_INTERVAL_MS);
+      if (attempts < TIMING.DOWNLOAD_POLL_MAX_ATTEMPTS) {
+        downloadPollTimer = setTimeout(poll, TIMING.DOWNLOAD_POLL_INTERVAL_MS);
       }
     }
   };
@@ -524,14 +627,15 @@ async function checkWarmupFlag() {
 /**
  * One-time session warmup - runs ensureEngine() on first sidepanel open
  * Skips warmup if already performed in this browser session.
- * @param {Object} callbacks - Optional callbacks for status updates
- * @param {Function} callbacks.onDownloadStart - Called when model download starts
- * @param {Function} callbacks.onDownloadProgress - Called with download progress (0-1)
- * @param {Function} callbacks.onDownloadComplete - Called when download completes
+ * @param {Object} options - Options and callbacks
+ * @param {string} [options.cachedAvailability] - Pre-checked availability to avoid redundant check
+ * @param {Function} [options.onDownloadStart] - Called when model download starts
+ * @param {Function} [options.onDownloadProgress] - Called with download progress (0-1)
+ * @param {Function} [options.onDownloadComplete] - Called when download completes
  * @returns {Promise<{skipped: boolean, success?: boolean, error?: string, downloaded?: boolean}>}
  */
-export async function performSessionWarmup(callbacks = {}) {
-  const { onDownloadStart, onDownloadProgress, onDownloadComplete } = callbacks;
+export async function performSessionWarmup(options = {}) {
+  const { cachedAvailability, onDownloadStart, onDownloadProgress, onDownloadComplete } = options;
 
   // Check both in-memory and session storage flags
   const alreadyWarmed = await checkWarmupFlag();
@@ -539,7 +643,8 @@ export async function performSessionWarmup(callbacks = {}) {
     return { skipped: true };
   }
 
-  const availability = await localAI.getAvailability();
+  // Use cached availability if provided, otherwise check
+  const availability = cachedAvailability || await localAI.getAvailability();
 
   // Handle both 'after-download' and 'downloading' states
   if (availability === 'after-download' || availability === 'downloading') {
@@ -573,8 +678,8 @@ export async function performSessionWarmup(callbacks = {}) {
     }
   }
 
-  // Normal warmup path (model already available)
-  const result = await localAI.ensureEngine();
+  // Normal warmup path (model already available) - pass cached availability to avoid redundant check
+  const result = await localAI.ensureEngine(availability);
 
   if (result.success) {
     hasWarmedUp = true;
@@ -795,6 +900,18 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
   let lastAiText = '';
   let generationAborted = false;
 
+  // Set up overall operation timeout
+  let timeoutId = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      controller.abort();
+      // Create a timeout error that will be handled as an abort
+      const timeoutError = new Error(`AI operation timed out after ${TIMING.AI_OPERATION_TIMEOUT_MS}ms`);
+      timeoutError.name = 'TimeoutError';
+      reject(timeoutError);
+    }, TIMING.AI_OPERATION_TIMEOUT_MS);
+  });
+
   try {
     const sessionConfig = getSessionConfig(settings);
     const { prompt: finalText, tokenEstimate } = await buildPromptWithContext(text, contextOverride, attachments);
@@ -809,12 +926,16 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
 
     let promptInput = finalText;
     if (imageAttachments.length > 0) {
-      // att.data is now a Blob (for IndexedDB storage), convert to canvas for Prompt API
+      // Use cached canvas if available, otherwise convert from blob
       try {
         const canvases = await Promise.all(
           imageAttachments.map(async (att) => {
-            const canvas = await blobToCanvas(att.data, LIMITS.IMAGE_MAX_WIDTH);
-            return canvas;
+            // Use cached canvas if available (avoids double conversion)
+            if (att.canvas) {
+              return att.canvas;
+            }
+            // Fallback: convert from blob (for attachments loaded from storage)
+            return await blobToCanvas(att.data, LIMITS.IMAGE_MAX_WIDTH);
           })
         );
 
@@ -834,25 +955,46 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
 
     const throttledUpdate = throttle((chunk) => {
       if (onChunk) onChunk(chunk);
-    }, STREAMING_THROTTLE_MS);
+    }, TIMING.STREAMING_THROTTLE_MS);
 
     try {
-      const streamedText = await localAI.promptStreaming(
-        sessionId,
-        promptInput,
-        controller.signal,
-        (chunk) => { throttledUpdate(chunk); },
-        sessionConfig
-      );
+      // Race between the actual operation and the timeout
+      const streamedText = await Promise.race([
+        localAI.promptStreaming(
+          sessionId,
+          promptInput,
+          controller.signal,
+          (chunk) => { throttledUpdate(chunk); },
+          sessionConfig
+        ),
+        timeoutPromise
+      ]);
+
+      // Clear timeout if operation completed successfully
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
 
       throttledUpdate.flush();
       lastAiText = streamedText;
       if (onComplete) onComplete(streamedText);
 
     } catch (err) {
+      // Clear timeout on error
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
       throttledUpdate.flush();
       if (err?.name === 'AbortError') throw err;
-      console.error("Side Panel failed with error:", err);
+      
+      // Log error (but don't show toast - let onError callback handle it)
+      handleError(err, {
+        operation: 'AI prompt execution',
+        showToast: false, // Callback will handle toast
+        logError: true
+      });
 
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (tab && tab.url && (tab.url.startsWith('chrome://') || tab.url.startsWith('edge://'))) {
@@ -861,29 +1003,59 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
 
       // Try fallback for non-image prompts (images don't work in page context)
       if (imageAttachments.length === 0) {
-        const fallback = await runPromptInPage(finalText, sessionId, settings.systemPrompt, attachments);
-        lastAiText = fallback;
-        if (onComplete) onComplete(fallback);
+        try {
+          const fallback = await runPromptInPage(finalText, sessionId, settings.systemPrompt, attachments);
+          lastAiText = fallback;
+          if (onComplete) onComplete(fallback);
+        } catch (fallbackError) {
+          // Fallback also failed, rethrow original error
+          throw err;
+        }
       } else {
         // Image prompts failed - can't use page fallback
-        console.error("Image prompt failed, cannot use fallback. Original error:", err);
-        throw new Error(`Image analysis failed: ${err?.message || 'Unknown error'}`);
+        const errorInfo = handleError(err, {
+          operation: 'Image prompt execution',
+          showToast: false,
+          logError: true
+        });
+        throw new Error(errorInfo.userMessage || `Image analysis failed: ${errorInfo.message}`);
       }
     } finally {
       throttledUpdate.cancel();
     }
 
   } catch (err) {
+    // Ensure timeout is cleared
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
     cancelGeneration();
     resetModel(sessionId);
 
-    if (err?.name === 'AbortError') {
+    if (err?.name === 'AbortError' || err?.name === 'TimeoutError') {
       generationAborted = true;
       if (onAbort) onAbort();
+      // If it was a timeout, also call onError with a user-friendly message
+      if (err?.name === 'TimeoutError' && onError) {
+        const timeoutError = new Error('AI operation timed out. Please try again with a shorter prompt or check your connection.');
+        handleError(timeoutError, {
+          operation: 'AI prompt execution',
+          showToast: false, // Callback will handle toast
+          logError: true
+        });
+        onError(timeoutError);
+      }
     } else {
+      // Error is logged above, just pass to callback
       if (onError) onError(err);
     }
   } finally {
+    // Ensure timeout is always cleared
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      timeoutId = null;
+    }
     // Only clear controller if it's still the active one (avoids race conditions)
     if (localAI.controller === controller) {
       localAI.controller = null;

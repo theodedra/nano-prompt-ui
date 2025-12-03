@@ -166,7 +166,18 @@ nano-prompt-ui/
 ├── sidepanel.js               # Bootstrap + event wiring
 ├── sidepanel.css              # Layout, theming, styles
 │
-├── controller.js              # Orchestrates handlers and state
+├── controller/                # Controller layer (modular)
+│   ├── index.js              # Main entry point, re-exports all controllers
+│   ├── session-controller.js # Session management
+│   ├── message-controller.js # Message operations
+│   ├── context-controller.js # Context and snapshots
+│   ├── attachment-controller.js # Attachment management
+│   ├── template-controller.js # Template operations
+│   ├── settings-controller.js # Settings
+│   ├── ui-controller.js      # UI rendering and interactions
+│   ├── status-controller.js  # Status, busy state, diagnostics
+│   ├── input-controller.js   # Input handling
+│   └── toast-controller.js   # Toast notifications
 │
 ├── handlers/                  # Modular event handlers
 │   ├── chat-handlers.js       # Re-exports + shared navigation handlers
@@ -187,23 +198,27 @@ nano-prompt-ui/
 │   ├── template-renderer.js   # Template list rendering
 │   ├── snapshot-renderer.js   # Context snapshot rendering
 │   ├── modal-manager.js       # Modal open/close, focus trapping
-│   └── attachment-renderer.js # Attachment chip rendering
+│   ├── attachment-renderer.js # Attachment chip rendering
+│   └── state.js               # UI state management
 │
 ├── model.js                   # Gemini Nano + Translation API interface
 ├── storage.js                 # IndexedDB, session state, persistence, markdown caching
 ├── context.js                 # Context assembly, snapshots, prompt building, intent classification
-├── utils.js                   # Markdown → HTML, sanitization, utilities
+├── prompt-builder.js          # Prompt assembly and token budget management
+├── utils/
+│   ├── utils.js              # Markdown → HTML, sanitization, utilities
+│   └── errors.js             # Standardized error handling
 ├── toast.js                   # Toast notification system
 ├── constants.js               # Limits, timing, labels, model config
 ├── virtual-scroll.js          # Virtualized chat list (performance optimized)
-│
-├── pdf.js                     # PDF extraction coordinator (delegates to Web Worker)
-├── pdf-worker.js              # Web Worker for off-thread PDF text extraction
 ├── setup-guide.js             # API availability checks, flag guidance
 │
-├── lib/
-│   ├── pdf.min.js             # Bundled Mozilla PDF.js
-│   └── pdf.worker.min.js      # PDF.js worker
+├── pdf/                       # PDF processing module
+│   ├── pdf.js                # PDF extraction coordinator (delegates to Web Worker)
+│   ├── pdf-worker.js         # Web Worker for off-thread PDF text extraction
+│   └── lib/
+│       ├── pdf.min.js        # Bundled Mozilla PDF.js
+│       └── pdf.worker.min.js # PDF.js worker
 │
 ├── package.json               # Dev dependencies (ESLint)
 ├── eslint.config.js           # Linting configuration

@@ -1,4 +1,4 @@
-import { $, formatDate } from '../utils.js';
+import { $, formatDate } from '../utils/utils.js';
 import { UI_MESSAGES, ICONS } from '../constants.js';
 import { VirtualScroller } from '../virtual-scroll.js';
 
@@ -16,6 +16,7 @@ let inputCardEl = null;
 // Scroll/virtual scroll observers
 let scrollObserver = null;
 let virtualScroller = null;
+let sessionVirtualScroller = null;
 
 const ICON_MIC = ICONS.MIC;
 const ICON_STOP = ICONS.STOP;
@@ -119,6 +120,14 @@ export function getScrollObserver() {
 
 export function getVirtualScroller() {
   return virtualScroller;
+}
+
+export function getSessionVirtualScroller() {
+  return sessionVirtualScroller;
+}
+
+export function setSessionVirtualScroller(scroller) {
+  sessionVirtualScroller = scroller;
 }
 
 export function getLastStatus() {

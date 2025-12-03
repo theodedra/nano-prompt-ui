@@ -4,11 +4,12 @@
  * Handles file attachment UI interactions via controller layer.
  */
 
-import * as Controller from '../controller.js';
-import { extractPdfText } from '../pdf.js';
+import * as Controller from '../controller/index.js';
+import { extractPdfText } from '../pdf/pdf.js';
 import { toast } from '../toast.js';
 import { LIMITS, USER_ERROR_MESSAGES, validateAttachment } from '../constants.js';
 import * as UI from '../ui/index.js';
+import { handleError } from '../utils/errors.js';
 
 /**
  * Trigger the hidden file input for attachments.
@@ -66,7 +67,8 @@ export async function handleFileInputChange(event) {
         Controller.addAttachment({
           name: file.name,
           type: file.type,
-          data: blob
+          data: blob,
+          canvas: canvas // Cache canvas to avoid double conversion
         });
         Controller.renderAttachments();
         toast.success('Image processed successfully');
@@ -76,13 +78,12 @@ export async function handleFileInputChange(event) {
         progressToast.dismiss();
       }
 
-      console.error('File processing failed', e);
-      if (validation.fileType === 'pdf') {
-        const errorMsg = e.message || USER_ERROR_MESSAGES.PDF_PROCESSING_FAILED;
-        Controller.showToast('error', `PDF Error: ${errorMsg}`);
-      } else {
-        Controller.showToast('error', USER_ERROR_MESSAGES.IMAGE_PROCESSING_FAILED);
-      }
+      handleError(e, {
+        operation: validation.fileType === 'pdf' ? 'PDF processing' : 'Image processing',
+        fallbackMessage: validation.fileType === 'pdf' ? 'PDF_PROCESSING_FAILED' : 'IMAGE_PROCESSING_FAILED',
+        showToast: true,
+        logError: true
+      });
     }
   }
   event.target.value = '';
@@ -158,4 +159,5 @@ export function handleAttachmentListClick(event) {
     Controller.renderAttachments();
   }
 }
+
 

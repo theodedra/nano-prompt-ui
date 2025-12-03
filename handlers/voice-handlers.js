@@ -4,9 +4,10 @@
  * Handles microphone input, speech recognition, and text-to-speech.
  */
 
-import * as Controller from '../controller.js';
+import * as Controller from '../controller/index.js';
 import * as Model from '../model.js';
 import { USER_ERROR_MESSAGES } from '../constants.js';
+import { handleError } from '../utils/errors.js';
 
 // Speech recognition state
 let recognition = null;
@@ -46,11 +47,15 @@ export function handleMicClick() {
   };
 
   recognition.onerror = (event) => {
-    console.error('Speech recognition error:', event.error);
+    handleError(event.error || new Error('Speech recognition failed'), {
+      operation: 'Speech recognition',
+      fallbackMessage: 'SPEECH_FAILED',
+      showToast: true,
+      logError: true
+    });
     recognizing = false;
     Controller.setMicState(false);
     recognition = null;
-    Controller.showToast('error', USER_ERROR_MESSAGES.SPEECH_FAILED);
   };
 
   recognition.onresult = (e) => {
@@ -64,11 +69,15 @@ export function handleMicClick() {
   try {
     recognition.start();
   } catch (e) {
-    console.error('Failed to start speech recognition:', e);
+    handleError(e, {
+      operation: 'Start speech recognition',
+      fallbackMessage: 'SPEECH_FAILED',
+      showToast: true,
+      logError: true
+    });
     recognition = null;
     recognizing = false;
     Controller.setMicState(false);
-    Controller.showToast('error', USER_ERROR_MESSAGES.SPEECH_FAILED);
   }
 }
 
@@ -105,4 +114,5 @@ export function stopRecognition() {
   }
   recognizing = false;
 }
+
 

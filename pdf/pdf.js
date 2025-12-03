@@ -1,10 +1,30 @@
 // pdf.js - PDF text extraction using Web Worker for non-blocking processing
 // This module handles PDF file processing for attachment support
 
-import { LIMITS } from './constants.js';
+import { LIMITS, TIMING } from '../constants.js';
 
 /** @type {Worker|null} */
 let pdfWorker = null;
+
+/** @type {number|null} */
+let idleTimeoutId = null;
+
+/**
+ * Reset the idle timeout for the PDF worker
+ * Terminates the worker after period of inactivity
+ */
+function resetIdleTimeout() {
+  // Clear existing timeout
+  if (idleTimeoutId !== null) {
+    clearTimeout(idleTimeoutId);
+    idleTimeoutId = null;
+  }
+
+  // Set new timeout to terminate worker after idle period
+  idleTimeoutId = setTimeout(() => {
+    terminatePdfWorker();
+  }, TIMING.PDF_WORKER_IDLE_TIMEOUT_MS);
+}
 
 /**
  * Get or create the PDF extraction worker
@@ -12,9 +32,11 @@ let pdfWorker = null;
  */
 function getWorker() {
   if (!pdfWorker) {
-    const workerUrl = chrome.runtime.getURL('pdf-worker.js');
+    const workerUrl = chrome.runtime.getURL('pdf/pdf-worker.js');
     pdfWorker = new Worker(workerUrl);
   }
+  // Reset idle timeout whenever worker is used
+  resetIdleTimeout();
   return pdfWorker;
 }
 
@@ -73,6 +95,8 @@ export async function extractPdfText(file, options = {}) {
           }
           worker.onmessage = null;
           worker.onerror = null;
+          // Reset idle timeout after successful extraction
+          resetIdleTimeout();
           resolve({ text, meta });
           break;
 
@@ -83,6 +107,8 @@ export async function extractPdfText(file, options = {}) {
           }
           worker.onmessage = null;
           worker.onerror = null;
+          // Reset idle timeout even after error (worker is still usable)
+          resetIdleTimeout();
           reject(new Error(error));
           break;
       }
@@ -96,6 +122,8 @@ export async function extractPdfText(file, options = {}) {
       worker.onmessage = null;
       worker.onerror = null;
       console.error('PDF worker error:', e);
+      // Reset idle timeout even after error (worker is still usable)
+      resetIdleTimeout();
       reject(new Error('PDF worker failed'));
     };
 
@@ -112,9 +140,16 @@ export async function extractPdfText(file, options = {}) {
 
 /**
  * Terminate the PDF worker to free resources
- * Call this when the extension is being unloaded
+ * Call this when the extension is being unloaded or after idle timeout
  */
 export function terminatePdfWorker() {
+  // Clear idle timeout
+  if (idleTimeoutId !== null) {
+    clearTimeout(idleTimeoutId);
+    idleTimeoutId = null;
+  }
+
+  // Terminate worker
   if (pdfWorker) {
     pdfWorker.terminate();
     pdfWorker = null;

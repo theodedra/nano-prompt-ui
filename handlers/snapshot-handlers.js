@@ -4,9 +4,10 @@
  * Handles saving, applying, and deleting context snapshots.
  */
 
-import * as Controller from '../controller.js';
+import * as Controller from '../controller/index.js';
 import { fetchContext } from '../context.js';
-import { getSnapshotHost, clampLabel } from '../utils.js';
+import { getSnapshotHost, clampLabel } from '../utils/utils.js';
+import { handleError } from '../utils/errors.js';
 
 let isSnapshotBusy = false;
 
@@ -61,8 +62,12 @@ export async function useLiveContext({ quiet = false } = {}) {
     await Controller.persistState({ immediate: true }); // User action
     if (!quiet) Controller.showToast('success', 'Live tab context restored');
   } catch (e) {
-    console.warn('Failed to refresh live context', e);
-    Controller.showToast('error', 'Could not refresh live context.');
+    handleError(e, {
+      operation: 'Refresh live context',
+      userMessage: 'Could not refresh live context.',
+      showToast: true,
+      logError: true
+    });
   } finally {
     isSnapshotBusy = false;
   }
@@ -120,8 +125,12 @@ export async function handleSaveSnapshotClick() {
       Controller.showToast('error', 'Could not save context snapshot.');
     }
   } catch (e) {
-    console.warn('Snapshot save failed', e);
-    Controller.showToast('error', 'Failed to save context snapshot.');
+    handleError(e, {
+      operation: 'Save context snapshot',
+      userMessage: 'Failed to save context snapshot.',
+      showToast: true,
+      logError: true
+    });
   } finally {
     isSnapshotBusy = false;
   }
@@ -155,4 +164,5 @@ export async function handleSnapshotListClick(event) {
     await handleDeleteSnapshot(deleteBtn.dataset.id);
   }
 }
+
 

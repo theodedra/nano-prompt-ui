@@ -1,4 +1,4 @@
-import { formatTime, markdownToHtml } from '../utils.js';
+import { formatTime, markdownToHtml } from '../utils/utils.js';
 import { VirtualScroller } from '../virtual-scroll.js';
 import {
   getEls,
@@ -207,7 +207,13 @@ export function renderLog(session) {
     virtualScroller.setMessages(messages);
     if (!virtualScroller.enabled) {
       virtualScroller.enable();
-      setTimeout(() => virtualScroller.calibrateItemHeight(), 100);
+      // Use double RAF to ensure DOM is painted before measuring
+      // This is faster and more accurate than setTimeout
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          virtualScroller.calibrateItemHeight();
+        });
+      });
     }
     virtualScroller.render(messages);
     setExportAvailability(true);
@@ -295,9 +301,10 @@ export function updateLastMessageBubble(session, markdownText, { streaming = fal
   }
 
   if (streaming) {
-    // Fast path: skip content comparison since throttle limits update frequency
-    body.textContent = markdownText;
-    body.dataset.renderMode = 'plain';
+    // Cache HTML during streaming for better formatting
+    const cachedHtml = markdownToHtml(markdownText);
+    body.innerHTML = cachedHtml;
+    body.dataset.renderMode = 'markdown';
     return;
   }
 
@@ -310,4 +317,5 @@ export function updateLastMessageBubble(session, markdownText, { streaming = fal
 
 // Export for use in other modules
 export { scrollToBottom, observeLastMessage };
+
 
