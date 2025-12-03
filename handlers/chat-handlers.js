@@ -97,7 +97,7 @@ export async function bootstrap() {
   }
 
   ensureTabContextSync();
-  await refreshContextDraft(true);
+  refreshContextDraft(true).catch(console.warn);
 
   chrome.runtime.sendMessage({ action: 'PANEL_READY' });
 }
@@ -141,7 +141,7 @@ export function handleInputKeyDown(event) {
  * Prime the model when the input gains focus (warm VRAM cache).
  */
 export function handleInputFocus() {
-  const primeFn = Model.prime || Model.primeModel;
+  const primeFn = Model.primeModel;
   if (typeof primeFn === 'function') {
     primeFn().catch(() => {});
   }
@@ -280,7 +280,7 @@ export async function handleDeferredStartup() {
       return;
     }
 
-    if (availability?.status === 'after-download') {
+    if (availability?.status === 'after-download' || availability?.status === 'downloading') {
       await Model.ensureModelDownloaded((loaded, total) => {
         const ratio = total ? loaded / total : 0;
         const percent = Math.min(100, Math.max(0, Math.round(ratio * 100)));

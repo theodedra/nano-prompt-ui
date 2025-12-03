@@ -187,13 +187,20 @@ export async function handleAskClick(overrideText = null) {
   Controller.clearAttachments();
 
   let contextOverride = Controller.getContextText();
-  const intent = classifyIntent(text);
+  // SAFETY: If the background scrape from bootstrap hasn't finished yet,
+  // and the user is asking a question that needs context, fetch it now.
+  const intent = classifyIntent(text); // Ensure intent is defined before this
+  if (!contextOverride && intent !== INTENT_TYPES.NONE) {
+    Controller.setStatus('Reading page...'); // Visual feedback
+    // Use false to check cache first (in case background just finished)
+    contextOverride = await refreshContextDraft(false);
+  }
 
   if (text.length < LIMITS.SHORT_QUERY_THRESHOLD && intent === INTENT_TYPES.NONE) {
     contextOverride = '';
-  } else if (contextOverride.includes('[System Page]')) {
+  } else if (contextOverride?.includes('[System Page]')) {
     contextOverride = await refreshContextDraft(true);
-    if (contextOverride.includes('[System Page]') && intent !== INTENT_TYPES.PAGE) {
+    if (contextOverride?.includes('[System Page]') && intent !== INTENT_TYPES.PAGE) {
       contextOverride = '';
     }
   }

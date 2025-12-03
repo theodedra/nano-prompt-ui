@@ -145,8 +145,11 @@ function scrapePage() {
     let collectedLength = 0;
     let visitedTextNodes = 0;
     const charCollectionLimit = CONTEXT_MAX_CHARS + TREEWALKER_SAFETY_MARGIN;
+    const startTime = Date.now();
 
     while (currentNode = walker.nextNode()) {
+      // Safety valve: Stop scraping if it takes longer than 2 seconds
+      if (Date.now() - startTime > 2000) break;
       visitedTextNodes += 1;
       if (visitedTextNodes > MAX_VISITED_TEXT_NODES) break;
 

@@ -14,9 +14,13 @@ function bind(selector, event, handler) {
   if (el) el.addEventListener(event, handler);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   UI.initUI();
-  ChatHandlers.bootstrap().catch(err => console.error('Bootstrap failed', err));
+  try {
+    await ChatHandlers.bootstrap();
+  } catch (err) {
+    console.error('Bootstrap failed', err);
+  }
 
   // --- EVENT BINDINGS ---
   const bindings = [
