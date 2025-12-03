@@ -54,7 +54,8 @@ export function renderPendingAttachments(attachments) {
 }
 
 export function triggerFilePicker() {
-  document.getElementById('file-input')?.click();
+  const els = getEls();
+  if (els.fileInput) els.fileInput.click();
 }
 
 

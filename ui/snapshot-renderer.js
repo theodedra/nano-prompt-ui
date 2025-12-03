@@ -5,47 +5,55 @@ export function buildContextSnapshotUI() {
   const els = getEls();
   if (!els.contextModal) return;
   const modalCard = els.contextModal.querySelector('.modal-card');
-  const contextArea = document.getElementById('context-text');
-  if (!modalCard || !contextArea) return;
+  if (!modalCard || !els.contextText) return;
 
   const container = document.createElement('div');
   container.className = 'context-snapshots';
 
+  // Use DocumentFragment for batch child element creation
+  const fragment = document.createDocumentFragment();
+
   const source = document.createElement('div');
   source.id = 'context-source-label';
   source.className = 'context-source-label';
-  container.appendChild(source);
+  fragment.appendChild(source);
 
   const hint = document.createElement('p');
   hint.className = 'context-snapshot-hint';
   hint.textContent = 'Save page context to reuse it later without re-scraping.';
-  container.appendChild(hint);
+  fragment.appendChild(hint);
 
   const actions = document.createElement('div');
   actions.className = 'row context-snapshot-actions';
 
+  // Use DocumentFragment for batch button creation
+  const actionsFragment = document.createDocumentFragment();
+  
   const saveBtn = document.createElement('button');
   saveBtn.id = 'save-context-snapshot';
   saveBtn.type = 'button';
   saveBtn.className = 'filled';
   saveBtn.textContent = 'Save snapshot';
-  actions.appendChild(saveBtn);
+  actionsFragment.appendChild(saveBtn);
 
   const liveBtn = document.createElement('button');
   liveBtn.id = 'use-live-context';
   liveBtn.type = 'button';
   liveBtn.className = 'tonal';
   liveBtn.textContent = 'Use live tab';
-  actions.appendChild(liveBtn);
-
-  container.appendChild(actions);
+  actionsFragment.appendChild(liveBtn);
+  
+  actions.appendChild(actionsFragment);
+  fragment.appendChild(actions);
 
   const list = document.createElement('ul');
   list.id = 'context-snapshot-list';
   list.className = 'attachment-list context-snapshot-list';
-  container.appendChild(list);
+  fragment.appendChild(list);
 
-  modalCard.insertBefore(container, contextArea);
+  // Append all children at once
+  container.appendChild(fragment);
+  modalCard.insertBefore(container, els.contextText);
 
   // Store references in els
   els.contextSource = source;
@@ -90,6 +98,9 @@ export function renderContextSnapshots(
     row.dataset.id = snap.id;
     if (snap.id === activeId) row.classList.add('is-active');
 
+    // Use DocumentFragment for batch child element creation
+    const rowFragment = document.createDocumentFragment();
+
     const info = document.createElement('div');
     info.className = 'snapshot-info';
 
@@ -105,15 +116,20 @@ export function renderContextSnapshots(
     meta.textContent = metaBits.join(' • ');
     info.appendChild(meta);
 
+    rowFragment.appendChild(info);
+
     const actions = document.createElement('div');
     actions.className = 'snapshot-actions';
 
+    // Use DocumentFragment for batch button creation
+    const actionsFragment = document.createDocumentFragment();
+    
     const useBtn = document.createElement('button');
     useBtn.className = 'tonal use-snapshot';
     useBtn.dataset.id = snap.id;
     useBtn.textContent = snap.id === activeId ? 'In use' : 'Use';
     useBtn.disabled = snap.id === activeId;
-    actions.appendChild(useBtn);
+    actionsFragment.appendChild(useBtn);
 
     const delBtn = document.createElement('button');
     delBtn.className = 'icon delete-snapshot';
@@ -121,10 +137,13 @@ export function renderContextSnapshots(
     delBtn.textContent = '✕';
     delBtn.title = 'Delete snapshot';
     delBtn.setAttribute('aria-label', 'Delete snapshot');
-    actions.appendChild(delBtn);
-
-    row.appendChild(info);
-    row.appendChild(actions);
+    actionsFragment.appendChild(delBtn);
+    
+    actions.appendChild(actionsFragment);
+    rowFragment.appendChild(actions);
+    
+    // Append all children at once
+    row.appendChild(rowFragment);
     fragment.appendChild(row);
   });
 

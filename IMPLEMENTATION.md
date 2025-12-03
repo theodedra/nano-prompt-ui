@@ -7,21 +7,27 @@ Complete technical documentation for NanoPromptUI Chrome extension features and 
 ## Table of Contents
 
 1. [Component Vocabulary](#component-vocabulary)
-2. [Chrome AI APIs](#chrome-ai-apis)
-3. [API Detection Logic](#api-detection-logic)
-4. [Multilingual Support](#multilingual-support)
-5. [Translation Implementation](#translation-implementation)
-6. [Multimodal Support (Images)](#multimodal-support-images)
-7. [PDF Support](#pdf-support)
-8. [Virtual Scrolling](#virtual-scrolling)
-9. [Lazy Session Loading](#lazy-session-loading)
-10. [Storage Architecture](#storage-architecture)
-11. [Smart Replies](#smart-replies)
-12. [Session Warmup](#session-warmup)
-13. [Context Snapshots](#context-snapshots)
-14. [Speech Synthesis](#speech-synthesis)
-15. [Setup Guide](#setup-guide)
-16. [HTML Sanitization Trade-offs](#html-sanitization-trade-offs)
+2. [Architecture Decisions](#architecture-decisions)
+3. [Chrome AI APIs](#chrome-ai-apis)
+4. [API Detection Logic](#api-detection-logic)
+5. [Multilingual Support](#multilingual-support)
+6. [Translation Implementation](#translation-implementation)
+7. [Multimodal Support (Images)](#multimodal-support-images)
+8. [PDF Support](#pdf-support)
+9. [Virtual Scrolling](#virtual-scrolling)
+10. [Lazy Session Loading](#lazy-session-loading)
+11. [Storage Architecture](#storage-architecture)
+12. [Smart Replies](#smart-replies)
+13. [Session Warmup](#session-warmup)
+14. [Context Snapshots](#context-snapshots)
+15. [Speech Synthesis](#speech-synthesis)
+16. [Setup Guide](#setup-guide)
+17. [HTML Sanitization Trade-offs](#html-sanitization-trade-offs)
+18. [File Structure](#file-structure)
+19. [Intent Classification](#intent-classification)
+20. [SPA Cache Invalidation](#spa-cache-invalidation)
+21. [Attachment Data Integrity](#attachment-data-integrity)
+22. [Markdown HTML Caching](#markdown-html-caching)
 
 ---
 
@@ -273,6 +279,187 @@ All components use these shared variables for consistency:
 | Showing/hiding content | `.is-open`/`.is-closed` or `.is-collapsed`/`.is-expanded` |
 | Indicating selection | `.is-active` |
 | Indicating an error | `.is-error` or `.chip--error` |
+
+---
+
+## Architecture Decisions
+
+### Handler-to-Storage/Model Routing
+
+This section establishes guidelines for when handlers should directly access storage/model layers versus going through controllers.
+
+#### Principle
+
+**Controllers are for coordination and transformation. Simple read operations can bypass controllers for clarity and performance.**
+
+#### Direct Access (Bypass Controllers)
+
+Handlers should directly import and use storage/model for:
+
+##### Simple Read Operations
+
+These operations are pure data access with no side effects or coordination needed:
+
+- **Session reads:**
+  - `Storage.getCurrentSessionSync()` - Get current session
+  - `Storage.getCurrentSessionId()` - Get current session ID
+  - `Storage.getSession(sessionId)` - Get session by ID
+  - `Storage.getSessions()` - Get all sessions
+  - `Storage.getSessionMeta()` - Get session metadata
+
+- **Settings reads:**
+  - `Storage.getSettings()` - Get all settings
+  - `Storage.getTemplates()` - Get templates
+  - `Storage.getContextDraft()` - Get context draft
+
+- **State reads:**
+  - `Storage.getPendingAttachments()` - Get pending attachments
+  - `Storage.getAvailability()` - Get AI availability status
+  - `Storage.getAvailabilityCheckedAt()` - Get availability check timestamp
+
+- **Model reads:**
+  - `Model.isGenerating()` - Check if AI is generating
+  - `Model.isSpeaking()` - Check if speech is active
+  - `Model.isSomethingRunning()` - Check if any operation is running
+
+- **UI reads:**
+  - `UI.getInputValue()` - Get input field value
+
+##### When to Use Direct Access
+
+Use direct access when:
+1. The operation is a **pure read** (no side effects)
+2. The operation is a **simple pass-through** (controller just calls storage/model)
+3. No **coordination** is needed between multiple layers
+4. No **transformation** or **validation** is required
+5. No **UI updates** are triggered by the read
+
+#### Controller Access (Required)
+
+Handlers must use controllers for:
+
+##### Operations Requiring Coordination
+
+These operations coordinate between multiple layers or have side effects:
+
+- **Session mutations:**
+  - `Controller.switchSession()` - Coordinates save, UI updates, menu closing
+  - `Controller.createNewSession()` - Coordinates save, UI updates
+  - `Controller.removeSession()` - Coordinates save, UI updates, toast notifications
+  - `Controller.renameSessionById()` - Coordinates save, UI updates, toast
+
+- **Message mutations:**
+  - `Controller.addMessage()` - Coordinates with UI updates
+  - `Controller.patchMessage()` - Coordinates with UI updates
+  - `Controller.updateLastBubble()` - Updates UI directly
+
+- **State persistence:**
+  - `Controller.persistState()` - Coordinates save timing (debounced vs immediate)
+  - `Controller.persistContextDraft()` - Coordinates save and UI updates
+
+- **Rendering operations:**
+  - `Controller.renderSessionsList()` - Coordinates metadata loading and UI rendering
+  - `Controller.renderCurrentLog()` - Coordinates session loading and UI rendering
+  - `Controller.renderContextUI()` - Coordinates context state and UI rendering
+
+- **Input operations with side effects:**
+  - `Controller.setInputValue()` - May trigger UI updates
+  - `Controller.focusInput()` - Directly manipulates DOM
+
+##### When to Use Controllers
+
+Use controllers when:
+1. The operation **mutates state** and needs persistence coordination
+2. The operation requires **UI updates** as part of the flow
+3. The operation needs **coordination** between storage, model, and UI
+4. The operation includes **transformation logic** or **validation**
+5. The operation triggers **side effects** (toasts, menu closing, etc.)
+
+#### Examples
+
+##### ✅ Good: Direct Access for Simple Reads
+
+```javascript
+// handlers/prompt-handlers.js
+import * as Storage from '../core/storage.js';
+import * as Model from '../core/model.js';
+
+export async function executePrompt(text) {
+  // Direct access - simple read, no coordination needed
+  const session = Storage.getCurrentSessionSync();
+  const settings = Storage.getSettings();
+  
+  // Use controller for mutation that needs coordination
+  Controller.addMessage(session.id, userMessage);
+  Controller.refreshLog();
+}
+```
+
+**Note:** While storage and model modules are located in `core/`, import paths may vary depending on your module resolution setup. Check existing handler files for the actual import pattern used in your codebase.
+
+##### ✅ Good: Controller for Coordination
+
+```javascript
+// handlers/session-handlers.js
+import * as Controller from '../controller/index.js';
+
+export async function switchSessionHandler(row) {
+  const id = row.dataset.id;
+  // Use controller - coordinates save, UI updates, menu closing
+  await Controller.switchSession(id);
+}
+```
+
+##### ❌ Bad: Unnecessary Controller Wrapper
+
+```javascript
+// Don't do this - simple read doesn't need controller
+const session = Controller.getCurrentSession(); // Just calls Storage.getCurrentSessionSync()
+```
+
+##### ✅ Good: Direct Access Instead
+
+```javascript
+// Do this - direct access is clearer and faster
+import * as Storage from '../core/storage.js';
+const session = Storage.getCurrentSessionSync();
+```
+
+**Note:** Adjust import paths based on your actual file structure. Files are located in `core/storage.js` and `core/model.js`.
+
+#### Migration Strategy
+
+When refactoring handlers:
+
+1. **Identify simple reads** - Look for controller calls that are pure pass-throughs
+2. **Add direct imports** - Import storage/model directly in handler files
+3. **Replace calls** - Replace controller calls with direct storage/model calls
+4. **Keep controllers** - Keep controller functions for backward compatibility and complex operations
+5. **Update documentation** - Document the pattern in controller files
+
+#### Backward Compatibility
+
+Controller functions remain available for:
+- Backward compatibility with existing code
+- Complex operations that need coordination
+- External code that may import controllers directly
+
+#### Performance Benefits
+
+Direct access provides:
+- **Reduced function call overhead** - One less function call in the stack
+- **Clearer code** - Direct imports show exactly what layer is being accessed
+- **Better tree-shaking** - Bundlers can optimize unused controller functions
+- **Easier debugging** - Stack traces show direct storage/model calls
+
+#### Summary
+
+- **Simple reads** → Direct storage/model access
+- **Mutations/coordination** → Use controllers
+- **When in doubt** → Use controllers (safer default)
+- **Document exceptions** → If a read needs coordination, document why
+
+See also: [Storage Architecture](#storage-architecture), [File Structure](#file-structure)
 
 ---
 
@@ -919,58 +1106,95 @@ All other APIs are optional with clear fallback explanations:
 
 ## File Structure
 
-### Core Modules
+### Core Modules (`core/`)
 
 | File | Purpose |
 |------|---------|
-| `model.js` | AI operations, streaming, translation, speech |
-| `storage.js` | IndexedDB, session management, attachments, markdown caching |
-| `controller/` | Mediates between Model, Storage, and UI (modular controllers) |
-| `virtual-scroll.js` | Performance optimization for large logs |
-| `pdf/pdf.js` | PDF extraction coordinator (delegates to Web Worker) |
-| `pdf/pdf-worker.js` | Web Worker for off-thread PDF text extraction |
-| `constants.js` | All configuration values and limits |
-| `context.js` | Context fetching, intent classification, token estimation |
-| `prompt-builder.js` | Prompt assembly and token budget management |
+| `core/model.js` | AI operations: Chrome Prompt API interface, Translation API, streaming responses, speech synthesis, model warmup, download polling |
+| `core/storage.js` | IndexedDB operations: session persistence, attachment storage (separate store), dirty-set tracking, debounced saves, markdown HTML caching, lazy session loading |
+| `core/state.js` | Core application state management: in-memory session cache, settings, templates, snapshots, application state flags |
+| `core/context.js` | Context operations: page content fetching via content script, intent classification, context snapshots, token estimation (non-ASCII aware) |
+| `core/prompt-builder.js` | Prompt assembly: system rules, page context, attachments, message history, token budget management, truncation logic |
+
+### Controller Modules (`controller/`)
+
+| File | Purpose |
+|------|---------|
+| `controller/index.js` | Re-exports all controller modules for unified access |
+| `controller/session-controller.js` | Session coordination: switch, create, rename, delete with UI updates and persistence |
+| `controller/message-controller.js` | Message coordination: add, patch, update messages with UI rendering and storage persistence |
+| `controller/context-controller.js` | Context coordination: fetch context, manage snapshots, apply active snapshot to context |
+| `controller/attachment-controller.js` | Attachment coordination: add/remove attachments with UI updates and IndexedDB persistence |
+| `controller/template-controller.js` | Template coordination: create, update, delete templates with UI updates and storage |
+| `controller/settings-controller.js` | Settings coordination: persist settings changes, update UI, sync form values |
+| `controller/input-controller.js` | Input coordination: set input value, focus management, error state handling |
+
+**Note:** Controllers handle operations requiring coordination between multiple layers. Simple reads can bypass controllers (see [Architecture Decisions](#architecture-decisions)).
 
 ### Handler Modules (`handlers/`)
 
 | File | Purpose |
 |------|---------|
-| `chat-handlers.js` | Re-exports and shared navigation handlers |
-| `prompt-handlers.js` | Prompt execution, summarization, translation |
-| `session-handlers.js` | Session switching, renaming, deletion, search |
-| `template-handlers.js` | Template CRUD operations |
-| `snapshot-handlers.js` | Context snapshot management |
-| `voice-handlers.js` | Speech recognition and synthesis |
-| `attachment-handlers.js` | File upload processing (sequential queue) |
-| `settings-handlers.js` | Settings panel interactions |
-| `context-menu-handlers.js` | Routes context menu commands |
+| `handlers/chat-handlers.js` | Bootstrap logic, availability checks, navigation handlers, chat copy functionality, re-exports all handler modules |
+| `handlers/prompt-handlers.js` | Prompt execution: user queries, summarization, rewriting, translation with context and attachments |
+| `handlers/session-handlers.js` | Session UI handlers: switch, create, rename, delete, search with user interactions |
+| `handlers/template-handlers.js` | Template UI handlers: create, edit, delete templates from UI events |
+| `handlers/snapshot-handlers.js` | Context snapshot UI handlers: save, apply, delete snapshots from UI interactions |
+| `handlers/voice-handlers.js` | Voice UI handlers: speech recognition (mic input), speech synthesis (TTS) controls |
+| `handlers/attachment-handlers.js` | File upload handlers: image/PDF processing, sequential queue, canvas conversion, blob storage |
+| `handlers/settings-handlers.js` | Settings UI handlers: theme switching, language selection, diagnostics display, setup guide |
+| `handlers/context-menu-handlers.js` | Context menu routing: routes browser context menu commands (summarize, rewrite, translate, describe image) to appropriate handlers |
+
+**Note:** Handlers use direct storage/model access for simple reads and controllers for mutations/coordination (see [Architecture Decisions](#architecture-decisions)).
 
 ### UI Modules (`ui/`)
 
 | File | Purpose |
 |------|---------|
-| `index.js` | Re-exports all UI modules |
-| `core.js` | DOM caching, busy state, status, input controls |
-| `log-renderer.js` | Chat message rendering (with cached HTML) |
-| `session-renderer.js` | Session list rendering |
-| `template-renderer.js` | Template list rendering |
-| `snapshot-renderer.js` | Context snapshot rendering |
-| `modal-manager.js` | Modal open/close, focus trapping |
-| `attachment-renderer.js` | Attachment chip rendering |
-| `state.js` | UI state management |
+| `ui/index.js` | Re-exports all UI modules and initializes cross-module callbacks |
+| `ui/core.js` | Core UI utilities: DOM element caching, busy state management, status text, input controls, theme application, diagnostics |
+| `ui/log-renderer.js` | Chat log rendering: message bubbles, markdown rendering, HTML caching, smart replies, streaming updates |
+| `ui/session-renderer.js` | Session list rendering: sidebar session list with search, active state, edit mode |
+| `ui/template-renderer.js` | Template list rendering: template sidebar with edit mode, inline editing |
+| `ui/snapshot-renderer.js` | Context snapshot rendering: snapshot list with active state, context source labels |
+| `ui/modal-manager.js` | Modal management: open/close modals, focus trapping, settings modal, context modal, setup guide modal |
+| `ui/attachment-renderer.js` | Attachment UI: pending attachment chips, file picker trigger, PDF truncation notes |
+| `ui/toast.js` | Toast notification system: success, error, warning, info notifications with auto-dismiss |
+| `ui/virtual-scroll.js` | Virtual scrolling: performance optimization for large chat histories (200+ messages), cached DOM nodes |
 
-### Other Modules
+### Configuration (`config/`)
 
 | File | Purpose |
 |------|---------|
-| `toast.js` | Toast notifications |
-| `sidepanel.js` | Main entry point, event wiring |
-| `background.js` | Service worker, context menus, warmup |
-| `content.js` | Page scraping with SPA cache invalidation |
-| `utils/utils.js` | Markdown → HTML, sanitization, utilities |
-| `utils/errors.js` | Standardized error handling |
+| `config/constants.js` | Centralized configuration: size limits, timing values, UI messages, validation rules, scraping constants, model configuration |
+
+### PDF Processing (`pdf/`)
+
+| File | Purpose |
+|------|---------|
+| `pdf/pdf.js` | PDF extraction coordinator: main thread interface, delegates to Web Worker, manages worker lifecycle |
+| `pdf/pdf-worker.js` | PDF extraction worker: off-thread PDF parsing using PDF.js, sequential page processing, character budget management |
+| `pdf/lib/pdf.min.js` | Bundled Mozilla PDF.js library: PDF parsing engine |
+| `pdf/lib/pdf.worker.min.js` | PDF.js worker script: required by PDF.js for worker-based parsing |
+
+### Utilities (`utils/`)
+
+| File | Purpose |
+|------|---------|
+| `utils/utils.js` | General utilities: markdown → HTML conversion, HTML sanitization (whitelist-based), helper functions |
+| `utils/errors.js` | Error handling: standardized error reporting, toast integration, error categorization |
+| `utils/setup-guide.js` | Setup utilities: Chrome API availability checks, flag detection, two-tier detection strategy, status reporting |
+
+### Entry Points & Service Files
+
+| File | Purpose |
+|------|---------|
+| `sidepanel.html` | Side panel HTML markup: main UI structure, modal containers, sidebar layout |
+| `sidepanel.js` | Side panel entry point: DOMContentLoaded bootstrap, event listener wiring, warmup coordination |
+| `sidepanel.css` | Global stylesheet: CSS variables, layout, theming (light/dark/system), component styles, responsive design |
+| `background.js` | Service worker: extension setup, side panel configuration, context menu creation, model warmup, message routing |
+| `content.js` | Content script: page content scraping with TreeWalker, SPA cache invalidation, main content detection, noise filtering |
+| `manifest.json` | Extension manifest: MV3 configuration, permissions, side panel setup, content scripts, web accessible resources |
 
 ---
 

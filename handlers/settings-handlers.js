@@ -2,20 +2,23 @@
  * Settings Handlers
  *
  * Handles settings UI interactions via controller layer.
+ * Uses direct storage/model access for simple read operations (see IMPLEMENTATION.md).
  */
 
 import * as Controller from '../controller/index.js';
-import * as Model from '../model.js';
-import { getSettingOrDefault, LANGUAGE_LABELS, THEME_LABELS } from '../constants.js';
-import { getSetupStatus } from '../setup-guide.js';
-import { toast } from '../toast.js';
+import * as Model from '../core/model.js';
+import * as Storage from '../core/storage.js';
+import { getSettingOrDefault, LANGUAGE_LABELS, THEME_LABELS } from '../config/constants.js';
+import { getSetupStatus } from '../utils/setup-guide.js';
+import { toast } from '../ui/toast.js';
 import * as UI from '../ui/index.js';
 import { escapeHtml } from '../utils/utils.js';
 import { handleError } from '../utils/errors.js';
 
 export function handleOpenSettings() {
   UI.openSettingsModal();
-  const settings = Controller.getSettings();
+  // Direct access - simple read operation
+  const settings = Storage.getSettings();
   const currentLang = getSettingOrDefault(settings, 'language');
   const currentTheme = getSettingOrDefault(settings, 'theme');
 
@@ -35,8 +38,8 @@ export function handleOpenSettings() {
 async function renderDiagnosticsPanel() {
   try {
     const diag = await Model.getDiagnostics({
-      availability: Controller.getAvailability(),
-      availabilityCheckedAt: Controller.getAvailabilityCheckedAt()
+      availability: Storage.getAvailability(),
+      availabilityCheckedAt: Storage.getAvailabilityCheckedAt()
     });
     UI.updateDiagnostics(diag);
   } catch (e) {
@@ -83,11 +86,16 @@ export async function handleDiagnosticsRefresh() {
 
     const result = await Model.checkAvailability({
       forceCheck: true,
-      cachedAvailability: Controller.getAvailability(),
-      cachedCheckedAt: Controller.getAvailabilityCheckedAt()
+      cachedAvailability: Storage.getAvailability(),
+      cachedCheckedAt: Storage.getAvailabilityCheckedAt()
     });
 
-    Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
+    // Update storage first
+    Storage.setAvailability(result.status);
+    Storage.setAvailabilityCheckedAt(result.checkedAt);
+    
+    // Then update UI
+    UI.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
 
     const diag = await Model.getDiagnostics({
       availability: result.status,
@@ -105,7 +113,12 @@ export async function handleWarmupClick() {
     UI.updateDiagnostics({ lastWarmupStatus: 'running' });
     const result = await Model.warmUpModel();
 
-    Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
+    // Update storage first
+    Storage.setAvailability(result.status);
+    Storage.setAvailabilityCheckedAt(result.checkedAt);
+    
+    // Then update UI
+    UI.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
     UI.updateDiagnostics(result.diag);
 
     if (result.warmupStatus === 'success') {
@@ -115,7 +128,7 @@ export async function handleWarmupClick() {
     } else if (result.warmupStatus === 'unavailable') {
       toast.info('Prompt API is not available in this Chrome build');
     } else {
-      Controller.showToast('error', 'Warmup failed');
+      toast.error('Warmup failed');
     }
   } catch (e) {
     handleError(e, {
@@ -139,7 +152,8 @@ export function handleDocumentClick(event) {
 }
 
 export async function handleSaveSettings() {
-  const settings = Controller.getSettings();
+  // Direct access - simple read operation
+  const settings = Storage.getSettings();
   const defaults = {
     temperature: settings.temperature,
     topK: settings.topK,
@@ -158,7 +172,7 @@ export async function handleSaveSettings() {
   });
   await Controller.persistState();
 
-  Controller.applyTheme(theme);
+  UI.applyTheme(theme);
   Model.resetModel();
 
   UI.closeModal();
@@ -166,10 +180,16 @@ export async function handleSaveSettings() {
   // Refresh availability
   const result = await Model.checkAvailability({
     forceCheck: false,
-    cachedAvailability: Controller.getAvailability(),
-    cachedCheckedAt: Controller.getAvailabilityCheckedAt()
+    cachedAvailability: Storage.getAvailability(),
+    cachedCheckedAt: Storage.getAvailabilityCheckedAt()
   });
-  Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
+  
+  // Update storage first
+  Storage.setAvailability(result.status);
+  Storage.setAvailabilityCheckedAt(result.checkedAt);
+  
+  // Then update UI
+  UI.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
 
   toast.success('Settings saved');
 }

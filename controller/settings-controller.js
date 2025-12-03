@@ -7,10 +7,10 @@
 import {
   getSettings as getStoredSettings,
   updateSettings
-} from '../storage.js';
+} from '../core/storage.js';
 import {
   getSettingOrDefault
-} from '../constants.js';
+} from '../config/constants.js';
 
 /**
  * Get all settings

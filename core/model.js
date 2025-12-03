@@ -6,7 +6,7 @@
  */
 
 import { buildPromptWithContext } from './context.js';
-import { throttle } from './utils/utils.js';
+import { throttle } from '../utils/utils.js';
 import {
   MODEL_CONFIG,
   LIMITS,
@@ -19,8 +19,8 @@ import {
   LANGUAGE_NAMES,
   STORAGE_KEYS,
   getSettingOrDefault
-} from './constants.js';
-import { handleError } from './utils/errors.js';
+} from '../config/constants.js';
+import { handleError } from '../utils/errors.js';
 
 const DIAGNOSTICS_KEY = 'nanoPrompt.diagnostics';
 const SESSION_WARMUP_KEY = STORAGE_KEYS.SESSION_WARMUP;
@@ -764,13 +764,73 @@ async function fetchImageWithRetry(url) {
 
 /**
  * Convert blob to canvas (required for Prompt API image input)
+ * Uses createImageBitmap() API for off-main-thread image processing
  * @param {Blob} blob - Image blob
  * @param {number} maxWidth - Maximum width for resizing
  * @returns {Promise<HTMLCanvasElement>}
  */
 async function blobToCanvas(blob, maxWidth) {
+  // Check if createImageBitmap is available (Chrome 50+, Firefox 42+, Safari 15.4+)
+  if (typeof createImageBitmap === 'function') {
+    try {
+      // First, decode the image to get dimensions (off main thread)
+      const imageBitmap = await createImageBitmap(blob);
+      let width = imageBitmap.width;
+      let height = imageBitmap.height;
+
+      // Calculate resize dimensions if needed
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+
+      // If resizing is needed, use createImageBitmap with resize options
+      // This performs resize during decode (off main thread)
+      let resizedBitmap;
+      if (width !== imageBitmap.width || height !== imageBitmap.height) {
+        resizedBitmap = await createImageBitmap(imageBitmap, {
+          resizeWidth: width,
+          resizeHeight: height,
+          resizeQuality: 'high'
+        });
+        // Clean up original bitmap
+        imageBitmap.close();
+      } else {
+        resizedBitmap = imageBitmap;
+      }
+
+      // Draw ImageBitmap to canvas (this is fast, just a transfer)
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(resizedBitmap, 0, 0);
+      
+      // Clean up ImageBitmap
+      resizedBitmap.close();
+
+      return canvas;
+    } catch (error) {
+      // If createImageBitmap fails, fall back to traditional method
+      console.warn('createImageBitmap failed, using fallback:', error);
+      return blobToCanvasFallback(blob, maxWidth);
+    }
+  } else {
+    // Fallback for browsers without createImageBitmap support
+    return blobToCanvasFallback(blob, maxWidth);
+  }
+}
+
+/**
+ * Fallback implementation using traditional Image + Canvas approach
+ * @param {Blob} blob - Image blob
+ * @param {number} maxWidth - Maximum width for resizing
+ * @returns {Promise<HTMLCanvasElement>}
+ */
+function blobToCanvasFallback(blob, maxWidth) {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    const objectUrl = URL.createObjectURL(blob);
 
     img.onload = () => {
       let width = img.width;
@@ -786,17 +846,17 @@ async function blobToCanvas(blob, maxWidth) {
       canvas.height = height;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(img, 0, 0, width, height);
-      URL.revokeObjectURL(img.src);
+      URL.revokeObjectURL(objectUrl);
 
       resolve(canvas);
     };
 
     img.onerror = () => {
-      URL.revokeObjectURL(img.src);
+      URL.revokeObjectURL(objectUrl);
       reject(new Error('Failed to load image from blob'));
     };
 
-    img.src = URL.createObjectURL(blob);
+    img.src = objectUrl;
   });
 }
 

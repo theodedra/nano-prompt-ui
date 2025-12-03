@@ -1,10 +1,10 @@
-import { sanitizeText } from './utils/utils.js';
+import { sanitizeText } from '../utils/utils.js';
 import {
   LIMITS,
   TIMING,
   UI_MESSAGES,
   VALIDATION
-} from './constants.js';
+} from '../config/constants.js';
 import { getActiveSnapshot } from './storage.js';
 import { enforceContextLimits } from './prompt-builder.js';
 

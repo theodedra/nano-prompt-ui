@@ -2,12 +2,16 @@
  * Voice Handlers - Voice input and speech UI event handlers
  *
  * Handles microphone input, speech recognition, and text-to-speech.
+ * Uses direct storage/model access for simple read operations (see IMPLEMENTATION.md).
  */
 
 import * as Controller from '../controller/index.js';
-import * as Model from '../model.js';
-import { USER_ERROR_MESSAGES } from '../constants.js';
+import * as Model from '../core/model.js';
+import * as Storage from '../core/storage.js';
+import * as UI from '../ui/index.js';
+import { USER_ERROR_MESSAGES } from '../config/constants.js';
 import { handleError } from '../utils/errors.js';
+import { toast } from '../ui/toast.js';
 
 // Speech recognition state
 let recognition = null;
@@ -19,7 +23,7 @@ let recognizing = false;
 export function handleMicClick() {
   const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Speech) {
-    Controller.showToast('error', USER_ERROR_MESSAGES.SPEECH_NOT_SUPPORTED);
+    toast.error(USER_ERROR_MESSAGES.SPEECH_NOT_SUPPORTED);
     return;
   }
 
@@ -37,12 +41,12 @@ export function handleMicClick() {
 
   recognition.onstart = () => {
     recognizing = true;
-    Controller.setMicState(true);
+    UI.setMicState(true);
   };
 
   recognition.onend = () => {
     recognizing = false;
-    Controller.setMicState(false);
+    UI.setMicState(false);
     recognition = null;
   };
 
@@ -54,7 +58,7 @@ export function handleMicClick() {
       logError: true
     });
     recognizing = false;
-    Controller.setMicState(false);
+    UI.setMicState(false);
     recognition = null;
   };
 
@@ -77,7 +81,7 @@ export function handleMicClick() {
     });
     recognition = null;
     recognizing = false;
-    Controller.setMicState(false);
+    UI.setMicState(false);
   }
 }
 
@@ -85,13 +89,14 @@ export function handleMicClick() {
  * Handle speak last AI response button click
  */
 export function handleSpeakLast() {
-  const session = Controller.getCurrentSession();
+  // Direct access - simple read operation
+  const session = Storage.getCurrentSessionSync();
   const last = [...session.messages].reverse().find(m => m.role === 'ai');
   if (last) {
     Model.speakText(last.text, {
-      onStart: () => Controller.setStopEnabled(true),
-      onEnd: () => Controller.setStopEnabled(false),
-      onError: () => Controller.setStopEnabled(false)
+      onStart: () => UI.setStopEnabled(true),
+      onEnd: () => UI.setStopEnabled(false),
+      onError: () => UI.setStopEnabled(false)
     });
   }
 }

@@ -2,20 +2,24 @@
  * Prompt Handlers - Prompt execution and AI interaction handlers
  *
  * Handles sending prompts to AI, summarization, translation, and related features.
+ * Uses direct storage/model access for simple read operations (see IMPLEMENTATION.md).
  */
 
 import * as Controller from '../controller/index.js';
-import * as Model from '../model.js';
-import { fetchContext } from '../context.js';
-import { classifyIntent } from '../prompt-builder.js';
+import * as Model from '../core/model.js';
+import * as Storage from '../core/storage.js';
+import * as UI from '../ui/index.js';
+import { fetchContext } from '../core/context.js';
+import { classifyIntent } from '../core/prompt-builder.js';
 import {
   LIMITS,
   UI_MESSAGES,
   USER_ERROR_MESSAGES,
   INTENT_TYPES,
   getSettingOrDefault
-} from '../constants.js';
+} from '../config/constants.js';
 import { handleError, handleErrorReturnEmpty } from '../utils/errors.js';
+import { toast } from '../ui/toast.js';
 
 // Smart reply generation queue management
 let currentSmartReplyGenerationToken = 0;
@@ -32,7 +36,7 @@ export async function refreshContextDraft(force = false, shouldSave = true) {
     const text = ctx?.text || '';
 
     Controller.setRestrictedState(Boolean(ctx?.isRestricted));
-    Controller.restoreStopButtonState(Model.isSomethingRunning());
+    UI.restoreStopButtonState(Model.isSomethingRunning());
     Controller.setContextDraft(text);
 
     if (shouldSave) {
@@ -58,7 +62,7 @@ export async function refreshContextDraft(force = false, shouldSave = true) {
  * @returns {{userMessage: Object, aiMessageIndex: number}} User message and AI message index
  */
 function setupPromptMessages(session, text, displayText, attachments) {
-  Controller.renderSmartReplies([]);
+  UI.renderSmartReplies([]);
 
   const userMessage = {
     role: 'user',
@@ -70,9 +74,9 @@ function setupPromptMessages(session, text, displayText, attachments) {
   Controller.refreshLog();
 
   // Set up AI message placeholder
-  Controller.setBusy(true);
-  Controller.setStopEnabled(true);
-  Controller.setStatus('Thinking...');
+  UI.setBusy(true);
+  UI.setStopEnabled(true);
+  UI.setStatusText('Thinking...');
 
   const aiMessageIndex = session.messages.length;
   Controller.addMessage(session.id, { role: 'ai', text: '', ts: Date.now() });
@@ -131,9 +135,9 @@ function createPromptCallbacks(session, aiMessageIndex, onCompleteCallback) {
  * @returns {Promise<void>}
  */
 async function cleanupPromptExecution() {
-  Controller.setBusy(false);
-  Controller.setStopEnabled(false);
-  Controller.setStatus('Ready to chat.');
+  UI.setBusy(false);
+  UI.setStopEnabled(false);
+  UI.setStatusText('Ready to chat.');
   await Controller.persistState();
 }
 
@@ -163,8 +167,9 @@ function handlePromptPostProcessing(result, lastAiText, session, userMessage, ai
  * @param {string} displayText - Text to show in chat (optional)
  */
 export async function executePrompt(text, contextOverride, attachments, displayText = null) {
-  const session = Controller.getCurrentSession();
-  const settings = Controller.getSettings();
+  // Direct access - simple read operations
+  const session = Storage.getCurrentSessionSync();
+  const settings = Storage.getSettings();
 
   const { userMessage, aiMessageIndex } = setupPromptMessages(session, text, displayText, attachments);
 
@@ -198,7 +203,8 @@ export async function generateSmartRepliesBackground(sessionId, userText, aiText
   const generationToken = currentSmartReplyGenerationToken;
 
   try {
-    const settings = Controller.getSettings();
+    // Direct access - simple read operation
+    const settings = Storage.getSettings();
     const replies = await Model.generateSmartReplies(userText, aiText, settings);
 
     // Only apply results if this generation is still current
@@ -210,8 +216,26 @@ export async function generateSmartRepliesBackground(sessionId, userText, aiText
 
     // Double-check token before rendering (race condition protection)
     if (generationToken === currentSmartReplyGenerationToken) {
-      if (Controller.getCurrentSessionId() === sessionId) {
-        Controller.renderSmartReplies(replies);
+      // Direct access - simple read operation
+      if (Storage.getCurrentSessionId() === sessionId) {
+        // Use requestIdleCallback for non-critical UI updates
+        if (typeof requestIdleCallback !== 'undefined') {
+          requestIdleCallback(() => {
+            // Re-check token inside callback to ensure still current
+            if (generationToken === currentSmartReplyGenerationToken && 
+                Storage.getCurrentSessionId() === sessionId) {
+              UI.renderSmartReplies(replies);
+            }
+          }, { timeout: 2000 });
+        } else {
+          // Fallback for browsers without requestIdleCallback
+          setTimeout(() => {
+            if (generationToken === currentSmartReplyGenerationToken && 
+                Storage.getCurrentSessionId() === sessionId) {
+              UI.renderSmartReplies(replies);
+            }
+          }, 0);
+        }
       }
       await Controller.persistState();
     }
@@ -233,7 +257,8 @@ export async function generateSmartRepliesBackground(sessionId, userText, aiText
  */
 export async function generateTitleBackground(sessionId) {
   try {
-    const session = Controller.getSession(sessionId);
+    // Direct access - simple read operation
+    const session = Storage.getSessions()[sessionId];
     if (!session || session.messages.length < 2) return;
     if (session.title !== 'New chat' && !session.title.endsWith('copy')) return;
 
@@ -261,14 +286,17 @@ export async function generateTitleBackground(sessionId) {
 export async function handleAskClick(overrideText = null) {
   if (overrideText?.preventDefault) overrideText.preventDefault();
 
-  const rawInput = typeof overrideText === 'string' ? overrideText : Controller.getInputValue();
+  // Direct access - simple read operation
+  const rawInput = typeof overrideText === 'string' ? overrideText : UI.getInputValue();
   const text = (rawInput || '').trim() || 'Hello';
-  const attachments = Controller.getAttachments();
+  // Direct access - simple read operation
+  const attachments = Storage.getPendingAttachments();
 
   Controller.setInputValue('');
   Controller.clearAttachments();
 
-  let contextOverride = Controller.getContextText();
+  // Direct access - simple read operation (gets UI value, not storage)
+  let contextOverride = UI.getContextText();
   const intent = classifyIntent(text);
 
   if (text.length < LIMITS.SHORT_QUERY_THRESHOLD && intent === INTENT_TYPES.NONE) {
@@ -289,7 +317,7 @@ export async function handleAskClick(overrideText = null) {
       showToast: true,
       logError: true
     });
-    Controller.setStatus(UI_MESSAGES.ERROR);
+    UI.setStatusText(UI_MESSAGES.ERROR);
   }
 }
 
@@ -298,8 +326,9 @@ export async function handleAskClick(overrideText = null) {
  * @returns {Promise<void>}
  */
 export async function handleSummarizeClick() {
-  Controller.setStatus(UI_MESSAGES.READING_TAB);
-  const session = Controller.getCurrentSession();
+  UI.setStatusText(UI_MESSAGES.READING_TAB);
+  // Direct access - simple read operation
+  const session = Storage.getCurrentSessionSync();
   Model.resetModel(session.id);
   const freshText = await refreshContextDraft(true);
   await executePrompt('Summarize the current tab in seven detailed bullet points.', freshText, []);
@@ -337,16 +366,17 @@ export async function runRewriter(text, tone = 'professional') {
  * @param {string} text - Text to translate
  */
 export async function runTranslator(text) {
-  const settings = Controller.getSettings();
+  // Direct access - simple read operations
+  const settings = Storage.getSettings();
   const targetLang = getSettingOrDefault(settings, 'language');
-  const session = Controller.getCurrentSession();
+  const session = Storage.getCurrentSessionSync();
 
-  Controller.setBusy(true);
-  Controller.setStatus('Detecting language...');
+  UI.setBusy(true);
+  UI.setStatusText('Detecting language...');
 
   try {
     const result = await Model.translateText(text, targetLang, {
-      onStatusUpdate: (status) => Controller.setStatus(status)
+      onStatusUpdate: (status) => UI.setStatusText(status)
     });
 
     if (result.sameLanguage) {
@@ -372,11 +402,11 @@ export async function runTranslator(text) {
       Controller.addMessage(session.id, userMessage);
       Controller.addMessage(session.id, aiMessage);
       Controller.refreshLog();
-      Controller.showToast('success', 'Translation complete');
+      toast.success('Translation complete');
     }
 
-    Controller.setBusy(false);
-    Controller.setStatus('Ready to chat.');
+    UI.setBusy(false);
+    UI.setStatusText('Ready to chat.');
     await Controller.persistState();
 
   } catch (error) {
@@ -387,7 +417,7 @@ export async function runTranslator(text) {
     });
 
     // Fallback to Gemini Nano Prompt API
-    Controller.setStatus('Using fallback translation...');
+    UI.setStatusText('Using fallback translation...');
     const langName = Model.LANGUAGE_NAMES[targetLang] || 'English';
 
     try {
@@ -396,7 +426,7 @@ export async function runTranslator(text) {
         '',
         []
       );
-      Controller.showToast('warning', 'Used Gemini Nano fallback (Translation API unavailable)');
+      toast.warning('Used Gemini Nano fallback (Translation API unavailable)');
     } catch (fallbackError) {
       handleError(fallbackError, {
         operation: 'Translation fallback',
@@ -413,8 +443,9 @@ export async function runTranslator(text) {
  * @param {string} url - Image URL to analyze
  */
 export async function runImageDescription(url) {
-  Controller.setStatus(UI_MESSAGES.ANALYZING_IMAGE);
-  const session = Controller.getCurrentSession();
+  UI.setStatusText(UI_MESSAGES.ANALYZING_IMAGE);
+  // Direct access - simple read operation
+  const session = Storage.getCurrentSessionSync();
 
   try {
     const blob = await Model.fetchImage(url);
@@ -436,7 +467,7 @@ export async function runImageDescription(url) {
       showToast: true,
       logError: true
     });
-    Controller.setStatus(UI_MESSAGES.ERROR);
+    UI.setStatusText(UI_MESSAGES.ERROR);
     Model.resetModel(session.id);
 
     Controller.addMessage(session.id, {

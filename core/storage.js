@@ -1,5 +1,5 @@
-import { nanoid, markdownToHtml } from './utils/utils.js';
-import { toast } from './toast.js';
+import { nanoid, markdownToHtml } from '../utils/utils.js';
+import { toast } from '../ui/toast.js';
 import {
   STORAGE_KEYS,
   LIMITS,
@@ -9,8 +9,53 @@ import {
   VALIDATION,
   USER_ERROR_MESSAGES,
   TIMING
-} from './constants.js';
-import { handleError } from './utils/errors.js';
+} from '../config/constants.js';
+import { handleError } from '../utils/errors.js';
+import {
+  // State getters/setters
+  getTemplates,
+  setTemplates,
+  getContextDraft,
+  updateContextDraft,
+  getContextSnapshots,
+  setContextSnapshots,
+  getActiveSnapshotId,
+  setActiveSnapshotId,
+  getAvailability,
+  setAvailability,
+  getAvailabilityCheckedAt,
+  setAvailabilityCheckedAt,
+  hasCachedAvailability,
+  getSettings,
+  updateSettings,
+  getModel,
+  setModel,
+  addPendingAttachment,
+  clearPendingAttachments,
+  getPendingAttachments,
+  removePendingAttachment,
+  // Session state
+  getSessions,
+  getSessionMeta,
+  getCurrentSessionId,
+  setCurrentSessionId,
+  getSession,
+  setSession,
+  deleteSession as deleteSessionFromState,
+  getSessionMetaById,
+  setSessionMeta,
+  markSessionDirty,
+  clearDirtySessions,
+  getDirtySessions,
+  hasSession,
+  getSessionOrder,
+  setSessionOrder,
+  getLazyLoadEnabled,
+  setLazyLoadEnabled,
+  // Internal access for persistence
+  getPersistentState,
+  getSessionManager
+} from './state.js';
 
 const { DB_NAME, DB_VERSION, STORES } = STORAGE_KEYS;
 const SYNC_KEY = STORAGE_KEYS.SYNC;
@@ -20,188 +65,132 @@ const MAX_SESSIONS = LIMITS.MAX_SESSIONS;
 // Re-export for backwards compatibility
 export { BLANK_TEMPLATE_ID, DEFAULT_TEMPLATES };
 
-/**
- * SessionManager class - Encapsulates all session-related state and operations
- */
-class SessionManager {
-  constructor() {
-    this.sessions = new Map(); // Loaded sessions (full data)
-    this.sessionMeta = new Map(); // Session metadata only (id, title, timestamp)
-    this.sessionOrder = [];
-    this.currentId = null;
-    this.lazyLoadEnabled = true; // Enable lazy loading when MAX_SESSIONS is high
-    this.dirtySessions = new Set(); // Track sessions that need to be saved
-  }
-
-  /**
-   * Get all loaded sessions as an object
-   * @returns {Object<string, object>}
-   */
-  getSessions() {
-    const result = {};
-    this.sessions.forEach((session, id) => {
-      result[id] = session;
-    });
-    return result;
-  }
-
-  /**
-   * Get session metadata as an object
-   * @returns {Object<string, object>}
-   */
-  getSessionMeta() {
-    const result = {};
-    this.sessionMeta.forEach((meta, id) => {
-      result[id] = meta;
-    });
-    return result;
-  }
-
-  /**
-   * Get current session ID
-   * @returns {string|null}
-   */
-  getCurrentId() {
-    return this.currentId;
-  }
-
-  /**
-   * Set current session ID
-   * @param {string|null} id
-   */
-  setCurrentId(id) {
-    this.currentId = id;
-  }
-
-  /**
-   * Get session by ID
-   * @param {string} id
-   * @returns {object|undefined}
-   */
-  getSession(id) {
-    return this.sessions.get(id);
-  }
-
-  /**
-   * Set session by ID
-   * @param {string} id
-   * @param {object} session
-   */
-  setSession(id, session) {
-    this.sessions.set(id, session);
-  }
-
-  /**
-   * Delete session by ID
-   * @param {string} id
-   */
-  deleteSession(id) {
-    this.sessions.delete(id);
-    this.sessionMeta.delete(id);
-    this.dirtySessions.delete(id);
-  }
-
-  /**
-   * Get session metadata by ID
-   * @param {string} id
-   * @returns {object|undefined}
-   */
-  getMeta(id) {
-    return this.sessionMeta.get(id);
-  }
-
-  /**
-   * Set session metadata by ID
-   * @param {string} id
-   * @param {object} meta
-   */
-  setMeta(id, meta) {
-    this.sessionMeta.set(id, meta);
-  }
-
-  /**
-   * Mark session as dirty (needs saving)
-   * @param {string} id
-   */
-  markDirty(id) {
-    this.dirtySessions.add(id);
-  }
-
-  /**
-   * Clear all dirty sessions
-   */
-  clearDirty() {
-    this.dirtySessions.clear();
-  }
-
-  /**
-   * Get all dirty session IDs
-   * @returns {Set<string>}
-   */
-  getDirtySessions() {
-    return this.dirtySessions;
-  }
-
-  /**
-   * Check if session exists (in sessions or metadata)
-   * @param {string} id
-   * @returns {boolean}
-   */
-  hasSession(id) {
-    return this.sessions.has(id) || this.sessionMeta.has(id);
-  }
-}
-
-// Create singleton instance
-const sessionManager = new SessionManager();
-
-/**
- * Application state object (internal - use getter/setter API below)
- * Session-related state is now managed by SessionManager
- */
-const appState = {
-  templates: DEFAULT_TEMPLATES.slice(),
-  pendingAttachments: [], // Attachments queued for the next message only
-  contextDraft: '',
-  contextSnapshots: [], // Saved page contexts
-  activeSnapshotId: null, // Currently applied snapshot id
-  availability: 'unknown',
-  availabilityCheckedAt: null,
-  settings: { ...DEFAULT_SETTINGS },
-  model: null
+// Re-export state API for backwards compatibility
+export {
+  getSessions,
+  getSessionMeta,
+  getCurrentSessionId,
+  getTemplates,
+  getContextDraft,
+  getContextSnapshots,
+  getActiveSnapshotId,
+  getAvailability,
+  setAvailability,
+  getAvailabilityCheckedAt,
+  setAvailabilityCheckedAt,
+  hasCachedAvailability,
+  getSettings
 };
 
+// Internal references to state for persistence layer
+const appState = getPersistentState();
+const sessionManager = getSessionManager();
+
 // ============================================================================
-// STATE API - Encapsulated getters/setters for appState
+// VALIDATION - Single Source of Truth
 // ============================================================================
 
-/** @returns {Object<string, object>} All loaded sessions */
-export function getSessions() {
-  return sessionManager.getSessions();
-}
-
-/** @returns {Object<string, object>} Session metadata map */
-export function getSessionMeta() {
-  return sessionManager.getSessionMeta();
-}
-
-/** @returns {string|null} Current active session ID */
-export function getCurrentSessionId() {
-  return sessionManager.getCurrentId();
-}
-
-/** @returns {object[]} Template list */
-export function getTemplates() {
-  return appState.templates;
+/**
+ * Validate a message object
+ * @param {any} message - Message to validate
+ * @returns {{valid: boolean, error?: string}} Validation result
+ */
+function validateMessage(message) {
+  if (!message || typeof message !== 'object') {
+    return { valid: false, error: 'Invalid message: must be an object' };
+  }
+  if (!message.role || !VALIDATION.VALID_MESSAGE_ROLES.includes(message.role)) {
+    return { valid: false, error: `Invalid message role: ${message.role}. Must be one of: ${VALIDATION.VALID_MESSAGE_ROLES.join(', ')}` };
+  }
+  if (typeof message.text !== 'string') {
+    return { valid: false, error: 'Invalid message text: must be a string' };
+  }
+  return { valid: true };
 }
 
 /**
- * Replace templates array
- * @param {object[]} templates
+ * Validate a message patch object (for updates)
+ * @param {any} patch - Patch object to validate
+ * @returns {{valid: boolean, error?: string}} Validation result
  */
-export function setTemplates(templates) {
-  appState.templates = templates;
+function validateMessagePatch(patch) {
+  if (!patch || typeof patch !== 'object') {
+    return { valid: false, error: 'Invalid patch: must be an object' };
+  }
+  // If role is being updated, validate it
+  if ('role' in patch && (!patch.role || !VALIDATION.VALID_MESSAGE_ROLES.includes(patch.role))) {
+    return { valid: false, error: `Invalid message role: ${patch.role}. Must be one of: ${VALIDATION.VALID_MESSAGE_ROLES.join(', ')}` };
+  }
+  // If text is being updated, validate it
+  if ('text' in patch && typeof patch.text !== 'string') {
+    return { valid: false, error: 'Invalid message text: must be a string' };
+  }
+  return { valid: true };
 }
+
+/**
+ * Validate a context snapshot payload
+ * @param {any} payload - Snapshot payload to validate
+ * @returns {{valid: boolean, error?: string}} Validation result
+ */
+function validateContextSnapshot(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return { valid: false, error: 'Invalid snapshot: must be an object' };
+  }
+  if (!payload.text || typeof payload.text !== 'string') {
+    return { valid: false, error: 'Invalid snapshot text: must be a non-empty string' };
+  }
+  if (payload.title !== undefined && typeof payload.title !== 'string') {
+    return { valid: false, error: 'Invalid snapshot title: must be a string' };
+  }
+  if (payload.url !== undefined && typeof payload.url !== 'string') {
+    return { valid: false, error: 'Invalid snapshot URL: must be a string' };
+  }
+  return { valid: true };
+}
+
+/**
+ * Validate a template
+ * @param {any} template - Template to validate
+ * @returns {{valid: boolean, error?: string}} Validation result
+ */
+function validateTemplate(template) {
+  if (!template || typeof template !== 'object') {
+    return { valid: false, error: 'Invalid template: must be an object' };
+  }
+  if (typeof template.label !== 'string') {
+    return { valid: false, error: 'Invalid template label: must be a string' };
+  }
+  if (typeof template.text !== 'string') {
+    return { valid: false, error: 'Invalid template text: must be a string' };
+  }
+  return { valid: true };
+}
+
+/**
+ * Validate a session structure
+ * @param {any} session - Session to validate
+ * @returns {{valid: boolean, error?: string}} Validation result
+ */
+function validateSession(session) {
+  if (!session || typeof session !== 'object') {
+    return { valid: false, error: 'Invalid session: must be an object' };
+  }
+  if (!session.id || typeof session.id !== 'string') {
+    return { valid: false, error: 'Invalid session ID: must be a non-empty string' };
+  }
+  if (typeof session.title !== 'string') {
+    return { valid: false, error: 'Invalid session title: must be a string' };
+  }
+  if (!Array.isArray(session.messages)) {
+    return { valid: false, error: 'Invalid session messages: must be an array' };
+  }
+  return { valid: true };
+}
+
+// ============================================================================
+// TEMPLATE OPERATIONS
+// ============================================================================
 
 /**
  * Add a new custom template
@@ -216,7 +205,9 @@ export function addTemplate(label, text) {
     text: (text || '').trim(),
     custom: true
   };
-  appState.templates.push(template);
+  const templates = getTemplates();
+  templates.push(template);
+  setTemplates(templates);
   return template;
 }
 
@@ -227,7 +218,8 @@ export function addTemplate(label, text) {
  * @returns {boolean} Whether the template was found and updated
  */
 export function updateTemplate(id, patch) {
-  const template = appState.templates.find(t => t.id === id);
+  const templates = getTemplates();
+  const template = templates.find(t => t.id === id);
   if (!template) return false;
 
   if (typeof patch.label === 'string') {
@@ -236,6 +228,7 @@ export function updateTemplate(id, patch) {
   if (typeof patch.text === 'string') {
     template.text = patch.text.trim();
   }
+  setTemplates(templates);
   return true;
 }
 
@@ -248,62 +241,18 @@ export function deleteTemplate(id) {
   // Don't allow deleting the blank template
   if (id === BLANK_TEMPLATE_ID) return false;
 
-  const before = appState.templates.length;
-  appState.templates = appState.templates.filter(t => t.id !== id);
-  return appState.templates.length < before;
+  const templates = getTemplates();
+  const before = templates.length;
+  const filtered = templates.filter(t => t.id !== id);
+  setTemplates(filtered);
+  return filtered.length < before;
 }
 
 /**
  * Reset templates to defaults
  */
 export function resetTemplates() {
-  appState.templates = DEFAULT_TEMPLATES.slice();
-}
-
-/** @returns {string} Current context draft text */
-export function getContextDraft() {
-  return appState.contextDraft;
-}
-
-/** @returns {object[]} Saved context snapshots */
-export function getContextSnapshots() {
-  return appState.contextSnapshots;
-}
-
-/** @returns {string|null} Active snapshot ID */
-export function getActiveSnapshotId() {
-  return appState.activeSnapshotId;
-}
-
-/** @returns {string} AI availability status */
-export function getAvailability() {
-  return appState.availability;
-}
-
-/**
- * Update availability status
- * @param {string} status
- */
-export function setAvailability(status) {
-  appState.availability = status || 'unknown';
-}
-
-/** @returns {number|null} Timestamp of last availability check */
-export function getAvailabilityCheckedAt() {
-  return appState.availabilityCheckedAt;
-}
-
-/**
- * Update availability check timestamp
- * @param {number|null} timestamp
- */
-export function setAvailabilityCheckedAt(timestamp) {
-  appState.availabilityCheckedAt = timestamp || null;
-}
-
-/** @returns {object} Current settings */
-export function getSettings() {
-  return appState.settings;
+  setTemplates(DEFAULT_TEMPLATES.slice());
 }
 
 let metaDirty = false;
@@ -752,7 +701,9 @@ function sanitizeMessageAttachments(sessionId, messageIndex, attachments = []) {
 
     if (hasData) {
       changed = true;
-      const result = persistAttachmentRecord(sessionId, messageIndex, { ...att, ...meta });
+      // Strip canvas property before persistence (HTMLCanvasElement cannot be serialized to IndexedDB)
+      const { canvas, ...attWithoutCanvas } = att;
+      const result = persistAttachmentRecord(sessionId, messageIndex, { ...attWithoutCanvas, ...meta });
       if (result?.promise) {
         attachmentPromises.push(result.promise);
       }
@@ -786,7 +737,7 @@ function normalizeSession(session) {
     return { ...msg, attachments };
   });
 
-  if (mutated) sessionManager.markDirty(session.id);
+  if (mutated) markSessionDirty(session.id);
 
   // Handle attachment write errors during normalization
   if (allAttachmentPromises.length > 0) {
@@ -843,20 +794,20 @@ function createEmptySession(title = 'New chat') {
  * Ensure at least one session exists
  */
 function ensureDefaultSession() {
-  const currentId = sessionManager.getCurrentId();
-  if (!currentId || !sessionManager.getSession(currentId)) {
+  const currentId = getCurrentSessionId();
+  if (!currentId || !getSession(currentId)) {
     const session = createEmptySession();
-    sessionManager.setSession(session.id, session);
-    sessionManager.setMeta(session.id, {
+    setSession(session.id, session);
+    setSessionMeta(session.id, {
       id: session.id,
       title: session.title,
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       messageCount: 0
     });
-    sessionManager.sessionOrder = [session.id];
-    sessionManager.setCurrentId(session.id);
-    sessionManager.markDirty(session.id);
+    setSessionOrder([session.id]);
+    setCurrentSessionId(session.id);
+    markSessionDirty(session.id);
     markMetaDirty();
   }
 }
@@ -884,10 +835,10 @@ async function loadSession(sessionId) {
  * @returns {Promise<void>}
  */
 export async function loadSessionMetadata(sessionIds = null, batchSize = 20) {
-  const idsToLoad = sessionIds || sessionManager.sessionOrder;
+  const idsToLoad = sessionIds || getSessionOrder();
   
   // Filter out sessions that already have metadata
-  const missingIds = idsToLoad.filter(id => !sessionManager.getMeta(id));
+  const missingIds = idsToLoad.filter(id => !getSessionMetaById(id));
   
   if (missingIds.length === 0) return;
 
@@ -908,7 +859,7 @@ export async function loadSessionMetadata(sessionIds = null, batchSize = 20) {
             const session = req.result;
             if (session) {
               const normalized = normalizeSession(session);
-              sessionManager.setMeta(id, {
+              setSessionMeta(id, {
                 id: normalized.id,
                 title: normalized.title,
                 createdAt: normalized.createdAt,
@@ -941,7 +892,7 @@ export async function loadSessionMetadata(sessionIds = null, batchSize = 20) {
  */
 export function getCurrentSessionSync() {
   ensureDefaultSession();
-  return sessionManager.getSession(sessionManager.getCurrentId());
+  return getSession(getCurrentSessionId());
 }
 
 /**
@@ -952,27 +903,29 @@ export function getCurrentSessionSync() {
  */
 export async function setCurrentSession(sessionId) {
   // Check if session exists in metadata or loaded sessions
-  if (!sessionManager.hasSession(sessionId)) {
+  if (!hasSession(sessionId)) {
     console.warn('Session not found:', sessionId);
     return;
   }
 
-  const previousId = sessionManager.getCurrentId();
-  sessionManager.setCurrentId(sessionId);
+  const previousId = getCurrentSessionId();
+  setCurrentSessionId(sessionId);
   if (previousId !== sessionId) markMetaDirty();
 
   // Lazy load session if not already loaded
-  if (sessionManager.lazyLoadEnabled && !sessionManager.getSession(sessionId)) {
+  if (getLazyLoadEnabled() && !getSession(sessionId)) {
     const session = await loadSession(sessionId);
     if (session) {
-      sessionManager.setSession(sessionId, session);
+      setSession(sessionId, session);
     }
   }
 
-  const idx = sessionManager.sessionOrder.indexOf(sessionId);
+  const order = getSessionOrder();
+  const idx = order.indexOf(sessionId);
   if (idx > 0) {
-    sessionManager.sessionOrder.splice(idx, 1);
-    sessionManager.sessionOrder.unshift(sessionId);
+    order.splice(idx, 1);
+    order.unshift(sessionId);
+    setSessionOrder(order);
     markMetaDirty();
   }
 }
@@ -984,9 +937,9 @@ export async function setCurrentSession(sessionId) {
  */
 export function searchSessions(query = '') {
   const term = query.trim().toLowerCase();
-  return sessionManager.sessionOrder.filter((id) => {
+  return getSessionOrder().filter((id) => {
     if (!term) return true;
-    const meta = sessionManager.getMeta(id) || sessionManager.getSession(id);
+    const meta = getSessionMetaById(id) || getSession(id);
     // If metadata is missing, include it in results (will be loaded on-demand)
     if (!meta) return true;
     const haystack = `${meta.title || ''} ${meta.id}`.toLowerCase();
@@ -1000,29 +953,31 @@ export function searchSessions(query = '') {
  * @returns {{id: string, title: string, messages: Array}} New session
  */
 export function createSessionFrom(baseSessionId = null) {
-  const base = baseSessionId ? sessionManager.getSession(baseSessionId) : null;
+  const base = baseSessionId ? getSession(baseSessionId) : null;
   const session = createEmptySession(base ? `${base.title} copy` : 'New chat');
   if (base) {
     session.messages = base.messages.slice();
   }
   normalizeSession(session);
-  sessionManager.setSession(session.id, session);
-  sessionManager.setMeta(session.id, {
+  setSession(session.id, session);
+  setSessionMeta(session.id, {
     id: session.id,
     title: session.title,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
     messageCount: session.messages.length
   });
-  sessionManager.sessionOrder.unshift(session.id);
-  sessionManager.setCurrentId(session.id);
-  sessionManager.markDirty(session.id);
+  const order = getSessionOrder();
+  order.unshift(session.id);
+  setSessionOrder(order);
+  setCurrentSessionId(session.id);
+  markSessionDirty(session.id);
   // Persist ordering + active session change separately
   markMetaDirty();
 
   // Remove oldest sessions if limit exceeded (batched in single transaction)
-  if (sessionManager.sessionOrder.length > MAX_SESSIONS) {
-    const sessionsToRemove = sessionManager.sessionOrder.slice(MAX_SESSIONS);
+  if (order.length > MAX_SESSIONS) {
+    const sessionsToRemove = order.slice(MAX_SESSIONS);
     
     // Batch IndexedDB deletes in single transaction with retry logic
     const batchDeleteOperation = async () => {
@@ -1073,10 +1028,10 @@ export function createSessionFrom(baseSessionId = null) {
     
     // Clean memory synchronously
     sessionsToRemove.forEach(oldId => {
-      sessionManager.deleteSession(oldId);
+      deleteSessionFromState(oldId);
     });
     
-    sessionManager.sessionOrder = sessionManager.sessionOrder.slice(0, MAX_SESSIONS);
+    setSessionOrder(order.slice(0, MAX_SESSIONS));
     markMetaDirty();
   }
 
@@ -1088,15 +1043,16 @@ export function createSessionFrom(baseSessionId = null) {
  * @param {string} sessionId - Session ID to delete
  */
 export function deleteSession(sessionId) {
-  if (!sessionManager.getSession(sessionId)) return;
+  if (!getSession(sessionId)) return;
 
-  sessionManager.deleteSession(sessionId);
+  deleteSessionFromState(sessionId);
 
-  sessionManager.sessionOrder = sessionManager.sessionOrder.filter(id => id !== sessionId);
+  const order = getSessionOrder().filter(id => id !== sessionId);
+  setSessionOrder(order);
   markMetaDirty();
 
-  if (sessionManager.getCurrentId() === sessionId) {
-    sessionManager.setCurrentId(sessionManager.sessionOrder[0] || null);
+  if (getCurrentSessionId() === sessionId) {
+    setCurrentSessionId(order[0] || null);
     markMetaDirty();
   }
   ensureDefaultSession();
@@ -1120,19 +1076,13 @@ export function deleteSession(sessionId) {
  * @param {number|null} replaceIndex - Index to replace (null to append)
  */
 export function upsertMessage(sessionId, message, replaceIndex = null) {
-  const session = sessionManager.getSession(sessionId);
+  const session = getSession(sessionId);
   if (!session) return;
 
-  if (!message || typeof message !== 'object') {
-    console.error('Invalid message: must be an object');
-    return;
-  }
-  if (!message.role || !VALIDATION.VALID_MESSAGE_ROLES.includes(message.role)) {
-    console.error('Invalid message role:', message.role);
-    return;
-  }
-  if (typeof message.text !== 'string') {
-    console.error('Invalid message text: must be a string');
+  // Centralized validation - single source of truth
+  const validation = validateMessage(message);
+  if (!validation.valid) {
+    console.error(validation.error);
     return;
   }
 
@@ -1156,13 +1106,14 @@ export function upsertMessage(sessionId, message, replaceIndex = null) {
     session.messages[replaceIndex] = storedMessage;
   }
   session.updatedAt = Date.now();
-  const meta = sessionManager.getMeta(sessionId);
+  setSession(sessionId, session);
+  const meta = getSessionMetaById(sessionId);
   if (meta) {
     meta.messageCount = session.messages.length;
     meta.updatedAt = session.updatedAt;
-    sessionManager.setMeta(sessionId, meta);
+    setSessionMeta(sessionId, meta);
   }
-  sessionManager.markDirty(sessionId);
+  markSessionDirty(sessionId);
 
   // Handle attachment write errors after session is marked dirty
   if (attachmentPromises.length > 0) {
@@ -1179,8 +1130,16 @@ export function upsertMessage(sessionId, message, replaceIndex = null) {
  * @param {object} patch - Fields to update
  */
 export function updateMessage(sessionId, messageIndex, patch) {
-  const session = sessionManager.getSession(sessionId);
+  const session = getSession(sessionId);
   if (!session || !session.messages[messageIndex]) return;
+
+  // Centralized validation - single source of truth
+  const validation = validateMessagePatch(patch);
+  if (!validation.valid) {
+    console.error(validation.error);
+    return;
+  }
+
   const next = { ...session.messages[messageIndex], ...patch };
   let attachmentPromises = [];
   if (Array.isArray(next.attachments)) {
@@ -1189,10 +1148,17 @@ export function updateMessage(sessionId, messageIndex, patch) {
     attachmentPromises = result.attachmentPromises;
   }
 
-  // Recompute htmlCache if text changed, clear if text is empty/removed
+  // Recompute htmlCache only if text actually changed, clear if text is empty/removed
   if ('text' in patch) {
+    const textChanged = session.messages[messageIndex].text !== patch.text;
     if (patch.text) {
-      next.htmlCache = markdownToHtml(patch.text);
+      // Only recompute if text actually changed, otherwise preserve existing cache
+      if (textChanged) {
+        next.htmlCache = markdownToHtml(patch.text);
+      } else if (session.messages[messageIndex].htmlCache) {
+        // Text unchanged - preserve existing cache
+        next.htmlCache = session.messages[messageIndex].htmlCache;
+      }
     } else {
       delete next.htmlCache;
     }
@@ -1200,12 +1166,13 @@ export function updateMessage(sessionId, messageIndex, patch) {
 
   session.messages[messageIndex] = next;
   session.updatedAt = Date.now();
-  const meta = sessionManager.getMeta(sessionId);
+  setSession(sessionId, session);
+  const meta = getSessionMetaById(sessionId);
   if (meta) {
     meta.updatedAt = session.updatedAt;
-    sessionManager.setMeta(sessionId, meta);
+    setSessionMeta(sessionId, meta);
   }
-  sessionManager.markDirty(sessionId);
+  markSessionDirty(sessionId);
 
   // Handle attachment write errors after session is marked dirty
   if (attachmentPromises.length > 0) {
@@ -1221,19 +1188,20 @@ export function updateMessage(sessionId, messageIndex, patch) {
  * @param {string} title - New title
  */
 export function renameSession(sessionId, title) {
-  const session = sessionManager.getSession(sessionId);
+  const session = getSession(sessionId);
   if (!session) return;
   session.title = title;
   session.updatedAt = Date.now();
-  const meta = sessionManager.getMeta(sessionId);
+  setSession(sessionId, session);
+  const meta = getSessionMetaById(sessionId);
   if (meta) {
-    sessionManager.setMeta(sessionId, {
+    setSessionMeta(sessionId, {
       ...meta,
       title,
       updatedAt: session.updatedAt
     });
   }
-  sessionManager.markDirty(sessionId);
+  markSessionDirty(sessionId);
 }
 
 /**
@@ -1243,25 +1211,25 @@ export function renameSession(sessionId, title) {
 export async function saveState() {
   ensureDefaultSession();
 
-  const hasSessionChanges = sessionManager.getDirtySessions().size > 0;
+  const hasSessionChanges = getDirtySessions().size > 0;
   const hasMetaChanges = metaDirty;
 
   if (hasSessionChanges || hasMetaChanges) {
     // Prepare data for fallback storage
     const sessionData = {};
     if (hasSessionChanges) {
-      sessionManager.getDirtySessions().forEach(id => {
-        const s = sessionManager.getSession(id);
+      getDirtySessions().forEach(id => {
+        const s = getSession(id);
         if (s) sessionData[id] = s;
       });
     }
 
     const metaData = {};
     if (hasMetaChanges) {
-      metaData.sessionOrder = sessionManager.sessionOrder;
-      metaData.currentSessionId = sessionManager.getCurrentId();
-      metaData.contextSnapshots = appState.contextSnapshots;
-      metaData.activeSnapshotId = appState.activeSnapshotId;
+      metaData.sessionOrder = getSessionOrder();
+      metaData.currentSessionId = getCurrentSessionId();
+      metaData.contextSnapshots = getContextSnapshots();
+      metaData.activeSnapshotId = getActiveSnapshotId();
     }
 
     // Wrap transaction in retry-able operation
@@ -1272,23 +1240,23 @@ export async function saveState() {
 
         if (hasMetaChanges) {
           const metaStore = tx.objectStore(STORES.META);
-          metaStore.put({ id: 'sessionOrder', val: sessionManager.sessionOrder });
-          metaStore.put({ id: 'currentSessionId', val: sessionManager.getCurrentId() });
-          metaStore.put({ id: 'contextSnapshots', val: appState.contextSnapshots });
-          metaStore.put({ id: 'activeSnapshotId', val: appState.activeSnapshotId });
+          metaStore.put({ id: 'sessionOrder', val: getSessionOrder() });
+          metaStore.put({ id: 'currentSessionId', val: getCurrentSessionId() });
+          metaStore.put({ id: 'contextSnapshots', val: getContextSnapshots() });
+          metaStore.put({ id: 'activeSnapshotId', val: getActiveSnapshotId() });
         }
 
         if (hasSessionChanges) {
           const sessionStore = tx.objectStore(STORES.SESSIONS);
-          sessionManager.getDirtySessions().forEach(id => {
-            const s = sessionManager.getSession(id);
+          getDirtySessions().forEach(id => {
+            const s = getSession(id);
             if (s) sessionStore.put(s);
           });
         }
 
         tx.oncomplete = () => {
           if (hasMetaChanges) metaDirty = false;
-          if (hasSessionChanges) sessionManager.clearDirty();
+          if (hasSessionChanges) clearDirtySessions();
           resolve();
         };
         tx.onerror = (event) => {
@@ -1326,8 +1294,8 @@ export async function saveState() {
 
   // Save settings to chrome.storage.sync (separate from IndexedDB)
   const settingsPayload = {
-    templates: appState.templates,
-    settings: appState.settings
+    templates: getTemplates(),
+    settings: getSettings()
   };
   try {
     await chrome.storage.sync.set({ [SYNC_KEY]: settingsPayload });
@@ -1368,7 +1336,7 @@ export async function flushSaveState() {
     await savePromise;
   }
   // Always save to ensure any dirty state is persisted
-  if (sessionManager.getDirtySessions().size > 0 || metaDirty) {
+  if (getDirtySessions().size > 0 || metaDirty) {
     await saveState();
   }
 }
@@ -1386,13 +1354,7 @@ export async function saveContextDraft(text) {
   }
 }
 
-/**
- * Update context draft in memory only
- * @param {string} text - Context text
- */
-export function updateContextDraft(text) {
-  appState.contextDraft = text;
-}
+// updateContextDraft is now exported from state.js, re-exported for backwards compatibility
 
 /**
  * Save a reusable context snapshot
@@ -1400,7 +1362,12 @@ export function updateContextDraft(text) {
  * @returns {object|null} Snapshot record
  */
 export function addContextSnapshot(payload = {}) {
-  if (!payload?.text || typeof payload.text !== 'string') return null;
+  // Centralized validation - single source of truth
+  const validation = validateContextSnapshot(payload);
+  if (!validation.valid) {
+    console.error(validation.error);
+    return null;
+  }
 
   const snapshot = {
     id: payload.id || nanoid(),
@@ -1411,10 +1378,10 @@ export function addContextSnapshot(payload = {}) {
   };
 
   // Keep newest snapshots first and cap the list
-  appState.contextSnapshots = [
-    snapshot,
-    ...appState.contextSnapshots.filter(s => s.id !== snapshot.id)
-  ].slice(0, MAX_CONTEXT_SNAPSHOTS);
+  const snapshots = getContextSnapshots();
+  const filtered = snapshots.filter(s => s.id !== snapshot.id);
+  const updated = [snapshot, ...filtered].slice(0, MAX_CONTEXT_SNAPSHOTS);
+  setContextSnapshots(updated);
 
   markMetaDirty();
   return snapshot;
@@ -1426,12 +1393,14 @@ export function addContextSnapshot(payload = {}) {
  * @returns {boolean} Whether a snapshot was removed
  */
 export function removeContextSnapshot(id) {
-  const before = appState.contextSnapshots.length;
-  appState.contextSnapshots = appState.contextSnapshots.filter(s => s.id !== id);
-  if (appState.activeSnapshotId === id) {
-    appState.activeSnapshotId = null;
+  const snapshots = getContextSnapshots();
+  const before = snapshots.length;
+  const filtered = snapshots.filter(s => s.id !== id);
+  setContextSnapshots(filtered);
+  if (getActiveSnapshotId() === id) {
+    setActiveSnapshotId(null);
   }
-  if (before !== appState.contextSnapshots.length) {
+  if (before !== filtered.length) {
     markMetaDirty();
     return true;
   }
@@ -1443,7 +1412,7 @@ export function removeContextSnapshot(id) {
  * @param {string|null} id - Snapshot id to activate or null to clear
  */
 export function setActiveSnapshot(id) {
-  appState.activeSnapshotId = id || null;
+  setActiveSnapshotId(id);
   markMetaDirty();
 }
 
@@ -1453,7 +1422,7 @@ export function setActiveSnapshot(id) {
  * @returns {object|null} Snapshot record
  */
 export function getContextSnapshotById(id) {
-  return appState.contextSnapshots.find(s => s.id === id) || null;
+  return getContextSnapshots().find(s => s.id === id) || null;
 }
 
 /**
@@ -1461,8 +1430,9 @@ export function getContextSnapshotById(id) {
  * @returns {object|null} Active snapshot
  */
 export function getActiveSnapshot() {
-  if (!appState.activeSnapshotId) return null;
-  return getContextSnapshotById(appState.activeSnapshotId);
+  const activeId = getActiveSnapshotId();
+  if (!activeId) return null;
+  return getContextSnapshotById(activeId);
 }
 
 /**
@@ -1479,20 +1449,21 @@ export async function loadState() {
     ]);
 
     if (syncData[SYNC_KEY]) {
-      appState.settings = { ...appState.settings, ...syncData[SYNC_KEY].settings };
+      updateSettings(syncData[SYNC_KEY].settings || {});
 
       // Migration: Update old "concise" system prompt to new "detailed" default
-      if (appState.settings.systemPrompt === 'You are a helpful, concise assistant.') {
-        appState.settings.systemPrompt = DEFAULT_SETTINGS.systemPrompt;
+      const settings = getSettings();
+      if (settings.systemPrompt === 'You are a helpful, concise assistant.') {
+        updateSettings({ systemPrompt: DEFAULT_SETTINGS.systemPrompt });
         // Save the migrated settings
-        await chrome.storage.sync.set({ [SYNC_KEY]: { settings: appState.settings, templates: appState.templates } });
+        await chrome.storage.sync.set({ [SYNC_KEY]: { settings: getSettings(), templates: getTemplates() } });
       }
 
-      if (syncData[SYNC_KEY].templates) appState.templates = syncData[SYNC_KEY].templates;
+      if (syncData[SYNC_KEY].templates) setTemplates(syncData[SYNC_KEY].templates);
     }
 
     if (sessionData[SESSION_KEY]) {
-      appState.contextDraft = sessionData[SESSION_KEY];
+      updateContextDraft(sessionData[SESSION_KEY]);
     }
 
     const tx = db.transaction([STORES.META], 'readonly');
@@ -1513,25 +1484,25 @@ export async function loadState() {
         getVal(metaStore, 'activeSnapshotId')
     ]);
 
-    if (order) sessionManager.sessionOrder = order;
-    if (currentId) sessionManager.setCurrentId(currentId);
-    if (Array.isArray(snapshots)) appState.contextSnapshots = snapshots;
+    if (order) setSessionOrder(order);
+    if (currentId) setCurrentSessionId(currentId);
+    if (Array.isArray(snapshots)) setContextSnapshots(snapshots);
     if (activeSnapshotId) {
       const exists = (snapshots || []).some(s => s.id === activeSnapshotId);
-      appState.activeSnapshotId = exists ? activeSnapshotId : null;
+      setActiveSnapshotId(exists ? activeSnapshotId : null);
     }
 
     // Enable lazy loading by default for better startup performance
     // Metadata will be loaded on-demand when needed
-    sessionManager.lazyLoadEnabled = true;
+    setLazyLoadEnabled(true);
 
     // Only load the current session's full data initially
     if (currentId && order && order.length > 0) {
       const currentSession = await loadSession(currentId);
       if (currentSession) {
-        sessionManager.setSession(currentId, currentSession);
+        setSession(currentId, currentSession);
         // Also set metadata for current session
-        sessionManager.setMeta(currentId, {
+        setSessionMeta(currentId, {
           id: currentSession.id,
           title: currentSession.title,
           createdAt: currentSession.createdAt,
@@ -1549,43 +1520,13 @@ export async function loadState() {
   return appState;
 }
 
-/**
- * Add an attachment to the current attachments list
- * @param {{name: string, type: string, data: string}} entry - Attachment object
- */
-export function addPendingAttachment(entry) {
-  appState.pendingAttachments.push(entry);
-}
-
-/**
- * Clear all attachments
- */
-export function clearPendingAttachments() {
-  appState.pendingAttachments = [];
-}
-
-/**
- * Get current attachments list
- * @returns {Array<{name: string, type: string, data: string}>} Attachments
- */
-export function getPendingAttachments() {
-  return appState.pendingAttachments;
-}
-
-/**
- * Remove a specific pending attachment by index
- * @param {number} index - Attachment index to remove
- */
-export function removePendingAttachment(index) {
-  if (index < 0 || index >= appState.pendingAttachments.length) return;
-  appState.pendingAttachments.splice(index, 1);
-}
-
-/**
- * Update settings with a patch object
- * @param {object} patch - Settings to update
- */
-export function updateSettings(patch) {
-  appState.settings = { ...appState.settings, ...patch };
-}
+// Re-export state functions for backwards compatibility
+export {
+  addPendingAttachment,
+  clearPendingAttachments,
+  getPendingAttachments,
+  removePendingAttachment,
+  updateSettings,
+  updateContextDraft
+};
 

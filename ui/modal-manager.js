@@ -27,8 +27,7 @@ export function openSettingsModal() {
   if (els.settingsModal) {
     els.settingsModal.removeAttribute('hidden');
     document.body?.classList.add('modal-open');
-    const firstInput = document.getElementById('temperature');
-    if (firstInput) firstInput.focus();
+    if (els.temperature) els.temperature.focus();
   }
 }
 
@@ -37,22 +36,20 @@ export function openContextModal() {
   if (!els.contextModal) return;
   els.contextModal.removeAttribute('hidden');
   document.body?.classList.add('modal-open');
-  const area = els.contextText || document.getElementById('context-text');
-  if (area) area.focus();
+  if (els.contextText) els.contextText.focus();
 }
 
 export function openSetupGuideModal() {
-  const modal = document.getElementById('setup-guide-modal');
-  if (modal) {
-    modal.removeAttribute('hidden');
+  const els = getEls();
+  if (els.setupGuideModal) {
+    els.setupGuideModal.removeAttribute('hidden');
     document.body?.classList.add('modal-open');
   }
 }
 
 export function closeModal() {
   const els = getEls();
-  const setupModal = document.getElementById('setup-guide-modal');
-  [els.settingsModal, els.contextModal, setupModal].forEach(modal => {
+  [els.settingsModal, els.contextModal, els.setupGuideModal].forEach(modal => {
     if (modal) modal.setAttribute('hidden', 'true');
   });
   document.body?.classList.remove('modal-open');
@@ -65,8 +62,8 @@ export function isModalOpen() {
 }
 
 export function setSetupGuideContent(html) {
-  const content = document.getElementById('setup-content');
-  if (content) content.innerHTML = html;
+  const els = getEls();
+  if (els.setupContent) els.setupContent.innerHTML = html;
 }
 
 function getAPIName(api) {

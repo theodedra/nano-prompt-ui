@@ -9,7 +9,7 @@ import {
   clearPendingAttachments,
   getPendingAttachments,
   removePendingAttachment
-} from '../storage.js';
+} from '../core/storage.js';
 import * as UI from '../ui/index.js';
 
 /**

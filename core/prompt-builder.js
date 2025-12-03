@@ -1,11 +1,11 @@
-import { sanitizeText } from './utils/utils.js';
+import { sanitizeText } from '../utils/utils.js';
 import {
   ASSISTANT_RULES,
   LIMITS,
   INTENT_PATTERNS,
   INTENT_TYPES,
   UI_MESSAGES
-} from './constants.js';
+} from '../config/constants.js';
 
 // ============================================================================
 // PROMPT HEADER CACHE - Avoid rebuilding static prompt parts

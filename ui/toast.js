@@ -1,7 +1,7 @@
 // toast.js - Toast notification system for user feedback
 
-import { TIMING } from './constants.js';
-import { escapeHtml } from './utils/utils.js';
+import { TIMING } from '../config/constants.js';
+import { escapeHtml } from '../utils/utils.js';
 
 /**
  * Toast notification types

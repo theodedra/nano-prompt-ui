@@ -12,7 +12,7 @@ import {
   resetTemplates as resetStorageTemplates,
   BLANK_TEMPLATE_ID,
   scheduleSaveState
-} from '../storage.js';
+} from '../core/storage.js';
 import * as UI from '../ui/index.js';
 
 /**

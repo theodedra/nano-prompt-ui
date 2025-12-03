@@ -6,8 +6,8 @@
 
 import * as Controller from '../controller/index.js';
 import { extractPdfText } from '../pdf/pdf.js';
-import { toast } from '../toast.js';
-import { LIMITS, USER_ERROR_MESSAGES, validateAttachment } from '../constants.js';
+import { toast } from '../ui/toast.js';
+import { LIMITS, USER_ERROR_MESSAGES, validateAttachment } from '../config/constants.js';
 import * as UI from '../ui/index.js';
 import { handleError } from '../utils/errors.js';
 

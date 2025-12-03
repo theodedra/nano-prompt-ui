@@ -1,6 +1,9 @@
 import { getEls, getSessionVirtualScroller, setSessionVirtualScroller } from './core.js';
-import { uiState } from './state.js';
-import { VirtualScroller } from '../virtual-scroll.js';
+import {
+  getSessionSearchTerm as getStateSessionSearchTerm,
+  setSessionSearchTerm as setStateSessionSearchTerm
+} from '../core/state.js';
+import { VirtualScroller } from './virtual-scroll.js';
 
 let editingInputRef = null;
 
@@ -18,6 +21,9 @@ function createSessionRowElement({ id, session, currentSessionId, confirmingId, 
   if (id === currentSessionId) row.classList.add('is-active');
   if (isEditing) row.classList.add('is-editing');
   row.dataset.id = id;
+
+  // Use DocumentFragment for batch child element creation
+  const fragment = document.createDocumentFragment();
 
   const info = document.createElement('div');
   info.className = 'session-info';
@@ -46,11 +52,14 @@ function createSessionRowElement({ id, session, currentSessionId, confirmingId, 
     info.appendChild(titleDiv);
   }
 
-  row.appendChild(info);
+  fragment.appendChild(info);
 
   const actions = document.createElement('div');
   actions.className = isEditing ? 'session-rename-actions' : 'session-actions';
 
+  // Use DocumentFragment for batch button creation
+  const actionsFragment = document.createDocumentFragment();
+  
   if (isEditing) {
     const saveBtn = document.createElement('button');
     saveBtn.className = 'action-btn save';
@@ -58,7 +67,7 @@ function createSessionRowElement({ id, session, currentSessionId, confirmingId, 
     saveBtn.title = 'Save';
     saveBtn.dataset.id = id;
     saveBtn.dataset.action = 'save-rename';
-    actions.appendChild(saveBtn);
+    actionsFragment.appendChild(saveBtn);
 
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'action-btn cancel';
@@ -66,14 +75,14 @@ function createSessionRowElement({ id, session, currentSessionId, confirmingId, 
     cancelBtn.title = 'Cancel';
     cancelBtn.dataset.id = id;
     cancelBtn.dataset.action = 'cancel-rename';
-    actions.appendChild(cancelBtn);
+    actionsFragment.appendChild(cancelBtn);
   } else {
     const editBtn = document.createElement('button');
     editBtn.className = 'action-btn edit';
     editBtn.textContent = '✎';
     editBtn.title = 'Rename';
     editBtn.dataset.id = id;
-    actions.appendChild(editBtn);
+    actionsFragment.appendChild(editBtn);
 
     const delBtn = document.createElement('button');
     delBtn.className = 'action-btn delete';
@@ -87,10 +96,14 @@ function createSessionRowElement({ id, session, currentSessionId, confirmingId, 
       delBtn.textContent = '✕';
       delBtn.title = 'Delete';
     }
-    actions.appendChild(delBtn);
+    actionsFragment.appendChild(delBtn);
   }
+  
+  actions.appendChild(actionsFragment);
+  fragment.appendChild(actions);
 
-  row.appendChild(actions);
+  // Append all children at once
+  row.appendChild(fragment);
   return row;
 }
 
@@ -114,11 +127,12 @@ export function renderSessions({
   const els = getEls();
   if (!els.sessionMenu) return;
 
-  uiState.sessionSearchTerm = searchTerm || '';
+  setStateSessionSearchTerm(searchTerm || '');
 
   // Keep the search box stable across renders
-  if (els.sessionSearch && els.sessionSearch.value !== uiState.sessionSearchTerm) {
-    els.sessionSearch.value = uiState.sessionSearchTerm;
+  const currentSearchTerm = getStateSessionSearchTerm();
+  if (els.sessionSearch && els.sessionSearch.value !== currentSearchTerm) {
+    els.sessionSearch.value = currentSearchTerm;
   }
 
   if (els.sessionTrigger) {
@@ -272,14 +286,15 @@ export function renderSessions({
 
 export function setSessionSearchTerm(value) {
   const els = getEls();
-  uiState.sessionSearchTerm = value || '';
-  if (els.sessionSearch && els.sessionSearch.value !== uiState.sessionSearchTerm) {
-    els.sessionSearch.value = uiState.sessionSearchTerm;
+  setStateSessionSearchTerm(value || '');
+  const currentSearchTerm = getStateSessionSearchTerm();
+  if (els.sessionSearch && els.sessionSearch.value !== currentSearchTerm) {
+    els.sessionSearch.value = currentSearchTerm;
   }
 }
 
 export function getSessionSearchTerm() {
-  return uiState.sessionSearchTerm;
+  return getStateSessionSearchTerm();
 }
 
 

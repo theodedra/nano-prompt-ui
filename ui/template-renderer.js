@@ -1,5 +1,5 @@
 import { getEls } from './core.js';
-import { uiState } from './state.js';
+import { getIsAddingNewTemplate, setIsAddingNewTemplate } from '../core/state.js';
 
 let editingTemplateInputRef = null;
 
@@ -20,10 +20,16 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     if (isEditing) item.classList.add('is-editing');
     item.dataset.id = t.id;
 
+    // Use DocumentFragment for batch child element creation
+    const itemFragment = document.createDocumentFragment();
+
     if (isEditing) {
       // Inline edit mode
       const editContainer = document.createElement('div');
       editContainer.className = 'template-edit-form';
+
+      // Use DocumentFragment for batch input creation
+      const containerFragment = document.createDocumentFragment();
 
       const labelInput = document.createElement('input');
       labelInput.type = 'text';
@@ -34,7 +40,7 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
       labelInput.dataset.field = 'label';
       labelInput.setAttribute('aria-label', 'Template name');
       labelInput.setAttribute('autocomplete', 'off');
-      editContainer.appendChild(labelInput);
+      containerFragment.appendChild(labelInput);
 
       const textInput = document.createElement('textarea');
       textInput.className = 'template-edit-text';
@@ -44,27 +50,33 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
       textInput.dataset.field = 'text';
       textInput.setAttribute('aria-label', 'Template prompt');
       textInput.rows = 3;
-      editContainer.appendChild(textInput);
+      containerFragment.appendChild(textInput);
 
       const actions = document.createElement('div');
       actions.className = 'template-edit-actions';
 
+      // Use DocumentFragment for batch button creation
+      const actionsFragment = document.createDocumentFragment();
+      
       const saveBtn = document.createElement('button');
       saveBtn.className = 'action-btn save';
       saveBtn.textContent = '✓ Save';
       saveBtn.dataset.id = t.id;
       saveBtn.dataset.action = 'save-template';
-      actions.appendChild(saveBtn);
+      actionsFragment.appendChild(saveBtn);
 
       const cancelBtn = document.createElement('button');
       cancelBtn.className = 'action-btn cancel';
       cancelBtn.textContent = '✕ Cancel';
       cancelBtn.dataset.id = t.id;
       cancelBtn.dataset.action = 'cancel-template';
-      actions.appendChild(cancelBtn);
-
-      editContainer.appendChild(actions);
-      item.appendChild(editContainer);
+      actionsFragment.appendChild(cancelBtn);
+      
+      actions.appendChild(actionsFragment);
+      containerFragment.appendChild(actions);
+      
+      editContainer.appendChild(containerFragment);
+      itemFragment.appendChild(editContainer);
 
       editingTemplateInputRef = labelInput;
     } else {
@@ -79,18 +91,21 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
       btn.dataset.id = t.id;
       content.appendChild(btn);
 
-      item.appendChild(content);
+      itemFragment.appendChild(content);
 
       const actions = document.createElement('div');
       actions.className = 'template-actions';
 
+      // Use DocumentFragment for batch button creation
+      const actionsFragment = document.createDocumentFragment();
+      
       const editBtn = document.createElement('button');
       editBtn.className = 'action-btn edit';
       editBtn.textContent = '✎';
       editBtn.title = 'Edit template';
       editBtn.dataset.id = t.id;
       editBtn.dataset.action = 'edit-template';
-      actions.appendChild(editBtn);
+      actionsFragment.appendChild(editBtn);
 
       const delBtn = document.createElement('button');
       delBtn.className = 'action-btn delete';
@@ -98,15 +113,19 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
       delBtn.title = 'Delete template';
       delBtn.dataset.id = t.id;
       delBtn.dataset.action = 'delete-template';
-      actions.appendChild(delBtn);
-
-      item.appendChild(actions);
+      actionsFragment.appendChild(delBtn);
+      
+      actions.appendChild(actionsFragment);
+      itemFragment.appendChild(actions);
     }
+    
+    // Append all children at once
+    item.appendChild(itemFragment);
 
     fragment.appendChild(item);
   });
 
-  if (!editingId && !uiState.isAddingNewTemplate) {
+  if (!editingId && !getIsAddingNewTemplate()) {
     const addRow = document.createElement('li');
     addRow.className = 'template-add-row';
 
@@ -119,12 +138,15 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     fragment.appendChild(addRow);
   }
 
-  if (uiState.isAddingNewTemplate) {
+  if (getIsAddingNewTemplate()) {
     const addFormRow = document.createElement('li');
     addFormRow.className = 'template-row is-editing new-template';
 
     const editContainer = document.createElement('div');
     editContainer.className = 'template-edit-form';
+
+    // Use DocumentFragment for batch input creation
+    const containerFragment = document.createDocumentFragment();
 
     const labelInput = document.createElement('input');
     labelInput.type = 'text';
@@ -134,7 +156,7 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     labelInput.placeholder = 'Template name';
     labelInput.setAttribute('aria-label', 'New template name');
     labelInput.setAttribute('autocomplete', 'off');
-    editContainer.appendChild(labelInput);
+    containerFragment.appendChild(labelInput);
 
     const textInput = document.createElement('textarea');
     textInput.className = 'template-edit-text';
@@ -143,24 +165,30 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
     textInput.placeholder = 'Template prompt text';
     textInput.setAttribute('aria-label', 'New template prompt');
     textInput.rows = 3;
-    editContainer.appendChild(textInput);
+    containerFragment.appendChild(textInput);
 
     const actions = document.createElement('div');
     actions.className = 'template-edit-actions';
 
+    // Use DocumentFragment for batch button creation
+    const actionsFragment = document.createDocumentFragment();
+    
     const saveBtn = document.createElement('button');
     saveBtn.className = 'action-btn save';
     saveBtn.textContent = '✓ Save';
     saveBtn.dataset.action = 'save-new-template';
-    actions.appendChild(saveBtn);
+    actionsFragment.appendChild(saveBtn);
 
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'action-btn cancel';
     cancelBtn.textContent = '✕ Cancel';
     cancelBtn.dataset.action = 'cancel-new-template';
-    actions.appendChild(cancelBtn);
-
-    editContainer.appendChild(actions);
+    actionsFragment.appendChild(cancelBtn);
+    
+    actions.appendChild(actionsFragment);
+    containerFragment.appendChild(actions);
+    
+    editContainer.appendChild(containerFragment);
     addFormRow.appendChild(editContainer);
     fragment.appendChild(addFormRow);
 
@@ -170,7 +198,7 @@ export function updateTemplates(templates, blankTemplateId = null, editingId = n
   els.templatesMenu.appendChild(fragment);
 
   // Focus the input after DOM is updated
-  if (editingTemplateInputRef && (editingId || uiState.isAddingNewTemplate)) {
+  if (editingTemplateInputRef && (editingId || getIsAddingNewTemplate())) {
     requestAnimationFrame(() => {
       if (editingTemplateInputRef) {
         editingTemplateInputRef.focus();
@@ -214,7 +242,7 @@ export function getTemplateEditValues(id) {
  * @param {boolean} adding
  */
 export function setAddingNewTemplate(adding) {
-  uiState.isAddingNewTemplate = adding;
+  setIsAddingNewTemplate(adding);
   if (!adding) {
     editingTemplateInputRef = null;
   }

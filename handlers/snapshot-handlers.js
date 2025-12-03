@@ -2,12 +2,15 @@
  * Snapshot Handlers - Context snapshot UI event handlers
  *
  * Handles saving, applying, and deleting context snapshots.
+ * Uses direct storage/model access for simple read operations (see IMPLEMENTATION.md).
  */
 
 import * as Controller from '../controller/index.js';
-import { fetchContext } from '../context.js';
+import * as Storage from '../core/storage.js';
+import { fetchContext } from '../core/context.js';
 import { getSnapshotHost, clampLabel } from '../utils/utils.js';
 import { handleError } from '../utils/errors.js';
+import { toast } from '../ui/toast.js';
 
 let isSnapshotBusy = false;
 
@@ -26,7 +29,7 @@ export async function applySnapshot(snapshot, { announce = false } = {}) {
   Controller.setRestrictedState(false);
   Controller.renderContextUI();
   await Controller.persistState({ immediate: true }); // User action
-  if (announce) Controller.showToast('success', 'Using saved context');
+  if (announce) toast.success('Using saved context');
 }
 
 /**
@@ -35,7 +38,8 @@ export async function applySnapshot(snapshot, { announce = false } = {}) {
  */
 export async function applySnapshotById(id) {
   if (!id) return;
-  const snapshot = Controller.getSnapshotById(id);
+  // Direct access - simple read operation
+  const snapshot = Storage.getContextSnapshotById(id);
   if (!snapshot) return;
   await applySnapshot(snapshot, { announce: true });
 }
@@ -60,7 +64,7 @@ export async function useLiveContext({ quiet = false } = {}) {
     Controller.setRestrictedState(Boolean(liveCtx?.isRestricted));
 
     await Controller.persistState({ immediate: true }); // User action
-    if (!quiet) Controller.showToast('success', 'Live tab context restored');
+    if (!quiet) toast.success('Live tab context restored');
   } catch (e) {
     handleError(e, {
       operation: 'Refresh live context',
@@ -79,24 +83,26 @@ export async function useLiveContext({ quiet = false } = {}) {
  */
 export async function handleDeleteSnapshot(id) {
   if (!id) return;
-  const activeSnapshotId = Controller.getActiveContextSnapshot()?.id;
+  // Direct access - simple read operations
+  const activeSnapshot = Storage.getActiveSnapshot();
+  const activeSnapshotId = activeSnapshot?.id;
   const wasActive = activeSnapshotId === id;
   const removed = Controller.deleteSnapshot(id);
   if (!removed) return;
 
   if (wasActive) {
     // Get first remaining snapshot
-    const snapshots = Controller.getSession(Controller.getCurrentSessionId())?.contextSnapshots || [];
+    const snapshots = Storage.getContextSnapshots();
     if (snapshots[0]) {
       await applySnapshot(snapshots[0]);
     } else {
       await useLiveContext({ quiet: true });
     }
-  } else {
-    Controller.renderContextUI();
-    await Controller.persistState({ immediate: true }); // Destructive action
-  }
-  Controller.showToast('success', 'Snapshot deleted');
+    } else {
+      Controller.renderContextUI();
+      await Controller.persistState({ immediate: true }); // Destructive action
+    }
+  toast.success('Snapshot deleted');
 }
 
 /**
@@ -108,7 +114,7 @@ export async function handleSaveSnapshotClick() {
   try {
     const ctx = await fetchContext(true, { respectSnapshot: false });
     if (ctx?.isRestricted || !ctx?.text) {
-      Controller.showToast('error', 'Context not available on this page.');
+      toast.error('Context not available on this page.');
       return;
     }
 
@@ -122,7 +128,7 @@ export async function handleSaveSnapshotClick() {
     if (snapshot) {
       await applySnapshot(snapshot, { announce: true });
     } else {
-      Controller.showToast('error', 'Could not save context snapshot.');
+      toast.error('Could not save context snapshot.');
     }
   } catch (e) {
     handleError(e, {

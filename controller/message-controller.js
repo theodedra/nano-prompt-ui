@@ -10,7 +10,7 @@ import {
   updateMessage,
   scheduleSaveState,
   flushSaveState
-} from '../storage.js';
+} from '../core/storage.js';
 import * as UI from '../ui/index.js';
 
 /**

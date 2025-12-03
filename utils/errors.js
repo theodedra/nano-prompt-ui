@@ -1,6 +1,6 @@
 // utils/errors.js - Standardized error handling utility
 
-import { USER_ERROR_MESSAGES } from '../constants.js';
+import { USER_ERROR_MESSAGES } from '../config/constants.js';
 
 // Cache toast function to avoid circular dependencies
 let toastFn = null;
@@ -12,26 +12,6 @@ let toastFn = null;
  */
 export function setToastFunction(fn) {
   toastFn = fn;
-}
-
-/**
- * Get the toast function, trying Controller if available
- * @returns {Function|null} Toast function or null
- */
-async function getToastFunction() {
-  if (toastFn) return toastFn;
-  
-  // Try dynamic import if available
-  try {
-    const Controller = await import('../controller/index.js');
-    if (Controller.showToast) {
-      return (type, message) => Controller.showToast(type, message);
-    }
-  } catch {
-    // Controller not available
-  }
-  
-  return null;
 }
 
 /**
@@ -129,19 +109,6 @@ export function handleError(error, context = {}) {
         toastFn('error', finalUserMessage);
       } catch (toastError) {
         console.warn('Toast function failed:', toastError);
-      }
-    } else {
-      // Try to use Controller via dynamic import (async, won't block)
-      try {
-        import('../controller/index.js').then((Controller) => {
-          if (Controller.showToast) {
-            Controller.showToast('error', finalUserMessage);
-          }
-        }).catch(() => {
-          // Controller not available, skip toast
-        });
-      } catch (importError) {
-        // Dynamic import not available, skip toast
       }
     }
   }

@@ -17,10 +17,13 @@ import {
   loadSessionMetadata,
   scheduleSaveState,
   flushSaveState
-} from '../storage.js';
+} from '../core/storage.js';
 import * as UI from '../ui/index.js';
-import { uiState } from '../ui/state.js';
-import { toast } from '../toast.js';
+import {
+  getSessionSearchTerm as getStateSessionSearchTerm,
+  setSessionSearchTerm as setStateSessionSearchTerm
+} from '../core/state.js';
+import { toast } from '../ui/toast.js';
 import { renderCurrentLog } from './message-controller.js';
 
 /**
@@ -86,7 +89,7 @@ export function filterSessions(query) {
  * Set session search term
  */
 export function setSessionSearchTerm(term) {
-  uiState.sessionSearchTerm = term;
+  setStateSessionSearchTerm(term);
   UI.setSessionSearchTerm(term);
 }
 
@@ -94,7 +97,7 @@ export function setSessionSearchTerm(term) {
  * Get session search term
  */
 export function getSessionSearchTerm() {
-  return uiState.sessionSearchTerm;
+  return getStateSessionSearchTerm();
 }
 
 /**
@@ -102,7 +105,8 @@ export function getSessionSearchTerm() {
  */
 export async function renderSessionsList(confirmingId = null, editingId = null) {
   const current = getCurrentSessionSync();
-  const matches = searchSessions(uiState.sessionSearchTerm);
+  const searchTerm = getSessionSearchTerm();
+  const matches = searchSessions(searchTerm);
   const sessionMeta = getSessionMeta();
   
   // Load metadata on-demand for visible sessions (first 50 or all if fewer)
@@ -114,16 +118,25 @@ export async function renderSessionsList(confirmingId = null, editingId = null) 
     // Load metadata asynchronously and re-render when done
     loadSessionMetadata(visibleIds).then(() => {
       const currentAfter = getCurrentSessionSync();
-      UI.renderSessions({
-        sessions: getSessions(),
-        sessionMeta: getSessionMeta(),
-        currentSessionId: getStoredCurrentSessionId(),
-        currentTitle: currentAfter?.title,
-        matches,
-        searchTerm: uiState.sessionSearchTerm,
-        confirmingId,
-        editingId
-      });
+      // Use requestIdleCallback for non-critical background UI updates
+      const renderUpdate = () => {
+        UI.renderSessions({
+          sessions: getSessions(),
+          sessionMeta: getSessionMeta(),
+          currentSessionId: getStoredCurrentSessionId(),
+          currentTitle: currentAfter?.title,
+          matches,
+          searchTerm: searchTerm,
+          confirmingId,
+          editingId
+        });
+      };
+      
+      if (typeof requestIdleCallback !== 'undefined') {
+        requestIdleCallback(renderUpdate, { timeout: 2000 });
+      } else {
+        setTimeout(renderUpdate, 0);
+      }
     }).catch(err => {
       console.error('Failed to load session metadata:', err);
     });
@@ -136,7 +149,7 @@ export async function renderSessionsList(confirmingId = null, editingId = null) 
     currentSessionId: getStoredCurrentSessionId(),
     currentTitle: current?.title,
     matches,
-    searchTerm: uiState.sessionSearchTerm,
+    searchTerm: searchTerm,
     confirmingId,
     editingId
   });
@@ -148,7 +161,14 @@ export async function renderSessionsList(confirmingId = null, editingId = null) 
 export async function updateSessionTitle(sessionId, title) {
   renameSession(sessionId, title);
   scheduleSaveState(); // Debounced save for background operation
-  renderSessionsList();
+  // Use requestIdleCallback for non-critical background UI updates
+  if (typeof requestIdleCallback !== 'undefined') {
+    requestIdleCallback(() => {
+      renderSessionsList();
+    }, { timeout: 2000 });
+  } else {
+    setTimeout(() => renderSessionsList(), 0);
+  }
 }
 
 /**

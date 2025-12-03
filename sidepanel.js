@@ -8,7 +8,7 @@ import * as UI from './ui/index.js';
 import * as ChatHandlers from './handlers/chat-handlers.js';
 import * as AttachmentHandlers from './handlers/attachment-handlers.js';
 import * as SettingsHandlers from './handlers/settings-handlers.js';
-import { performSessionWarmup, startDownloadPolling, stopDownloadPolling } from './model.js';
+import { performSessionWarmup, startDownloadPolling, stopDownloadPolling } from './core/model.js';
 import { terminatePdfWorker } from './pdf/pdf.js';
 
 function bind(selector, event, handler) {
@@ -18,9 +18,7 @@ function bind(selector, event, handler) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   UI.initUI();
-  await ChatHandlers.bootstrap();
-
-  const availabilityResult = await ChatHandlers.refreshAvailability({ forceCheck: true });
+  const availabilityResult = await ChatHandlers.bootstrap();
 
   // Handle download states: 'after-download' OR 'downloading'
   const needsDownload = availabilityResult?.status === 'after-download' ||

@@ -2,11 +2,19 @@
  * Template Handlers - Template management UI event handlers
  *
  * Handles template selection, editing, creation, and deletion.
+ * Uses direct storage/model access for simple read operations (see IMPLEMENTATION.md).
  */
 
 import * as Controller from '../controller/index.js';
 import * as UI from '../ui/index.js';
-import { uiState } from '../ui/state.js';
+import * as Storage from '../core/storage.js';
+import {
+  getEditingTemplateId,
+  setEditingTemplateId,
+  getIsAddingNewTemplate,
+  setIsAddingNewTemplate
+} from '../core/state.js';
+import { toast } from '../ui/toast.js';
 
 /**
  * Handle templates trigger click (open/close templates menu)
@@ -14,7 +22,7 @@ import { uiState } from '../ui/state.js';
  */
 export function handleTemplatesTriggerClick(event) {
   event.stopPropagation();
-  Controller.toggleMenu('templates');
+  UI.toggleMenu('templates');
 }
 
 /**
@@ -22,8 +30,8 @@ export function handleTemplatesTriggerClick(event) {
  * @param {string} id - Template ID
  */
 export function startTemplateEdit(id) {
-  uiState.editingTemplateId = id;
-  uiState.isAddingNewTemplate = false;
+  setEditingTemplateId(id);
+  setIsAddingNewTemplate(false);
   Controller.updateTemplatesUI(id);
 }
 
@@ -31,8 +39,8 @@ export function startTemplateEdit(id) {
  * Cancel template editing
  */
 export function cancelTemplateEdit() {
-  uiState.editingTemplateId = null;
-  uiState.isAddingNewTemplate = false;
+  setEditingTemplateId(null);
+  setIsAddingNewTemplate(false);
   UI.setAddingNewTemplate(false);
   Controller.updateTemplatesUI();
 }
@@ -45,17 +53,17 @@ export function saveTemplateEdit(id) {
   const values = UI.getTemplateEditValues(id);
 
   if (!values || !values.label) {
-    Controller.showToast('error', 'Template name is required');
+    toast.error('Template name is required');
     return;
   }
 
   const success = Controller.patchTemplate(id, values);
   if (success) {
-    uiState.editingTemplateId = null;
+    setEditingTemplateId(null);
     Controller.updateTemplatesUI();
-    Controller.showToast('success', 'Template saved');
+    toast.success('Template saved');
   } else {
-    Controller.showToast('error', 'Failed to save template');
+    toast.error('Failed to save template');
   }
 }
 
@@ -67,7 +75,7 @@ export function deleteTemplate(id) {
   const success = Controller.removeTemplate(id);
   if (success) {
     Controller.updateTemplatesUI();
-    Controller.showToast('success', 'Template deleted');
+    toast.success('Template deleted');
   }
 }
 
@@ -75,8 +83,8 @@ export function deleteTemplate(id) {
  * Start adding a new template
  */
 export function startAddTemplate() {
-  uiState.editingTemplateId = null;
-  uiState.isAddingNewTemplate = true;
+  setEditingTemplateId(null);
+  setIsAddingNewTemplate(true);
   UI.setAddingNewTemplate(true);
   Controller.updateTemplatesUI();
 }
@@ -88,22 +96,22 @@ export function saveNewTemplate() {
   const values = UI.getTemplateEditValues(null);
 
   if (!values || !values.label) {
-    Controller.showToast('error', 'Template name is required');
+    toast.error('Template name is required');
     return;
   }
 
   Controller.addTemplate(values.label, values.text);
-  uiState.isAddingNewTemplate = false;
+  setIsAddingNewTemplate(false);
   UI.setAddingNewTemplate(false);
   Controller.updateTemplatesUI();
-  Controller.showToast('success', 'Template created');
+  toast.success('Template created');
 }
 
 /**
  * Cancel adding new template
  */
 export function cancelNewTemplate() {
-  uiState.isAddingNewTemplate = false;
+  setIsAddingNewTemplate(false);
   UI.setAddingNewTemplate(false);
   Controller.updateTemplatesUI();
 }
@@ -172,8 +180,9 @@ export function handleTemplateMenuClick(event) {
     if (btn.classList.contains('template-select')) {
       const text = btn.dataset.text;
       if (text) {
-        Controller.setInputValue(Controller.getInputValue() + text);
-        Controller.closeMenu('templates');
+        // Direct access - simple read operation
+        Controller.setInputValue(UI.getInputValue() + text);
+        UI.closeMenu('templates');
         Controller.focusInput();
       }
       return;
@@ -218,6 +227,6 @@ export function handleTemplateEditKeyDown(event) {
  * @returns {boolean}
  */
 export function isTemplateEditingActive() {
-  return uiState.editingTemplateId !== null || uiState.isAddingNewTemplate;
+  return getEditingTemplateId() !== null || getIsAddingNewTemplate();
 }
 

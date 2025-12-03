@@ -1,27 +1,28 @@
 /**
  * Chat Handlers - UI Event Handlers
  *
- * Handles user interactions and dispatches to controller.
- * Does NOT directly access storage or model - only through controller.
+ * Handles user interactions and dispatches to controller for mutations/coordination.
+ * Uses direct storage/model access for simple read operations (see IMPLEMENTATION.md).
  *
  * This file re-exports from modular handler files and contains
  * remaining shared handlers for bootstrap, navigation, and misc UI.
  */
 
 import * as Controller from '../controller/index.js';
-import * as Model from '../model.js';
-import * as Storage from '../storage.js';
+import * as Model from '../core/model.js';
+import * as Storage from '../core/storage.js';
 import * as UI from '../ui/index.js';
-import { fetchContext } from '../context.js';
+import { fetchContext } from '../core/context.js';
 import { debounce } from '../utils/utils.js';
 import {
   TIMING,
   UI_MESSAGES,
   getSettingOrDefault
-} from '../constants.js';
+} from '../config/constants.js';
 import { registerContextMenuHandlers } from './context-menu-handlers.js';
-import { getModelStatusSummary } from '../setup-guide.js';
+import { getModelStatusSummary } from '../utils/setup-guide.js';
 import { setToastFunction } from '../utils/errors.js';
+import { toast } from '../ui/toast.js';
 
 // Re-export all handlers from modular files
 export * from './session-handlers.js';
@@ -87,13 +88,15 @@ function ensureTabContextSync() {
 }
 
 function getSessionMarkdown(sessionId) {
-  const session = Controller.getSession(sessionId);
+  // Direct access - simple read operation
+  const session = Storage.getSessions()[sessionId];
   if (!session) return '';
   return session.messages.map(m => `### ${m.role === 'user' ? 'User' : 'Nano'}\n${m.text}`).join('\n\n');
 }
 
 function getSessionPlaintext(sessionId) {
-  const session = Controller.getSession(sessionId);
+  // Direct access - simple read operation
+  const session = Storage.getSessions()[sessionId];
   if (!session) return '';
   return session.messages.map(m => `${m.role === 'user' ? 'User' : 'Nano'}: ${m.text}`).join('\n\n');
 }
@@ -104,14 +107,17 @@ function getSessionPlaintext(sessionId) {
  */
 export async function bootstrap() {
   // Initialize error handling with toast function
-  setToastFunction((type, message) => Controller.showToast(type, message));
+  setToastFunction((type, message) => toast[type](message));
   
   registerContextMenuHandlers();
 
-  // Load state from storage module
-  await Storage.loadState();
+  // Run independent operations in parallel to reduce startup time
+  const [, availabilityResult] = await Promise.all([
+    Storage.loadState(),
+    refreshAvailability({ forceCheck: true })
+  ]);
 
-  Controller.applyTheme(getSettingOrDefault(Storage.getSettings(), 'theme'));
+  UI.applyTheme(getSettingOrDefault(Storage.getSettings(), 'theme'));
 
   Controller.setSessionSearchTerm(Controller.getSessionSearchTerm());
 
@@ -127,13 +133,15 @@ export async function bootstrap() {
   const urlParams = new URLSearchParams(window.location.search);
   if (urlParams.get('mic_setup') === 'true') {
     setTimeout(() => handleMicClick(), TIMING.MIC_SETUP_DELAY_MS);
-    return;
+    return availabilityResult;
   }
 
   ensureTabContextSync();
   await refreshContextDraft(true);
 
   chrome.runtime.sendMessage({ action: 'PANEL_READY' });
+  
+  return availabilityResult;
 }
 
 /**
@@ -141,23 +149,25 @@ export async function bootstrap() {
  * @returns {Promise<void>}
  */
 export async function handleCopyChatClick() {
-  const text = getSessionPlaintext(Controller.getCurrentSessionId());
+  // Direct access - simple read operation
+  const text = getSessionPlaintext(Storage.getCurrentSessionId());
   if (!text) return;
   await navigator.clipboard.writeText(text);
-  Controller.setStatus(UI_MESSAGES.COPIED);
-  Controller.showToast('success', UI_MESSAGES.COPIED);
-  setTimeout(() => Controller.setStatus(UI_MESSAGES.READY), 1500);
+  UI.setStatusText(UI_MESSAGES.COPIED);
+  toast.success(UI_MESSAGES.COPIED);
+  setTimeout(() => UI.setStatusText(UI_MESSAGES.READY), 1500);
 }
 
 /**
  * Handle Save Markdown button click
  */
 export function handleSaveMarkdown() {
-  const md = getSessionMarkdown(Controller.getCurrentSessionId());
+  // Direct access - simple read operation
+  const md = getSessionMarkdown(Storage.getCurrentSessionId());
   if (!md) return;
   const blob = new Blob([md], { type: 'text/markdown' });
-  Controller.downloadBlob(blob, `chat-export-${Date.now()}.md`);
-  Controller.showToast('success', 'Chat exported');
+  UI.downloadBlob(blob, `chat-export-${Date.now()}.md`);
+  toast.success('Chat exported');
 }
 
 /**
@@ -177,25 +187,25 @@ export function handleInputKeyDown(event) {
  */
 export function handleDocumentKeyDown(event) {
   if (event.key === 'Escape') {
-    if (Controller.isModalOpen()) Controller.closeModal();
+    if (UI.isModalOpen()) UI.closeModal();
     return;
   }
   if (event.key === 'Tab') {
-    const container = Controller.getTrapContainer();
-    Controller.trapFocus(event, container);
+    const container = UI.getTrapContainer();
+    UI.trapFocus(event, container);
   }
 }
 
 export function handleDocumentClick(event) {
   if (!event.target.closest('#templates-dropdown')) {
-    Controller.closeMenu('templates');
+    UI.closeMenu('templates');
     // Cancel template editing when clicking outside templates dropdown
     if (isTemplateEditingActive()) {
       cancelTemplateEdit();
     }
   }
   if (!event.target.closest('#session-dropdown')) {
-    Controller.closeMenu('session');
+    UI.closeMenu('session');
     // Cancel inline rename when clicking outside session dropdown
     if (isSessionEditingActive()) {
       cancelInlineRename();
@@ -210,7 +220,7 @@ export function handleDocumentClick(event) {
 export function handleModalClick(event) {
   const btn = event.target.closest('[data-dismiss="modal"]');
   const backdrop = event.target.classList.contains('modal-backdrop');
-  if (btn || backdrop) Controller.closeModal();
+  if (btn || backdrop) UI.closeModal();
 }
 
 /**
@@ -223,21 +233,22 @@ export async function handleLogClick(event) {
   if (!btn) return;
 
   const idx = btn.dataset.idx;
-  const session = Controller.getCurrentSession();
+  // Direct access - simple read operation
+  const session = Storage.getCurrentSessionSync();
 
   if (btn.classList.contains('bubble-copy')) {
     const msg = session.messages[idx];
     if (msg) {
       await navigator.clipboard.writeText(msg.text);
-      Controller.showToast('success', 'Message copied');
+      toast.success('Message copied');
     }
   } else if (btn.classList.contains('speak')) {
     const msg = session.messages[idx];
     if (msg) {
       Model.speakText(msg.text, {
-        onStart: () => Controller.setStopEnabled(true),
-        onEnd: () => Controller.setStopEnabled(false),
-        onError: () => Controller.setStopEnabled(false)
+        onStart: () => UI.setStopEnabled(true),
+        onEnd: () => UI.setStopEnabled(false),
+        onError: () => UI.setStopEnabled(false)
       });
     }
   } else if (btn.classList.contains('smart-reply-btn')) {
@@ -255,7 +266,7 @@ export async function handleLogClick(event) {
 export function handleStopClick() {
   Model.cancelGeneration();
   Model.stopSpeech();
-  Controller.setStopEnabled(false);
+  UI.setStopEnabled(false);
 }
 
 /**
@@ -264,7 +275,7 @@ export function handleStopClick() {
  */
 export async function handleToggleContext() {
   Controller.renderContextUI();
-  Controller.openContextModal();
+  UI.openContextModal();
   await refreshContextDraft(false);
 }
 
@@ -297,16 +308,21 @@ export async function handleContextBlur(event) {
 export async function refreshAvailability({ forceCheck = false } = {}) {
   const result = await Model.checkAvailability({
     forceCheck,
-    cachedAvailability: Controller.getAvailability(),
-    cachedCheckedAt: Controller.getAvailabilityCheckedAt()
+    cachedAvailability: Storage.getAvailability(),
+    cachedCheckedAt: Storage.getAvailabilityCheckedAt()
   });
 
-  Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
+  // Update storage first
+  Storage.setAvailability(result.status);
+  Storage.setAvailabilityCheckedAt(result.checkedAt);
+  
+  // Then update UI
+  UI.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
 
   // Update model status chip with diagnostic summary
   try {
     const modelStatus = await getModelStatusSummary(result.status);
-    Controller.updateModelStatusChip(modelStatus);
+    UI.updateModelStatusChip(modelStatus);
   } catch (e) {
     handleError(e, {
       operation: 'Get model status summary',
