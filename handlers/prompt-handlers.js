@@ -4,16 +4,16 @@
  * Handles sending prompts to AI, summarization, translation, and related features.
  */
 
-import * as Controller from '../controller.js';
-import * as Model from '../model.js';
-import { fetchContext, classifyIntent } from '../context.js';
+import * as Controller from '../controller/controller.js';
+import * as Model from '../core/model.js';
+import { fetchContext, classifyIntent } from '../core/context.js';
 import {
   LIMITS,
   UI_MESSAGES,
   USER_ERROR_MESSAGES,
   INTENT_TYPES,
   getSettingOrDefault
-} from '../constants.js';
+} from '../config/constants.js';
 
 /**
  * Refresh context draft from active tab
@@ -345,4 +345,3 @@ export async function runImageDescription(url) {
     Controller.refreshLog();
   }
 }
-

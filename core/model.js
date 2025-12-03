@@ -6,7 +6,7 @@
  */
 
 import { buildPromptWithContext } from './context.js';
-import { throttle } from './utils.js';
+import { throttle } from '../utils/utils.js';
 import {
   MODEL_CONFIG,
   LIMITS,
@@ -18,7 +18,7 @@ import {
   TITLE_GENERATION_PROMPT,
   LANGUAGE_NAMES,
   getSettingOrDefault
-} from './constants.js';
+} from '../config/constants.js';
 
 const STREAMING_THROTTLE_MS = 100;
 const DIAGNOSTICS_KEY = 'nanoPrompt.diagnostics';

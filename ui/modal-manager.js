@@ -1,5 +1,5 @@
 import { getEls, focusInput } from './core.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml } from '../utils/utils.js';
 
 export function trapFocus(e, container) {
   const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -197,4 +197,3 @@ export function renderSetupGuide(status) {
 
   setSetupGuideContent(html);
 }
-

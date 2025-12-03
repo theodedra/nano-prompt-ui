@@ -4,10 +4,10 @@
  * Handles file attachment UI interactions via controller layer.
  */
 
-import * as Controller from '../controller.js';
-import { extractPdfText } from '../pdf.js';
-import { toast } from '../toast.js';
-import { LIMITS, USER_ERROR_MESSAGES, validateAttachment } from '../constants.js';
+import * as Controller from '../controller/controller.js';
+import { extractPdfText } from '../pdf/pdf.js';
+import { toast } from '../utils/toast.js';
+import { LIMITS, USER_ERROR_MESSAGES, validateAttachment } from '../config/constants.js';
 import * as UI from '../ui/index.js';
 
 /**
@@ -158,4 +158,3 @@ export function handleAttachmentListClick(event) {
     Controller.renderAttachments();
   }
 }
-

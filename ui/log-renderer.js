@@ -1,5 +1,5 @@
-import { formatTime, markdownToHtml } from '../utils.js';
-import { VirtualScroller } from '../virtual-scroll.js';
+import { formatTime, markdownToHtml } from '../utils/utils.js';
+import { VirtualScroller } from '../utils/virtual-scroll.js';
 import {
   getEls,
   getChatCardEl,
@@ -310,4 +310,3 @@ export function updateLastMessageBubble(session, markdownText, { streaming = fal
 
 // Export for use in other modules
 export { scrollToBottom, observeLastMessage };
-

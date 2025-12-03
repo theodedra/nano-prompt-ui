@@ -4,7 +4,7 @@
  * Handles template selection, editing, creation, and deletion.
  */
 
-import * as Controller from '../controller.js';
+import * as Controller from '../controller/controller.js';
 import * as UI from '../ui/index.js';
 
 let editingTemplateId = null;
@@ -222,4 +222,3 @@ export function handleTemplateEditKeyDown(event) {
 export function isTemplateEditingActive() {
   return editingTemplateId !== null || isAddingTemplate;
 }
-

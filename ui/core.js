@@ -1,6 +1,6 @@
-import { $, formatDate } from '../utils.js';
-import { UI_MESSAGES, ICONS } from '../constants.js';
-import { VirtualScroller } from '../virtual-scroll.js';
+import { $, formatDate } from '../utils/utils.js';
+import { UI_MESSAGES, ICONS } from '../config/constants.js';
+import { VirtualScroller } from '../utils/virtual-scroll.js';
 
 // Shared state
 let els = {};
@@ -449,4 +449,3 @@ export function downloadBlob(blob, filename) {
 export function setExportAvailability(enabled) {
   [els.copy, els.saveMd].forEach(btn => { if (btn) btn.disabled = !enabled; });
 }
-

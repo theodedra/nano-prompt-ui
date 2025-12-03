@@ -1,4 +1,4 @@
-import { sanitizeText } from './utils.js';
+import { sanitizeText } from '../utils/utils.js';
 import {
   ASSISTANT_RULES,
   LIMITS,
@@ -7,7 +7,7 @@ import {
   INTENT_PATTERNS,
   INTENT_TYPES,
   VALIDATION
-} from './constants.js';
+} from '../config/constants.js';
 import { getActiveSnapshot } from './storage.js';
 
 let cachedContext = {
@@ -305,4 +305,3 @@ export async function buildPromptWithContext(userText, contextOverride = '', att
 
   return { prompt, tokenEstimate: totalTokens };
 }
-

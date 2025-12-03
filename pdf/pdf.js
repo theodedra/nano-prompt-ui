@@ -1,7 +1,7 @@
 // pdf.js - PDF text extraction using Web Worker for non-blocking processing
 // This module handles PDF file processing for attachment support
 
-import { LIMITS } from './constants.js';
+import { LIMITS } from '../config/constants.js';
 
 /** @type {Worker|null} */
 let pdfWorker = null;
@@ -12,7 +12,7 @@ let pdfWorker = null;
  */
 function getWorker() {
   if (!pdfWorker) {
-    const workerUrl = chrome.runtime.getURL('pdf-worker.js');
+    const workerUrl = chrome.runtime.getURL('pdf/pdf-worker.js');
     pdfWorker = new Worker(workerUrl);
   }
   return pdfWorker;

@@ -4,9 +4,9 @@
  * Handles saving, applying, and deleting context snapshots.
  */
 
-import * as Controller from '../controller.js';
-import { fetchContext } from '../context.js';
-import { getSnapshotHost, clampLabel } from '../utils.js';
+import * as Controller from '../controller/controller.js';
+import { fetchContext } from '../core/context.js';
+import { getSnapshotHost, clampLabel } from '../utils/utils.js';
 
 let isSnapshotBusy = false;
 
@@ -155,4 +155,3 @@ export async function handleSnapshotListClick(event) {
     await handleDeleteSnapshot(deleteBtn.dataset.id);
   }
 }
-

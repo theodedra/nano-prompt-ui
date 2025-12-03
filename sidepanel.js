@@ -8,7 +8,7 @@ import * as UI from './ui/index.js';
 import * as ChatHandlers from './handlers/chat-handlers.js';
 import * as AttachmentHandlers from './handlers/attachment-handlers.js';
 import * as SettingsHandlers from './handlers/settings-handlers.js';
-import { performSessionWarmup } from './model.js';
+import { performSessionWarmup } from './core/model.js';
 
 function bind(selector, event, handler) {
   const el = document.querySelector(selector);

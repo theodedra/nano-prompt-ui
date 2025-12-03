@@ -7,7 +7,7 @@
  * - All state mutations go through this layer
  */
 
-import * as UI from './ui/index.js';
+import * as UI from '../ui/index.js';
 import {
   // State getters/setters
   getSessions,
@@ -55,12 +55,12 @@ import {
   resetTemplates as resetStorageTemplates,
   // Constants
   BLANK_TEMPLATE_ID
-} from './storage.js';
-import { toast } from './toast.js';
+} from '../core/storage.js';
+import { toast } from '../utils/toast.js';
 import {
   UI_MESSAGES,
   getSettingOrDefault
-} from './constants.js';
+} from '../config/constants.js';
 
 // --- SESSION MANAGEMENT ---
 
@@ -459,4 +459,3 @@ export function getAvailability() {
 export function getAvailabilityCheckedAt() {
   return getStoredAvailabilityCheckedAt();
 }
-

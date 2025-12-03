@@ -1,6 +1,6 @@
 // setup-guide.js - API availability detection and setup guide
 
-import { escapeHtml } from './utils.js';
+import { escapeHtml } from '../utils/utils.js';
 
 /**
  * Helper to get the AI language model API reference

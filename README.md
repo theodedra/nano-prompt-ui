@@ -1,6 +1,6 @@
 # Nano Prompt UI
 
-![Nano Prompt UI – Dark](Screenshot(dark).png) ![Nano Prompt UI – Light](Screenshot(light).png)
+![Nano Prompt UI – Dark](assets/Screenshot(dark).png) ![Nano Prompt UI – Light](assets/Screenshot(light).png)
 
 A privacy-first Chrome extension that runs entirely on-device using Chrome's built-in **Gemini Nano** language model. Everything stays local—no servers, no data leaves your machine.
 
@@ -166,11 +166,12 @@ nano-prompt-ui/
 ├── sidepanel.js               # Bootstrap + event wiring
 ├── sidepanel.css              # Layout, theming, styles
 │
-├── controller.js              # Orchestrates handlers and state
+├── controller/                # Orchestrates handlers and state
+│   └── controller.js
 │
 ├── handlers/                  # Modular event handlers
 │   ├── chat-handlers.js       # Re-exports + shared navigation handlers
-│   ├── prompt-handlers.js      # Prompt execution, summarization, translation
+│   ├── prompt-handlers.js     # Prompt execution, summarization, translation
 │   ├── session-handlers.js    # Session switching, renaming, deletion, search
 │   ├── template-handlers.js   # Template CRUD operations
 │   ├── snapshot-handlers.js   # Context snapshot management
@@ -189,27 +190,33 @@ nano-prompt-ui/
 │   ├── modal-manager.js       # Modal open/close, focus trapping
 │   └── attachment-renderer.js # Attachment chip rendering
 │
-├── model.js                   # Gemini Nano + Translation API interface
-├── storage.js                 # IndexedDB, session state, persistence, markdown caching
-├── context.js                 # Context assembly, snapshots, prompt building, intent classification
-├── utils.js                   # Markdown → HTML, sanitization, utilities
-├── toast.js                   # Toast notification system
-├── constants.js               # Limits, timing, labels, model config
-├── virtual-scroll.js          # Virtualized chat list (performance optimized)
+├── core/                      # Core business logic
+│   ├── context.js             # Context assembly, snapshots, prompt building, intent classification
+│   ├── model.js               # Gemini Nano + Translation API interface
+│   ├── storage.js             # IndexedDB, session state, persistence, markdown caching
+│   └── setup-guide.js         # API availability checks, flag guidance
 │
-├── pdf.js                     # PDF extraction coordinator (delegates to Web Worker)
-├── pdf-worker.js              # Web Worker for off-thread PDF text extraction
-├── setup-guide.js             # API availability checks, flag guidance
+├── config/                    # Configuration constants
+│   └── constants.js
 │
-├── lib/
-│   ├── pdf.min.js             # Bundled Mozilla PDF.js
-│   └── pdf.worker.min.js      # PDF.js worker
+├── utils/                     # Shared utilities
+│   ├── utils.js               # Markdown → HTML, sanitization, utilities
+│   ├── toast.js               # Toast notification system
+│   └── virtual-scroll.js      # Virtualized chat list (performance optimized)
+│
+├── pdf/                       # PDF extraction module
+│   ├── pdf.js                 # PDF extraction coordinator (delegates to Web Worker)
+│   ├── pdf-worker.js          # Web Worker for off-thread PDF text extraction
+│   └── lib/
+│       ├── pdf.min.js         # Bundled Mozilla PDF.js
+│       └── pdf.worker.min.js  # PDF.js worker
+│
+├── assets/
+│   ├── Screenshot(dark).png   # Dark theme screenshot
+│   └── Screenshot(light).png  # Light theme screenshot
 │
 ├── package.json               # Dev dependencies (ESLint)
 ├── eslint.config.js           # Linting configuration
-│
-├── Screenshot(dark).png       # Dark theme screenshot
-├── Screenshot(light).png      # Light theme screenshot
 ├── LICENSE.txt                # The Unlicense
 ├── SECURITY.md                # Security model and threat analysis
 └── IMPLEMENTATION.md          # Internal implementation notes

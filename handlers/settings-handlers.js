@@ -4,13 +4,13 @@
  * Handles settings UI interactions via controller layer.
  */
 
-import * as Controller from '../controller.js';
-import * as Model from '../model.js';
-import { getSettingOrDefault, LANGUAGE_LABELS, THEME_LABELS } from '../constants.js';
-import { getSetupStatus } from '../setup-guide.js';
-import { toast } from '../toast.js';
+import * as Controller from '../controller/controller.js';
+import * as Model from '../core/model.js';
+import { getSettingOrDefault, LANGUAGE_LABELS, THEME_LABELS } from '../config/constants.js';
+import { getSetupStatus } from '../core/setup-guide.js';
+import { toast } from '../utils/toast.js';
 import * as UI from '../ui/index.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml } from '../utils/utils.js';
 
 export function handleOpenSettings() {
   UI.openSettingsModal();
@@ -179,4 +179,3 @@ export async function handleOpenSetupGuide() {
     UI.setSetupGuideContent(`<p class="error">Error checking API status: ${escapeHtml(e.message)}</p>`);
   }
 }
-

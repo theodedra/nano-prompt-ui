@@ -385,7 +385,7 @@ const testSession = await LanguageModel.create({ ... });
 
 ### Implementation
 
-**File:** `model.js` - `getSessionConfig()`
+**File:** `core/model.js` - `getSessionConfig()`
 
 ```javascript
 function getSessionConfig(settings) {
@@ -424,7 +424,7 @@ NanoPromptUI uses Chrome's dedicated Translation API with automatic language det
 6. **Translate text** using expert translation model
 7. **Display result** with language pair indicator: `Translate (es → en): ...`
 
-**File:** `model.js` - `translateText()`
+**File:** `core/model.js` - `translateText()`
 
 ---
 
@@ -467,7 +467,7 @@ Controller.addAttachment({
 
 #### 2. Image Sending
 
-**File:** `model.js` - `runPrompt()`
+**File:** `core/model.js` - `runPrompt()`
 
 ```javascript
 // Convert Blob back to Canvas for Prompt API
@@ -490,7 +490,7 @@ promptInput = [{
 
 ### Image Limits
 
-**File:** `constants.js`
+**File:** `config/constants.js`
 
 ```javascript
 IMAGE_MAX_WIDTH: 1_024,             // Max width for uploaded images
@@ -505,13 +505,13 @@ MAX_ATTACHMENTS: 3,                 // Max attachments per message
 
 ### Overview
 
-Extracts text from PDF files using Mozilla's pdf.js library (local copy in `lib/`), running entirely off the main thread via a Web Worker to keep the UI responsive.
+Extracts text from PDF files using Mozilla's pdf.js library (local copy in `pdf/lib/`), running entirely off the main thread via a Web Worker to keep the UI responsive.
 
-**Files:** `pdf.js` (coordinator), `pdf-worker.js` (Web Worker)
+**Files:** `pdf/pdf.js` (coordinator), `pdf/pdf-worker.js` (Web Worker)
 
 ### Limits
 
-**File:** `constants.js`
+**File:** `config/constants.js`
 
 ```javascript
 PDF_MAX_PAGES: 50,        // Maximum pages to extract
@@ -521,10 +521,10 @@ PDF_MAX_CHARS: 50_000,    // Maximum characters (~12,500 tokens)
 ### Architecture
 
 ```
-┌─────────────────┐         ┌─────────────────┐
-│   pdf.js        │ ──────▶ │  pdf-worker.js  │
-│   (main thread) │ ◀────── │  (Web Worker)   │
-└─────────────────┘         └─────────────────┘
+┌─────────────────┐         ┌──────────────────────┐
+│ pdf/pdf.js      │ ──────▶ │  pdf/pdf-worker.js   │
+│ (main thread)   │ ◀────── │  (Web Worker)        │
+└─────────────────┘         └──────────────────────┘
      │                              │
      │ postMessage({arrayBuffer})   │
      │ ◀─ progress updates ─────────│
@@ -579,7 +579,7 @@ for (const file of files.slice(0, LIMITS.MAX_ATTACHMENTS)) {
 
 Renders only visible messages + buffer for performance with large chat histories.
 
-**File:** `virtual-scroll.js`
+**File:** `utils/virtual-scroll.js`
 
 ### Activation Threshold
 
@@ -630,7 +630,7 @@ if (this.needsPrune) {
 
 Reduces startup memory by only loading current session's full data.
 
-**File:** `storage.js`
+**File:** `core/storage.js`
 
 ### Activation Threshold
 
@@ -665,7 +665,7 @@ export async function setCurrentSession(sessionId) {
 
 ### IndexedDB Schema
 
-**File:** `constants.js`
+**File:** `config/constants.js`
 
 ```javascript
 STORAGE_KEYS = {
@@ -683,7 +683,7 @@ STORAGE_KEYS = {
 
 Large attachments (images, PDFs) are stored in a separate `ATTACHMENTS` store to keep session records small.
 
-**File:** `storage.js`
+**File:** `core/storage.js`
 
 ```javascript
 // Messages store only metadata, not the actual data
@@ -723,7 +723,7 @@ TIMING.SAVE_STATE_DEBOUNCE_MS: 500 // Debounce for IndexedDB writes
 
 ### Quota Handling
 
-**File:** `storage.js`
+**File:** `core/storage.js`
 
 ```javascript
 tx.onerror = (event) => {
@@ -741,7 +741,7 @@ tx.onerror = (event) => {
 
 AI-generated follow-up suggestions displayed after each response.
 
-**File:** `model.js`
+**File:** `core/model.js`
 
 ### Configuration
 
@@ -775,7 +775,7 @@ export async function generateSmartReplies(userText, aiText, settings) {
 
 Pre-warms the AI engine on first sidepanel open for faster first response.
 
-**File:** `model.js`
+**File:** `core/model.js`
 
 ### Flow
 
@@ -806,7 +806,7 @@ export async function performSessionWarmup() {
 
 Saved page contexts that can be reused across sessions.
 
-**File:** `storage.js`
+**File:** `core/storage.js`
 
 ### Storage
 
@@ -844,7 +844,7 @@ appState.activeSnapshotId = null; // Currently applied snapshot
 
 Text-to-speech for AI responses using browser's built-in synthesis.
 
-**File:** `model.js`
+**File:** `core/model.js`
 
 ### Implementation
 
@@ -923,14 +923,14 @@ All other APIs are optional with clear fallback explanations:
 
 | File | Purpose |
 |------|---------|
-| `model.js` | AI operations, streaming, translation, speech |
-| `storage.js` | IndexedDB, session management, attachments, markdown caching |
-| `controller.js` | Mediates between Model, Storage, and UI |
-| `virtual-scroll.js` | Performance optimization for large logs |
-| `pdf.js` | PDF extraction coordinator (delegates to Web Worker) |
-| `pdf-worker.js` | Web Worker for off-thread PDF text extraction |
-| `constants.js` | All configuration values and limits |
-| `context.js` | Context fetching, intent classification, token estimation |
+| `core/model.js` | AI operations, streaming, translation, speech |
+| `core/storage.js` | IndexedDB, session management, attachments, markdown caching |
+| `controller/controller.js` | Mediates between Model, Storage, and UI |
+| `utils/virtual-scroll.js` | Performance optimization for large logs |
+| `pdf/pdf.js` | PDF extraction coordinator (delegates to Web Worker) |
+| `pdf/pdf-worker.js` | Web Worker for off-thread PDF text extraction |
+| `config/constants.js` | All configuration values and limits |
+| `core/context.js` | Context fetching, intent classification, token estimation |
 
 ### Handler Modules (`handlers/`)
 
@@ -963,7 +963,7 @@ All other APIs are optional with clear fallback explanations:
 
 | File | Purpose |
 |------|---------|
-| `toast.js` | Toast notifications |
+| `utils/toast.js` | Toast notifications |
 | `sidepanel.js` | Main entry point, event wiring |
 | `background.js` | Service worker, context menus, warmup |
 | `content.js` | Page scraping with SPA cache invalidation |
@@ -974,7 +974,7 @@ All other APIs are optional with clear fallback explanations:
 
 ### Overview
 
-The `markdownToHtml()` function in `utils.js` converts AI responses from markdown to HTML with sanitization. This section documents the intentional trade-off between maximum security and preserving useful output formatting.
+The `markdownToHtml()` function in `utils/utils.js` converts AI responses from markdown to HTML with sanitization. This section documents the intentional trade-off between maximum security and preserving useful output formatting.
 
 ### The Trade-off: Safety vs. SPA Context
 
@@ -1035,12 +1035,12 @@ If considering changes:
 1. Document the specific threat you're addressing
 2. Test with real AI responses that reference SPA content
 3. Verify that code blocks, lists, and explanatory formatting still render correctly
-4. Update this section and the inline comments in `utils.js`
+4. Update this section and the inline comments in `utils/utils.js`
 
 **Files involved:**
-- `utils.js` - `markdownToHtml()`, `sanitizeHtmlString()`
+- `utils/utils.js` - `markdownToHtml()`, `sanitizeHtmlString()`
 - `ui.js` - Calls to `markdownToHtml()` in message rendering
-- `constants.js` - `VALIDATION.ALLOWED_HTML_TAGS`, `VALIDATION.ALLOWED_LINK_ATTRIBUTES`
+- `config/constants.js` - `VALIDATION.ALLOWED_HTML_TAGS`, `VALIDATION.ALLOWED_LINK_ATTRIBUTES`
 
 ---
 
@@ -1050,7 +1050,7 @@ If considering changes:
 
 User queries are classified to determine context handling.
 
-**File:** `context.js`
+**File:** `core/context.js`
 
 ### Patterns
 
@@ -1066,7 +1066,7 @@ Note: Word boundaries (`\b`) prevent false positives (e.g., "tabletop" won't mat
 
 ### Token Estimation
 
-**File:** `context.js`
+**File:** `core/context.js`
 
 Non-ASCII aware estimation accounts for different character-to-token ratios:
 
@@ -1117,7 +1117,7 @@ window.addEventListener('popstate', () => {
 
 Attachments are stored in a separate IndexedDB store to keep session records small. Write failures are now properly tracked and reported.
 
-**File:** `storage.js`
+**File:** `core/storage.js`
 
 ### Error Handling
 
@@ -1156,12 +1156,12 @@ sessionsToRemove.forEach(oldId => {
 
 Messages store pre-rendered HTML to avoid repeated markdown parsing during scroll and re-render operations.
 
-**Files:** `storage.js`, `ui/log-renderer.js`
+**Files:** `core/storage.js`, `ui/log-renderer.js`
 
 ### Implementation
 
 ```javascript
-// storage.js - upsertMessage()
+// core/storage.js - upsertMessage()
 if (storedMessage.text) {
   storedMessage.htmlCache = markdownToHtml(storedMessage.text);
 }

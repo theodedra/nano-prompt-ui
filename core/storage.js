@@ -1,5 +1,5 @@
-import { nanoid, markdownToHtml } from './utils.js';
-import { toast } from './toast.js';
+import { nanoid, markdownToHtml } from '../utils/utils.js';
+import { toast } from '../utils/toast.js';
 import {
   STORAGE_KEYS,
   LIMITS,
@@ -9,7 +9,7 @@ import {
   VALIDATION,
   USER_ERROR_MESSAGES,
   TIMING
-} from './constants.js';
+} from '../config/constants.js';
 
 const { DB_NAME, DB_VERSION, STORES } = STORAGE_KEYS;
 const SYNC_KEY = STORAGE_KEYS.SYNC;
@@ -1021,4 +1021,3 @@ export function removePendingAttachment(index) {
 export function updateSettings(patch) {
   appState.settings = { ...appState.settings, ...patch };
 }
-

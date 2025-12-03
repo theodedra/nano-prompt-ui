@@ -8,19 +8,19 @@
  * remaining shared handlers for bootstrap, navigation, and misc UI.
  */
 
-import * as Controller from '../controller.js';
-import * as Model from '../model.js';
-import * as Storage from '../storage.js';
+import * as Controller from '../controller/controller.js';
+import * as Model from '../core/model.js';
+import * as Storage from '../core/storage.js';
 import * as UI from '../ui/index.js';
-import { fetchContext } from '../context.js';
-import { debounce } from '../utils.js';
+import { fetchContext } from '../core/context.js';
+import { debounce } from '../utils/utils.js';
 import {
   TIMING,
   UI_MESSAGES,
   getSettingOrDefault
-} from '../constants.js';
+} from '../config/constants.js';
 import { registerContextMenuHandlers } from './context-menu-handlers.js';
-import { getModelStatusSummary } from '../setup-guide.js';
+import { getModelStatusSummary } from '../core/setup-guide.js';
 
 // Re-export all handlers from modular files
 export * from './session-handlers.js';
@@ -279,4 +279,3 @@ export async function refreshAvailability({ forceCheck = false } = {}) {
 
   return result;
 }
-

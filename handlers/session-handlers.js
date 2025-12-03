@@ -4,10 +4,10 @@
  * Handles session switching, renaming, deletion, and search.
  */
 
-import * as Controller from '../controller.js';
-import * as Model from '../model.js';
-import { debounce } from '../utils.js';
-import { TIMING } from '../constants.js';
+import * as Controller from '../controller/controller.js';
+import * as Model from '../core/model.js';
+import { debounce } from '../utils/utils.js';
+import { TIMING } from '../config/constants.js';
 
 let confirmingDeleteId = null;
 let editingSessionId = null;
@@ -200,4 +200,3 @@ export function isSessionEditingActive() {
 export function getEditingSessionId() {
   return editingSessionId;
 }
-

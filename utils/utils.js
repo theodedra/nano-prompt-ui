@@ -1,6 +1,6 @@
 // utils.js - General utility functions
 
-import { VALIDATION } from './constants.js';
+import { VALIDATION } from '../config/constants.js';
 
 /**
  * Query selector helper
