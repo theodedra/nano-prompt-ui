@@ -6,7 +6,6 @@ export const TIMING = {
   // Context caching and refresh
   CONTEXT_CACHE_MS: 15_000,
   TAB_UPDATE_DEBOUNCE_MS: 300,
-  SCRAPE_CACHE_TTL_MS: 30_000, // Cache same-page scrapes briefly to avoid repeated DOM walks
 
   // Network timeouts
   IMAGE_FETCH_TIMEOUT_MS: 5_000,
@@ -19,54 +18,7 @@ export const TIMING = {
   MIC_SETUP_DELAY_MS: 500, // Delay before auto-triggering mic on setup
 
   // Storage persistence
-  SAVE_STATE_DEBOUNCE_MS: 500, // Debounce for IndexedDB writes to avoid thrash
-
-  // Streaming and polling
-  STREAMING_THROTTLE_MS: 100, // Throttle for streaming responses
-  DOWNLOAD_POLL_INTERVAL_MS: 2_000, // Poll every 2 seconds during download
-  DOWNLOAD_POLL_MAX_ATTEMPTS: 180, // Max 6 minutes of polling
-
-  // AI operation timeouts
-  AI_OPERATION_TIMEOUT_MS: 300_000, // 5 minutes timeout for AI operations
-  AI_STREAM_READ_TIMEOUT_MS: 60_000, // 1 minute timeout for individual stream reads
-
-  // PDF worker lifecycle
-  PDF_WORKER_IDLE_TIMEOUT_MS: 300_000 // Terminate worker after 5 minutes of inactivity
-};
-
-// ============================================================================
-// SCRAPING CONSTANTS
-// ============================================================================
-
-export const SCRAPING = {
-  // Main content selectors (priority order)
-  MAIN_CONTENT_SELECTORS: [
-    'main',
-    '[role="main"]',
-    '#main',
-    '#content',
-    '.jobs-search-results-list',
-    '.job-view-layout',
-    'article',
-    '.feed-shared-update-v2'
-  ],
-
-  // Tags to exclude from scraping
-  EXCLUDED_TAGS: ['SCRIPT', 'STYLE', 'NOSCRIPT', 'NAV', 'FOOTER', 'BUTTON', 'SVG', 'PATH'],
-
-  // Noise phrases to filter out
-  NOISE_PHRASES: [
-    'Jump to', 'Skip to', 'main content', 'accessibility',
-    'Easy Apply', 'connections work here', 'Actively reviewing',
-    'results', 'Expired', 'ago', 'See more', 'show more',
-    'Keyboard shortcuts', 'opens in a new window', 'verficiation',
-    'Apply now', 'Save', 'Share'
-  ],
-
-  // Content length thresholds
-  MIN_CONTENT_LENGTH: 50,
-  FALLBACK_MAX_LENGTH: 5_000,
-  MIN_TEXT_LENGTH: 2
+  SAVE_STATE_DEBOUNCE_MS: 500 // Debounce for IndexedDB writes to avoid thrash
 };
 
 // ============================================================================
@@ -104,12 +56,7 @@ export const LIMITS = {
 
   // Title generation
   TITLE_MAX_LENGTH: 50,
-  TITLE_GENERATION_MAX_CHARS: 500, // Max chars from conversation to use for title generation
-
-  // Content scraping limits (used in content.js)
-  CONTEXT_MAX_CHARS: 12_000, // MAX_CONTEXT_TOKENS * TOKEN_TO_CHAR_RATIO (≈12,000 chars)
-  TREEWALKER_SAFETY_MARGIN: 2_000, // Allows slight overshoot before final clamp upstream
-  MAX_VISITED_TEXT_NODES: 8_000 // High cap to avoid worst-case pages without trimming usable context
+  TITLE_GENERATION_MAX_CHARS: 500 // Max chars from conversation to use for title generation
 };
 
 // ============================================================================
@@ -170,7 +117,6 @@ Title:`;
 export const STORAGE_KEYS = {
   SYNC: 'nanoPromptUI.settings.v1', // Chrome sync storage for settings
   SESSION_DRAFT: 'nanoPromptUI.draft', // Session storage for context draft
-  SESSION_WARMUP: 'nanoPrompt.warmedUp', // Session storage key for warmup flag (shared across background.js and model.js)
   DB_NAME: 'NanoPromptDB',
   DB_VERSION: 2,
   STORES: {
@@ -276,7 +222,6 @@ export const VALIDATION = {
   // URL protocols
   ALLOWED_PAGE_PROTOCOLS: /^(https?|file):/i,
   ALLOWED_IMAGE_PROTOCOLS: ['http:', 'https:'],
-  ALLOWED_LINK_PROTOCOLS: ['http:', 'https:', 'mailto:', 'tel:'],
 
   // Message roles
   VALID_MESSAGE_ROLES: ['user', 'ai'],

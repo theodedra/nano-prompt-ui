@@ -114,7 +114,7 @@ async function checkPromptAPI() {
     // If status check returns 'no' or something unexpected, try to actually create a session
     // This handles cases where flag is "Enabled multilingual" or "Enabled Bypass" etc.
     // Note: 'downloading' means model is being downloaded - don't try to create session (would block)
-    let isAvailable = status === 'readily' || status === 'available' || status === 'after-download' || status === 'downloading';
+    let isAvailable = status === 'readily' || status === 'after-download' || status === 'downloading';
     let actuallyWorks = false;
 
     // Only try to create a test session if status is 'no' - don't block on 'downloading'

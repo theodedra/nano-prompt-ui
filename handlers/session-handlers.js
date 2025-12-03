@@ -4,17 +4,13 @@
  * Handles session switching, renaming, deletion, and search.
  */
 
-import * as Controller from '../controller/index.js';
-import * as Model from '../core/model.js';
-import * as UI from '../ui/index.js';
-import {
-  getConfirmingDeleteId,
-  setConfirmingDeleteId,
-  getEditingSessionId,
-  setEditingSessionId
-} from '../core/state.js';
-import { debounce } from '../utils/utils.js';
-import { TIMING } from '../config/constants.js';
+import * as Controller from '../controller.js';
+import * as Model from '../model.js';
+import { debounce } from '../utils.js';
+import { TIMING } from '../constants.js';
+
+let confirmingDeleteId = null;
+let editingSessionId = null;
 
 // Debounced session search to avoid excessive re-renders
 const debouncedSessionSearch = debounce((value) => {
@@ -39,17 +35,17 @@ export async function handleNewSessionClick() {
  * @returns {Promise<void>}
  */
 export async function deleteSessionHandler(btn, id) {
-  if (id === getConfirmingDeleteId()) {
+  if (id === confirmingDeleteId) {
     Model.cancelGeneration();
     Model.resetModel(id);
     await Controller.removeSession(id);
-    setConfirmingDeleteId(null);
+    confirmingDeleteId = null;
   } else {
-    setConfirmingDeleteId(id);
-    Controller.renderSessionsList(getConfirmingDeleteId());
+    confirmingDeleteId = id;
+    Controller.renderSessionsList(confirmingDeleteId);
     setTimeout(() => {
-      if (getConfirmingDeleteId() === id) {
-        setConfirmingDeleteId(null);
+      if (confirmingDeleteId === id) {
+        confirmingDeleteId = null;
         Controller.renderSessionsList();
       }
     }, TIMING.DELETE_CONFIRM_TIMEOUT_MS);
@@ -61,7 +57,7 @@ export async function deleteSessionHandler(btn, id) {
  * @param {string} id - Session ID to rename
  */
 export function startInlineRename(id) {
-  setEditingSessionId(id);
+  editingSessionId = id;
   Controller.renderSessionsList(null, id);
 }
 
@@ -69,7 +65,7 @@ export function startInlineRename(id) {
  * Cancel inline rename
  */
 export function cancelInlineRename() {
-  setEditingSessionId(null);
+  editingSessionId = null;
   Controller.renderSessionsList();
 }
 
@@ -80,7 +76,7 @@ export function cancelInlineRename() {
  * @returns {Promise<void>}
  */
 export async function saveInlineRename(id, newTitle) {
-  setEditingSessionId(null);
+  editingSessionId = null;
   const trimmed = (newTitle || '').trim();
   if (trimmed) {
     await Controller.renameSessionById(id, trimmed);
@@ -115,7 +111,7 @@ export function handleSessionSearchInput(event) {
  */
 export function handleSessionTriggerClick(event) {
   event.stopPropagation();
-  UI.toggleMenu('session');
+  Controller.toggleMenu('session');
 }
 
 /**
@@ -160,7 +156,7 @@ export async function handleSessionMenuClick(event) {
   }
 
   // Don't switch session if we're currently editing
-  if (getEditingSessionId()) {
+  if (editingSessionId) {
     return;
   }
 
@@ -194,9 +190,14 @@ export async function handleRenameInputKeyDown(event) {
  * @returns {boolean}
  */
 export function isSessionEditingActive() {
-  return getEditingSessionId() !== null;
+  return editingSessionId !== null;
 }
 
-// getEditingSessionId is now exported from state.js
-
+/**
+ * Get currently editing session ID
+ * @returns {string|null}
+ */
+export function getEditingSessionId() {
+  return editingSessionId;
+}
 

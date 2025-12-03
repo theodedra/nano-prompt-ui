@@ -1,5 +1,5 @@
-import { formatTime, markdownToHtml } from '../utils/utils.js';
-import { VirtualScroller } from './virtual-scroll.js';
+import { formatTime, markdownToHtml } from '../utils.js';
+import { VirtualScroller } from '../virtual-scroll.js';
 import {
   getEls,
   getChatCardEl,
@@ -36,24 +36,19 @@ function createMessageActions(msg, idx) {
   const actions = document.createElement('div');
   actions.className = 'copy1';
 
-  // Use DocumentFragment for batch button creation
-  const fragment = document.createDocumentFragment();
-  
   const copyBtn = document.createElement('button');
   copyBtn.textContent = 'Copy';
   copyBtn.dataset.idx = idx;
   copyBtn.className = 'bubble-copy';
-  fragment.appendChild(copyBtn);
+  actions.appendChild(copyBtn);
 
   if (msg.role === 'ai') {
     const speak = document.createElement('button');
     speak.textContent = '🔊';
     speak.dataset.idx = idx;
     speak.className = 'speak';
-    fragment.appendChild(speak);
+    actions.appendChild(speak);
   }
-  
-  actions.appendChild(fragment);
   return actions;
 }
 
@@ -70,9 +65,6 @@ export function buildSmartReplyRow(replies = []) {
 
   const list = document.createElement('div');
   list.className = 'smart-reply-list';
-  
-  // Use DocumentFragment for batch button creation
-  const fragment = document.createDocumentFragment();
   replies.forEach((reply) => {
     if (!reply) return;
     const btn = document.createElement('button');
@@ -80,9 +72,8 @@ export function buildSmartReplyRow(replies = []) {
     btn.className = 'smart-reply-btn tonal';
     btn.dataset.reply = reply;
     btn.textContent = reply;
-    fragment.appendChild(btn);
+    list.appendChild(btn);
   });
-  list.appendChild(fragment);
 
   container.appendChild(list);
   return container;
@@ -95,9 +86,6 @@ export function createMessageElement(m, idx) {
   const div = document.createElement('div');
   div.className = `msg ${m.role}`;
 
-  // Use DocumentFragment for batch child element creation
-  const fragment = document.createDocumentFragment();
-
   const header = document.createElement('div');
   header.className = 'msg-header';
 
@@ -109,7 +97,7 @@ export function createMessageElement(m, idx) {
   const time = document.createElement('time');
   time.textContent = formatTime(m.ts);
   header.appendChild(time);
-  fragment.appendChild(header);
+  div.appendChild(header);
 
   const body = document.createElement('div');
   body.className = 'body';
@@ -121,7 +109,7 @@ export function createMessageElement(m, idx) {
     // Use pre-cached HTML if available, otherwise parse markdown
     body.innerHTML = m.htmlCache || markdownToHtml(m.text || '');
   }
-  fragment.appendChild(body);
+  div.appendChild(body);
 
   if (m.attachments?.length) {
     const attachmentSection = document.createElement('div');
@@ -134,9 +122,6 @@ export function createMessageElement(m, idx) {
 
     const att = document.createElement('ul');
     att.className = 'attachment-list persisted-attachments';
-    
-    // Use DocumentFragment for batch attachment chip creation
-    const attachmentFragment = document.createDocumentFragment();
     m.attachments.forEach(file => {
       const chip = document.createElement('li');
       chip.className = 'attachment-chip';
@@ -148,24 +133,20 @@ export function createMessageElement(m, idx) {
         noteEl.textContent = note;
         chip.appendChild(noteEl);
       }
-      attachmentFragment.appendChild(chip);
+      att.appendChild(chip);
     });
-    att.appendChild(attachmentFragment);
 
     attachmentSection.appendChild(att);
-    fragment.appendChild(attachmentSection);
+    div.appendChild(attachmentSection);
   }
 
   const smartRepliesRow = buildSmartReplyRow(m.smartReplies);
   if (smartRepliesRow) {
-    fragment.appendChild(smartRepliesRow);
+    div.appendChild(smartRepliesRow);
   }
 
   const actions = createMessageActions(m, idx);
-  fragment.appendChild(actions);
-
-  // Append all children at once
-  div.appendChild(fragment);
+  div.appendChild(actions);
 
   div.addEventListener('mousemove', (e) => {
     const rect = div.getBoundingClientRect();
@@ -226,13 +207,7 @@ export function renderLog(session) {
     virtualScroller.setMessages(messages);
     if (!virtualScroller.enabled) {
       virtualScroller.enable();
-      // Use double RAF to ensure DOM is painted before measuring
-      // This is faster and more accurate than setTimeout
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          virtualScroller.calibrateItemHeight();
-        });
-      });
+      setTimeout(() => virtualScroller.calibrateItemHeight(), 100);
     }
     virtualScroller.render(messages);
     setExportAvailability(true);
@@ -260,18 +235,6 @@ export function renderLog(session) {
 }
 
 export function renderSmartReplies(replies = []) {
-  // Use requestIdleCallback for non-critical UI updates to avoid blocking main thread
-  if (typeof requestIdleCallback !== 'undefined') {
-    requestIdleCallback(() => {
-      renderSmartRepliesSync(replies);
-    }, { timeout: 2000 }); // Fallback after 2s if browser never becomes idle
-  } else {
-    // Fallback for browsers without requestIdleCallback
-    setTimeout(() => renderSmartRepliesSync(replies), 0);
-  }
-}
-
-function renderSmartRepliesSync(replies = []) {
   const els = getEls();
   if (!els.log) return;
 
@@ -331,30 +294,20 @@ export function updateLastMessageBubble(session, markdownText, { streaming = fal
     return;
   }
 
-  // Check if text actually changed - avoid redundant parsing
-  const textChanged = lastMessage.text !== markdownText;
-  
-  // Use cached HTML if text hasn't changed and cache exists
-  let htmlToRender;
-  if (!textChanged && lastMessage.htmlCache) {
-    htmlToRender = lastMessage.htmlCache;
-  } else {
-    // Text changed or no cache - parse markdown
-    htmlToRender = markdownToHtml(markdownText);
-    // Store in message object for future use (especially during streaming)
-    if (streaming || textChanged) {
-      lastMessage.htmlCache = htmlToRender;
-    }
+  if (streaming) {
+    // Fast path: skip content comparison since throttle limits update frequency
+    body.textContent = markdownText;
+    body.dataset.renderMode = 'plain';
+    return;
   }
 
-  // Only update DOM if HTML actually changed
-  if (body.innerHTML !== htmlToRender) {
-    body.innerHTML = htmlToRender;
+  const newHtml = markdownToHtml(markdownText);
+  if (body.dataset.renderMode !== 'markdown' || body.innerHTML !== newHtml) {
+    body.innerHTML = newHtml;
     body.dataset.renderMode = 'markdown';
   }
 }
 
 // Export for use in other modules
 export { scrollToBottom, observeLastMessage };
-
 

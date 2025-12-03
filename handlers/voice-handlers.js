@@ -2,16 +2,11 @@
  * Voice Handlers - Voice input and speech UI event handlers
  *
  * Handles microphone input, speech recognition, and text-to-speech.
- * Uses direct storage/model access for simple read operations (see IMPLEMENTATION.md).
  */
 
-import * as Controller from '../controller/index.js';
-import * as Model from '../core/model.js';
-import * as Storage from '../core/storage.js';
-import * as UI from '../ui/index.js';
-import { USER_ERROR_MESSAGES } from '../config/constants.js';
-import { handleError } from '../utils/errors.js';
-import { toast } from '../ui/toast.js';
+import * as Controller from '../controller.js';
+import * as Model from '../model.js';
+import { USER_ERROR_MESSAGES } from '../constants.js';
 
 // Speech recognition state
 let recognition = null;
@@ -23,7 +18,7 @@ let recognizing = false;
 export function handleMicClick() {
   const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Speech) {
-    toast.error(USER_ERROR_MESSAGES.SPEECH_NOT_SUPPORTED);
+    Controller.showToast('error', USER_ERROR_MESSAGES.SPEECH_NOT_SUPPORTED);
     return;
   }
 
@@ -41,25 +36,21 @@ export function handleMicClick() {
 
   recognition.onstart = () => {
     recognizing = true;
-    UI.setMicState(true);
+    Controller.setMicState(true);
   };
 
   recognition.onend = () => {
     recognizing = false;
-    UI.setMicState(false);
+    Controller.setMicState(false);
     recognition = null;
   };
 
   recognition.onerror = (event) => {
-    handleError(event.error || new Error('Speech recognition failed'), {
-      operation: 'Speech recognition',
-      fallbackMessage: 'SPEECH_FAILED',
-      showToast: true,
-      logError: true
-    });
+    console.error('Speech recognition error:', event.error);
     recognizing = false;
-    UI.setMicState(false);
+    Controller.setMicState(false);
     recognition = null;
+    Controller.showToast('error', USER_ERROR_MESSAGES.SPEECH_FAILED);
   };
 
   recognition.onresult = (e) => {
@@ -73,15 +64,11 @@ export function handleMicClick() {
   try {
     recognition.start();
   } catch (e) {
-    handleError(e, {
-      operation: 'Start speech recognition',
-      fallbackMessage: 'SPEECH_FAILED',
-      showToast: true,
-      logError: true
-    });
+    console.error('Failed to start speech recognition:', e);
     recognition = null;
     recognizing = false;
-    UI.setMicState(false);
+    Controller.setMicState(false);
+    Controller.showToast('error', USER_ERROR_MESSAGES.SPEECH_FAILED);
   }
 }
 
@@ -89,14 +76,13 @@ export function handleMicClick() {
  * Handle speak last AI response button click
  */
 export function handleSpeakLast() {
-  // Direct access - simple read operation
-  const session = Storage.getCurrentSessionSync();
+  const session = Controller.getCurrentSession();
   const last = [...session.messages].reverse().find(m => m.role === 'ai');
   if (last) {
     Model.speakText(last.text, {
-      onStart: () => UI.setStopEnabled(true),
-      onEnd: () => UI.setStopEnabled(false),
-      onError: () => UI.setStopEnabled(false)
+      onStart: () => Controller.setStopEnabled(true),
+      onEnd: () => Controller.setStopEnabled(false),
+      onError: () => Controller.setStopEnabled(false)
     });
   }
 }
@@ -119,5 +105,4 @@ export function stopRecognition() {
   }
   recognizing = false;
 }
-
 

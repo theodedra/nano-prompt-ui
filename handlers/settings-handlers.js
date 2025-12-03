@@ -2,23 +2,19 @@
  * Settings Handlers
  *
  * Handles settings UI interactions via controller layer.
- * Uses direct storage/model access for simple read operations (see IMPLEMENTATION.md).
  */
 
-import * as Controller from '../controller/index.js';
-import * as Model from '../core/model.js';
-import * as Storage from '../core/storage.js';
-import { getSettingOrDefault, LANGUAGE_LABELS, THEME_LABELS } from '../config/constants.js';
-import { getSetupStatus } from '../utils/setup-guide.js';
-import { toast } from '../ui/toast.js';
+import * as Controller from '../controller.js';
+import * as Model from '../model.js';
+import { getSettingOrDefault, LANGUAGE_LABELS, THEME_LABELS } from '../constants.js';
+import { getSetupStatus } from '../setup-guide.js';
+import { toast } from '../toast.js';
 import * as UI from '../ui/index.js';
-import { escapeHtml } from '../utils/utils.js';
-import { handleError } from '../utils/errors.js';
+import { escapeHtml } from '../utils.js';
 
 export function handleOpenSettings() {
   UI.openSettingsModal();
-  // Direct access - simple read operation
-  const settings = Storage.getSettings();
+  const settings = Controller.getSettings();
   const currentLang = getSettingOrDefault(settings, 'language');
   const currentTheme = getSettingOrDefault(settings, 'theme');
 
@@ -38,8 +34,8 @@ export function handleOpenSettings() {
 async function renderDiagnosticsPanel() {
   try {
     const diag = await Model.getDiagnostics({
-      availability: Storage.getAvailability(),
-      availabilityCheckedAt: Storage.getAvailabilityCheckedAt()
+      availability: Controller.getAvailability(),
+      availabilityCheckedAt: Controller.getAvailabilityCheckedAt()
     });
     UI.updateDiagnostics(diag);
   } catch (e) {
@@ -86,16 +82,11 @@ export async function handleDiagnosticsRefresh() {
 
     const result = await Model.checkAvailability({
       forceCheck: true,
-      cachedAvailability: Storage.getAvailability(),
-      cachedCheckedAt: Storage.getAvailabilityCheckedAt()
+      cachedAvailability: Controller.getAvailability(),
+      cachedCheckedAt: Controller.getAvailabilityCheckedAt()
     });
 
-    // Update storage first
-    Storage.setAvailability(result.status);
-    Storage.setAvailabilityCheckedAt(result.checkedAt);
-    
-    // Then update UI
-    UI.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
+    Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
 
     const diag = await Model.getDiagnostics({
       availability: result.status,
@@ -113,12 +104,7 @@ export async function handleWarmupClick() {
     UI.updateDiagnostics({ lastWarmupStatus: 'running' });
     const result = await Model.warmUpModel();
 
-    // Update storage first
-    Storage.setAvailability(result.status);
-    Storage.setAvailabilityCheckedAt(result.checkedAt);
-    
-    // Then update UI
-    UI.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
+    Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
     UI.updateDiagnostics(result.diag);
 
     if (result.warmupStatus === 'success') {
@@ -128,15 +114,10 @@ export async function handleWarmupClick() {
     } else if (result.warmupStatus === 'unavailable') {
       toast.info('Prompt API is not available in this Chrome build');
     } else {
-      toast.error('Warmup failed');
+      Controller.showToast('error', 'Warmup failed');
     }
   } catch (e) {
-    handleError(e, {
-      operation: 'Model warmup',
-      userMessage: 'Warmup failed',
-      showToast: true,
-      logError: true
-    });
+    Controller.showToast('error', 'Warmup failed');
   } finally {
     UI.setDiagnosticsBusy('warmup', false);
   }
@@ -152,8 +133,7 @@ export function handleDocumentClick(event) {
 }
 
 export async function handleSaveSettings() {
-  // Direct access - simple read operation
-  const settings = Storage.getSettings();
+  const settings = Controller.getSettings();
   const defaults = {
     temperature: settings.temperature,
     topK: settings.topK,
@@ -172,7 +152,7 @@ export async function handleSaveSettings() {
   });
   await Controller.persistState();
 
-  UI.applyTheme(theme);
+  Controller.applyTheme(theme);
   Model.resetModel();
 
   UI.closeModal();
@@ -180,16 +160,10 @@ export async function handleSaveSettings() {
   // Refresh availability
   const result = await Model.checkAvailability({
     forceCheck: false,
-    cachedAvailability: Storage.getAvailability(),
-    cachedCheckedAt: Storage.getAvailabilityCheckedAt()
+    cachedAvailability: Controller.getAvailability(),
+    cachedCheckedAt: Controller.getAvailabilityCheckedAt()
   });
-  
-  // Update storage first
-  Storage.setAvailability(result.status);
-  Storage.setAvailabilityCheckedAt(result.checkedAt);
-  
-  // Then update UI
-  UI.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
+  Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
 
   toast.success('Settings saved');
 }
@@ -205,5 +179,4 @@ export async function handleOpenSetupGuide() {
     UI.setSetupGuideContent(`<p class="error">Error checking API status: ${escapeHtml(e.message)}</p>`);
   }
 }
-
 

@@ -1,14 +1,9 @@
 /**
  * INLINED CONSTANTS (Content scripts cannot use ES modules)
- * Source of truth: constants.js
  * Keep in sync with constants.js:
- * - CONTEXT_MAX_CHARS → constants.js → LIMITS.CONTEXT_MAX_CHARS
- * - TREEWALKER_SAFETY_MARGIN → constants.js → LIMITS.TREEWALKER_SAFETY_MARGIN
- * - MAX_VISITED_TEXT_NODES → constants.js → LIMITS.MAX_VISITED_TEXT_NODES
- * - SCRAPING_CONSTANTS → constants.js → SCRAPING
- * - SCRAPE_CACHE_TTL_MS → constants.js → TIMING.SCRAPE_CACHE_TTL_MS
+ * - CONTEXT_MAX_CHARS → LIMITS.MAX_CONTEXT_TOKENS * LIMITS.TOKEN_TO_CHAR_RATIO (constants.js:30-31)
+ * - SCRAPING_CONSTANTS → unique to content.js (page scraping selectors/noise filters)
  */
-// Source of truth: constants.js → SCRAPING
 const SCRAPING_CONSTANTS = {
   MAIN_CONTENT_SELECTORS: [
     'main',
@@ -28,19 +23,16 @@ const SCRAPING_CONSTANTS = {
     'Keyboard shortcuts', 'opens in a new window', 'verficiation',
     'Apply now', 'Save', 'Share'
   ],
-  MIN_CONTENT_LENGTH: 50,
+ MIN_CONTENT_LENGTH: 50,
   FALLBACK_MAX_LENGTH: 5000,
   MIN_TEXT_LENGTH: 2
 };
 
-// Source of truth: constants.js → LIMITS.CONTEXT_MAX_CHARS
+// Keep in sync with LIMITS.MAX_CONTEXT_TOKENS * LIMITS.TOKEN_TO_CHAR_RATIO in constants.js (≈12k chars)
 const CONTEXT_MAX_CHARS = 12_000;
-// Source of truth: constants.js → LIMITS.TREEWALKER_SAFETY_MARGIN
-const TREEWALKER_SAFETY_MARGIN = 2_000;
-// Source of truth: constants.js → LIMITS.MAX_VISITED_TEXT_NODES
-const MAX_VISITED_TEXT_NODES = 8_000;
-// Source of truth: constants.js → TIMING.SCRAPE_CACHE_TTL_MS
-const SCRAPE_CACHE_TTL_MS = 30_000;
+const TREEWALKER_SAFETY_MARGIN = 2_000; // Allows slight overshoot before final clamp upstream
+const MAX_VISITED_TEXT_NODES = 8_000; // High cap to avoid worst-case pages without trimming usable context
+const SCRAPE_CACHE_TTL_MS = 30_000; // Cache same-page scrapes briefly to avoid repeated DOM walks
 
 let lastScrapeCache = {
   url: '',

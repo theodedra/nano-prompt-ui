@@ -1,6 +1,6 @@
 # Nano Prompt UI
 
-![Nano Prompt UI – Dark](./assets/Screenshot(dark).png) ![Nano Prompt UI – Light](./assets/Screenshot(light).png)
+![Nano Prompt UI – Dark](Screenshot(dark).png) ![Nano Prompt UI – Light](Screenshot(light).png)
 
 A privacy-first Chrome extension that runs entirely on-device using Chrome's built-in **Gemini Nano** language model. Everything stays local—no servers, no data leaves your machine.
 
@@ -158,78 +158,61 @@ Because the AI is read-only with no execution privileges, prompt injection attac
 
 ```
 nano-prompt-ui/
-├── manifest.json              # MV3 manifest (side panel, permissions, content scripts)
-├── background.js              # Service worker: side panel setup, context menus, model warmup
-├── content.js                 # Content script: page scraping with SPA-aware caching
+├── manifest.json              # MV3 manifest (side panel, permissions)
+├── background.js              # Service worker, context menus, warmup
+├── content.js                 # Page content scraper (SPA-aware caching)
 │
-├── sidepanel.html             # Side panel markup (main UI container)
-├── sidepanel.js               # Side panel entry point: event wiring and bootstrap
-├── sidepanel.css              # Global styles: layout, theming, component styles
+├── sidepanel.html             # Side panel markup
+├── sidepanel.js               # Bootstrap + event wiring
+├── sidepanel.css              # Layout, theming, styles
 │
-├── controller/                # Controller layer (coordination between Model/Storage/UI)
-│   ├── index.js              # Re-exports all controller modules
-│   ├── session-controller.js # Session management (switch, create, rename, delete)
-│   ├── message-controller.js # Message operations (add, patch, update)
-│   ├── context-controller.js # Context fetching and snapshot operations
-│   ├── attachment-controller.js # Attachment management (add, remove)
-│   ├── template-controller.js # Template CRUD operations
-│   ├── settings-controller.js # Settings persistence and updates
-│   └── input-controller.js   # Input field handling and focus management
+├── controller.js              # Orchestrates handlers and state
 │
-├── handlers/                  # UI event handlers (user interactions)
-│   ├── chat-handlers.js       # Bootstrap, navigation, copy chat, re-exports
+├── handlers/                  # Modular event handlers
+│   ├── chat-handlers.js       # Re-exports + shared navigation handlers
 │   ├── prompt-handlers.js      # Prompt execution, summarization, translation
 │   ├── session-handlers.js    # Session switching, renaming, deletion, search
-│   ├── template-handlers.js   # Template CRUD event handlers
-│   ├── snapshot-handlers.js   # Context snapshot management handlers
-│   ├── voice-handlers.js      # Speech recognition and synthesis handlers
-│   ├── attachment-handlers.js # Image/PDF file upload processing (sequential queue)
-│   ├── settings-handlers.js   # Settings panel interactions (theme, language, diagnostics)
-│   └── context-menu-handlers.js # Routes context menu commands to handlers
+│   ├── template-handlers.js   # Template CRUD operations
+│   ├── snapshot-handlers.js   # Context snapshot management
+│   ├── voice-handlers.js      # Speech recognition and synthesis
+│   ├── attachment-handlers.js # Image/PDF attachment handling (sequential queue)
+│   ├── settings-handlers.js   # Theme, language, diagnostics hooks
+│   └── context-menu-handlers.js # Routes context menu commands
 │
-├── ui/                        # UI rendering modules
+├── ui/                        # Modular UI renderers
 │   ├── index.js               # Re-exports all UI modules
-│   ├── core.js                # DOM element caching, busy state, status, input controls
-│   ├── log-renderer.js        # Chat message rendering with HTML caching
-│   ├── session-renderer.js    # Session list rendering (sidebar)
+│   ├── core.js                # DOM caching, busy state, status, input controls
+│   ├── log-renderer.js        # Chat message rendering (with cached HTML)
+│   ├── session-renderer.js    # Session list rendering
 │   ├── template-renderer.js   # Template list rendering
-│   ├── snapshot-renderer.js   # Context snapshot list rendering
-│   ├── modal-manager.js       # Modal dialogs (open/close, focus trapping)
-│   ├── attachment-renderer.js # Attachment chip rendering (pending files)
-│   ├── toast.js               # Toast notification system
-│   └── virtual-scroll.js      # Virtualized chat list (performance optimization)
+│   ├── snapshot-renderer.js   # Context snapshot rendering
+│   ├── modal-manager.js       # Modal open/close, focus trapping
+│   └── attachment-renderer.js # Attachment chip rendering
 │
-├── core/                      # Core business logic modules
-│   ├── model.js               # AI operations: Prompt API, Translation API, streaming, speech
-│   ├── storage.js             # IndexedDB operations, session persistence, attachment storage
-│   ├── context.js             # Context fetching, intent classification, token estimation
-│   ├── prompt-builder.js      # Prompt assembly and token budget management
-│   └── state.js               # Core application state management
+├── model.js                   # Gemini Nano + Translation API interface
+├── storage.js                 # IndexedDB, session state, persistence, markdown caching
+├── context.js                 # Context assembly, snapshots, prompt building, intent classification
+├── utils.js                   # Markdown → HTML, sanitization, utilities
+├── toast.js                   # Toast notification system
+├── constants.js               # Limits, timing, labels, model config
+├── virtual-scroll.js          # Virtualized chat list (performance optimized)
 │
-├── config/                    # Configuration constants
-│   └── constants.js           # All limits, timing values, labels, model configuration
+├── pdf.js                     # PDF extraction coordinator (delegates to Web Worker)
+├── pdf-worker.js              # Web Worker for off-thread PDF text extraction
+├── setup-guide.js             # API availability checks, flag guidance
 │
-├── utils/                     # Utility modules
-│   ├── utils.js              # Markdown → HTML conversion, HTML sanitization, helpers
-│   ├── errors.js             # Standardized error handling and reporting
-│   └── setup-guide.js        # API availability checks, Chrome flag guidance
-│
-├── pdf/                       # PDF text extraction module
-│   ├── pdf.js                # PDF extraction coordinator (main thread interface)
-│   ├── pdf-worker.js         # Web Worker for off-thread PDF parsing
-│   └── lib/
-│       ├── pdf.min.js        # Bundled Mozilla PDF.js library
-│       └── pdf.worker.min.js # PDF.js worker script
+├── lib/
+│   ├── pdf.min.js             # Bundled Mozilla PDF.js
+│   └── pdf.worker.min.js      # PDF.js worker
 │
 ├── package.json               # Dev dependencies (ESLint)
-├── eslint.config.js           # ESLint configuration
+├── eslint.config.js           # Linting configuration
 │
-├── assets/
-│   ├── Screenshot(dark).png   # Dark theme screenshot
-│   └── Screenshot(light).png  # Light theme screenshot
+├── Screenshot(dark).png       # Dark theme screenshot
+├── Screenshot(light).png      # Light theme screenshot
 ├── LICENSE.txt                # The Unlicense
 ├── SECURITY.md                # Security model and threat analysis
-└── IMPLEMENTATION.md          # Complete technical documentation and architecture guide
+└── IMPLEMENTATION.md          # Internal implementation notes
 ```
 
 ---
@@ -237,7 +220,7 @@ nano-prompt-ui/
 ## Documentation
 
 - **[SECURITY.md](SECURITY.md)** – Security model, threat analysis, and attack mitigations
-- **[IMPLEMENTATION.md](IMPLEMENTATION.md)** – Complete technical documentation, architecture decisions, and feature implementation guide
+- **[IMPLEMENTATION.md](IMPLEMENTATION.md)** – Internal implementation notes
 - **[GitHub Releases](../../releases)** – Version history and changelogs
 
 ---

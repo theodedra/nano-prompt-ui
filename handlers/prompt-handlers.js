@@ -2,27 +2,18 @@
  * Prompt Handlers - Prompt execution and AI interaction handlers
  *
  * Handles sending prompts to AI, summarization, translation, and related features.
- * Uses direct storage/model access for simple read operations (see IMPLEMENTATION.md).
  */
 
-import * as Controller from '../controller/index.js';
-import * as Model from '../core/model.js';
-import * as Storage from '../core/storage.js';
-import * as UI from '../ui/index.js';
-import { fetchContext } from '../core/context.js';
-import { classifyIntent } from '../core/prompt-builder.js';
+import * as Controller from '../controller.js';
+import * as Model from '../model.js';
+import { fetchContext, classifyIntent } from '../context.js';
 import {
   LIMITS,
   UI_MESSAGES,
   USER_ERROR_MESSAGES,
   INTENT_TYPES,
   getSettingOrDefault
-} from '../config/constants.js';
-import { handleError, handleErrorReturnEmpty } from '../utils/errors.js';
-import { toast } from '../ui/toast.js';
-
-// Smart reply generation queue management
-let currentSmartReplyGenerationToken = 0;
+} from '../constants.js';
 
 /**
  * Refresh context draft from active tab
@@ -36,7 +27,7 @@ export async function refreshContextDraft(force = false, shouldSave = true) {
     const text = ctx?.text || '';
 
     Controller.setRestrictedState(Boolean(ctx?.isRestricted));
-    UI.restoreStopButtonState(Model.isSomethingRunning());
+    Controller.restoreStopButtonState(Model.isSomethingRunning());
     Controller.setContextDraft(text);
 
     if (shouldSave) {
@@ -46,23 +37,24 @@ export async function refreshContextDraft(force = false, shouldSave = true) {
     Controller.setContextText(text);
     return text;
   } catch (e) {
-    return handleErrorReturnEmpty(e, {
-      operation: 'Context refresh',
-      fallbackMessage: 'CONTEXT_FETCH_FAILED'
-    });
+    console.warn('Context refresh failed', e);
+    Controller.showToast('error', USER_ERROR_MESSAGES.CONTEXT_FETCH_FAILED);
+    return '';
   }
 }
 
 /**
- * Setup prompt execution: create messages and prepare UI state
- * @param {Object} session - Current session
+ * Run a prompt through the AI
  * @param {string} text - Prompt text
- * @param {string} displayText - Display text for user message
+ * @param {string} contextOverride - Context to use
  * @param {Array} attachments - Attachments
- * @returns {{userMessage: Object, aiMessageIndex: number}} User message and AI message index
+ * @param {string} displayText - Text to show in chat (optional)
  */
-function setupPromptMessages(session, text, displayText, attachments) {
-  UI.renderSmartReplies([]);
+export async function executePrompt(text, contextOverride, attachments, displayText = null) {
+  const session = Controller.getCurrentSession();
+  const settings = Controller.getSettings();
+
+  Controller.renderSmartReplies([]);
 
   const userMessage = {
     role: 'user',
@@ -74,26 +66,23 @@ function setupPromptMessages(session, text, displayText, attachments) {
   Controller.refreshLog();
 
   // Set up AI message placeholder
-  UI.setBusy(true);
-  UI.setStopEnabled(true);
-  UI.setStatusText('Thinking...');
+  Controller.setBusy(true);
+  Controller.setStopEnabled(true);
+  Controller.setStatus('Thinking...');
 
   const aiMessageIndex = session.messages.length;
   Controller.addMessage(session.id, { role: 'ai', text: '', ts: Date.now() });
   Controller.refreshLog();
 
-  return { userMessage, aiMessageIndex };
-}
+  let lastAiText = '';
 
-/**
- * Create callback handlers for prompt execution
- * @param {Object} session - Current session
- * @param {number} aiMessageIndex - Index of AI message
- * @param {Function} onCompleteCallback - Callback to store final text
- * @returns {Object} Callback handlers object
- */
-function createPromptCallbacks(session, aiMessageIndex, onCompleteCallback) {
-  return {
+  const result = await Model.runPrompt({
+    sessionId: session.id,
+    text,
+    contextOverride,
+    attachments,
+    settings
+  }, {
     onChunk: (chunk) => {
       Controller.patchMessage(session.id, aiMessageIndex, { text: chunk });
       Controller.updateLastBubble(chunk, { streaming: true });
@@ -101,18 +90,13 @@ function createPromptCallbacks(session, aiMessageIndex, onCompleteCallback) {
     onComplete: (finalText) => {
       Controller.patchMessage(session.id, aiMessageIndex, { text: finalText });
       Controller.updateLastBubble(finalText);
-      onCompleteCallback(finalText);
+      lastAiText = finalText;
     },
     onError: (err) => {
-      const errorInfo = handleError(err, {
-        operation: 'Prompt execution',
-        fallbackMessage: 'AI_UNAVAILABLE',
-        showToast: true,
-        logError: true
-      });
-      const msg = errorInfo.userMessage;
+      const msg = err.message || USER_ERROR_MESSAGES.AI_UNAVAILABLE;
       Controller.patchMessage(session.id, aiMessageIndex, { text: `Error: ${msg}` });
       Controller.updateLastBubble(`Error: ${msg}`);
+      Controller.showToast('error', msg);
     },
     onAbort: () => {
       const currentMessage = session.messages[aiMessageIndex];
@@ -127,29 +111,13 @@ function createPromptCallbacks(session, aiMessageIndex, onCompleteCallback) {
         Controller.updateLastBubble(UI_MESSAGES.STOPPED);
       }
     }
-  };
-}
+  });
 
-/**
- * Cleanup after prompt execution: reset UI state and persist
- * @returns {Promise<void>}
- */
-async function cleanupPromptExecution() {
-  UI.setBusy(false);
-  UI.setStopEnabled(false);
-  UI.setStatusText('Ready to chat.');
+  Controller.setBusy(false);
+  Controller.setStopEnabled(false);
+  Controller.setStatus('Ready to chat.');
   await Controller.persistState();
-}
 
-/**
- * Handle post-processing tasks after prompt execution
- * @param {Object} result - Prompt execution result
- * @param {string} lastAiText - Final AI response text
- * @param {Object} session - Current session
- * @param {Object} userMessage - User message object
- * @param {number} aiMessageIndex - Index of AI message
- */
-function handlePromptPostProcessing(result, lastAiText, session, userMessage, aiMessageIndex) {
   if (!result.aborted && lastAiText) {
     generateSmartRepliesBackground(session.id, userMessage.text, lastAiText, aiMessageIndex);
   }
@@ -160,37 +128,6 @@ function handlePromptPostProcessing(result, lastAiText, session, userMessage, ai
 }
 
 /**
- * Run a prompt through the AI
- * @param {string} text - Prompt text
- * @param {string} contextOverride - Context to use
- * @param {Array} attachments - Attachments
- * @param {string} displayText - Text to show in chat (optional)
- */
-export async function executePrompt(text, contextOverride, attachments, displayText = null) {
-  // Direct access - simple read operations
-  const session = Storage.getCurrentSessionSync();
-  const settings = Storage.getSettings();
-
-  const { userMessage, aiMessageIndex } = setupPromptMessages(session, text, displayText, attachments);
-
-  let lastAiText = '';
-  const storeFinalText = (finalText) => { lastAiText = finalText; };
-
-  const callbacks = createPromptCallbacks(session, aiMessageIndex, storeFinalText);
-
-  const result = await Model.runPrompt({
-    sessionId: session.id,
-    text,
-    contextOverride,
-    attachments,
-    settings
-  }, callbacks);
-
-  await cleanupPromptExecution();
-  handlePromptPostProcessing(result, lastAiText, session, userMessage, aiMessageIndex);
-}
-
-/**
  * Generate smart replies in the background
  * @param {string} sessionId - Session ID
  * @param {string} userText - User's message text
@@ -198,56 +135,17 @@ export async function executePrompt(text, contextOverride, attachments, displayT
  * @param {number} aiIndex - Index of AI message
  */
 export async function generateSmartRepliesBackground(sessionId, userText, aiText, aiIndex) {
-  // Cancel previous generation by incrementing token
-  currentSmartReplyGenerationToken++;
-  const generationToken = currentSmartReplyGenerationToken;
-
   try {
-    // Direct access - simple read operation
-    const settings = Storage.getSettings();
+    const settings = Controller.getSettings();
     const replies = await Model.generateSmartReplies(userText, aiText, settings);
-
-    // Only apply results if this generation is still current
-    if (generationToken !== currentSmartReplyGenerationToken) {
-      return; // Stale generation, ignore results
-    }
-
     Controller.patchMessage(sessionId, aiIndex, { smartReplies: replies });
 
-    // Double-check token before rendering (race condition protection)
-    if (generationToken === currentSmartReplyGenerationToken) {
-      // Direct access - simple read operation
-      if (Storage.getCurrentSessionId() === sessionId) {
-        // Use requestIdleCallback for non-critical UI updates
-        if (typeof requestIdleCallback !== 'undefined') {
-          requestIdleCallback(() => {
-            // Re-check token inside callback to ensure still current
-            if (generationToken === currentSmartReplyGenerationToken && 
-                Storage.getCurrentSessionId() === sessionId) {
-              UI.renderSmartReplies(replies);
-            }
-          }, { timeout: 2000 });
-        } else {
-          // Fallback for browsers without requestIdleCallback
-          setTimeout(() => {
-            if (generationToken === currentSmartReplyGenerationToken && 
-                Storage.getCurrentSessionId() === sessionId) {
-              UI.renderSmartReplies(replies);
-            }
-          }, 0);
-        }
-      }
-      await Controller.persistState();
+    if (Controller.getCurrentSessionId() === sessionId) {
+      Controller.renderSmartReplies(replies);
     }
+    await Controller.persistState();
   } catch (e) {
-    // Only log error if this generation is still current
-    if (generationToken === currentSmartReplyGenerationToken) {
-      handleError(e, {
-        operation: 'Smart reply generation',
-        showToast: false, // Background operation, don't show toast
-        logError: true
-      });
-    }
+    console.warn('Smart reply generation failed', e);
   }
 }
 
@@ -257,8 +155,7 @@ export async function generateSmartRepliesBackground(sessionId, userText, aiText
  */
 export async function generateTitleBackground(sessionId) {
   try {
-    // Direct access - simple read operation
-    const session = Storage.getSessions()[sessionId];
+    const session = Controller.getSession(sessionId);
     if (!session || session.messages.length < 2) return;
     if (session.title !== 'New chat' && !session.title.endsWith('copy')) return;
 
@@ -271,11 +168,7 @@ export async function generateTitleBackground(sessionId) {
       await Controller.updateSessionTitle(sessionId, title);
     }
   } catch (e) {
-    handleError(e, {
-      operation: 'Background title generation',
-      showToast: false, // Background operation, don't show toast
-      logError: true
-    });
+    console.warn('Background title generation failed:', e);
   }
 }
 
@@ -286,17 +179,14 @@ export async function generateTitleBackground(sessionId) {
 export async function handleAskClick(overrideText = null) {
   if (overrideText?.preventDefault) overrideText.preventDefault();
 
-  // Direct access - simple read operation
-  const rawInput = typeof overrideText === 'string' ? overrideText : UI.getInputValue();
+  const rawInput = typeof overrideText === 'string' ? overrideText : Controller.getInputValue();
   const text = (rawInput || '').trim() || 'Hello';
-  // Direct access - simple read operation
-  const attachments = Storage.getPendingAttachments();
+  const attachments = Controller.getAttachments();
 
   Controller.setInputValue('');
   Controller.clearAttachments();
 
-  // Direct access - simple read operation (gets UI value, not storage)
-  let contextOverride = UI.getContextText();
+  let contextOverride = Controller.getContextText();
   const intent = classifyIntent(text);
 
   if (text.length < LIMITS.SHORT_QUERY_THRESHOLD && intent === INTENT_TYPES.NONE) {
@@ -311,13 +201,9 @@ export async function handleAskClick(overrideText = null) {
   try {
     await executePrompt(text, contextOverride, attachments);
   } catch (e) {
-    handleError(e, {
-      operation: 'Prompt execution',
-      fallbackMessage: 'AI_SESSION_FAILED',
-      showToast: true,
-      logError: true
-    });
-    UI.setStatusText(UI_MESSAGES.ERROR);
+    console.error('Prompt Execution Failed:', e);
+    Controller.setStatus(UI_MESSAGES.ERROR);
+    Controller.showToast('error', USER_ERROR_MESSAGES.AI_SESSION_FAILED);
   }
 }
 
@@ -326,9 +212,8 @@ export async function handleAskClick(overrideText = null) {
  * @returns {Promise<void>}
  */
 export async function handleSummarizeClick() {
-  UI.setStatusText(UI_MESSAGES.READING_TAB);
-  // Direct access - simple read operation
-  const session = Storage.getCurrentSessionSync();
+  Controller.setStatus(UI_MESSAGES.READING_TAB);
+  const session = Controller.getCurrentSession();
   Model.resetModel(session.id);
   const freshText = await refreshContextDraft(true);
   await executePrompt('Summarize the current tab in seven detailed bullet points.', freshText, []);
@@ -366,17 +251,16 @@ export async function runRewriter(text, tone = 'professional') {
  * @param {string} text - Text to translate
  */
 export async function runTranslator(text) {
-  // Direct access - simple read operations
-  const settings = Storage.getSettings();
+  const settings = Controller.getSettings();
   const targetLang = getSettingOrDefault(settings, 'language');
-  const session = Storage.getCurrentSessionSync();
+  const session = Controller.getCurrentSession();
 
-  UI.setBusy(true);
-  UI.setStatusText('Detecting language...');
+  Controller.setBusy(true);
+  Controller.setStatus('Detecting language...');
 
   try {
     const result = await Model.translateText(text, targetLang, {
-      onStatusUpdate: (status) => UI.setStatusText(status)
+      onStatusUpdate: (status) => Controller.setStatus(status)
     });
 
     if (result.sameLanguage) {
@@ -402,39 +286,27 @@ export async function runTranslator(text) {
       Controller.addMessage(session.id, userMessage);
       Controller.addMessage(session.id, aiMessage);
       Controller.refreshLog();
-      toast.success('Translation complete');
+      Controller.showToast('success', 'Translation complete');
     }
 
-    UI.setBusy(false);
-    UI.setStatusText('Ready to chat.');
+    Controller.setBusy(false);
+    Controller.setStatus('Ready to chat.');
     await Controller.persistState();
 
   } catch (error) {
-    handleError(error, {
-      operation: 'Translation',
-      showToast: false, // We'll show a warning toast below after fallback
-      logError: true
-    });
+    console.error('Translation failed:', error);
 
     // Fallback to Gemini Nano Prompt API
-    UI.setStatusText('Using fallback translation...');
+    Controller.setStatus('Using fallback translation...');
     const langName = Model.LANGUAGE_NAMES[targetLang] || 'English';
 
-    try {
-      await executePrompt(
-        `Translate the following text to ${langName}:\n\n${text}`,
-        '',
-        []
-      );
-      toast.warning('Used Gemini Nano fallback (Translation API unavailable)');
-    } catch (fallbackError) {
-      handleError(fallbackError, {
-        operation: 'Translation fallback',
-        fallbackMessage: 'AI_SESSION_FAILED',
-        showToast: true,
-        logError: true
-      });
-    }
+    await executePrompt(
+      `Translate the following text to ${langName}:\n\n${text}`,
+      '',
+      []
+    );
+
+    Controller.showToast('warning', 'Used Gemini Nano fallback (Translation API unavailable)');
   }
 }
 
@@ -443,9 +315,8 @@ export async function runTranslator(text) {
  * @param {string} url - Image URL to analyze
  */
 export async function runImageDescription(url) {
-  UI.setStatusText(UI_MESSAGES.ANALYZING_IMAGE);
-  // Direct access - simple read operation
-  const session = Storage.getCurrentSessionSync();
+  Controller.setStatus(UI_MESSAGES.ANALYZING_IMAGE);
+  const session = Controller.getCurrentSession();
 
   try {
     const blob = await Model.fetchImage(url);
@@ -461,22 +332,17 @@ export async function runImageDescription(url) {
     await executePrompt("Describe this image in detail.", '', [attachment]);
 
   } catch (e) {
-    const errorInfo = handleError(e, {
-      operation: 'Image description',
-      fallbackMessage: 'IMAGE_PROCESSING_FAILED',
-      showToast: true,
-      logError: true
-    });
-    UI.setStatusText(UI_MESSAGES.ERROR);
+    console.error(e);
+    Controller.setStatus(UI_MESSAGES.ERROR);
+    Controller.showToast('error', USER_ERROR_MESSAGES.IMAGE_PROCESSING_FAILED);
     Model.resetModel(session.id);
 
     Controller.addMessage(session.id, {
       role: 'ai',
-      text: `**Image Error:** ${errorInfo.userMessage}`,
+      text: `**Image Error:** ${e.message}.`,
       ts: Date.now()
     });
     Controller.refreshLog();
   }
 }
-
 

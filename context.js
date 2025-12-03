@@ -1,11 +1,25 @@
-import { sanitizeText } from '../utils/utils.js';
+import { sanitizeText } from './utils.js';
 import {
   ASSISTANT_RULES,
   LIMITS,
+  TIMING,
+  UI_MESSAGES,
   INTENT_PATTERNS,
   INTENT_TYPES,
-  UI_MESSAGES
-} from '../config/constants.js';
+  VALIDATION
+} from './constants.js';
+import { getActiveSnapshot } from './storage.js';
+
+let cachedContext = {
+  text: '',
+  ts: 0,
+  tabId: null,
+  isRestricted: false,
+  title: '',
+  url: '',
+  source: 'live',
+  snapshotId: null
+};
 
 // ============================================================================
 // PROMPT HEADER CACHE - Avoid rebuilding static prompt parts
@@ -97,14 +111,127 @@ function smartTruncate(text, maxTokens) {
 }
 
 /**
+ * Fetch context from the active tab with caching
+ * @param {boolean} force - Force refresh ignoring cache
+ * @param {{respectSnapshot?: boolean}} options - Fetch options
+ * @returns {Promise<{text: string, tabId: number|null, isRestricted: boolean, title?: string, url?: string, source?: string, snapshotId?: string|null}>} Context object
+ */
+export async function fetchContext(force = false, options = {}) {
+  const { respectSnapshot = true } = options;
+  const activeSnapshot = respectSnapshot ? getActiveSnapshot() : null;
+
+  if (activeSnapshot?.text) {
+    cachedContext = {
+      text: activeSnapshot.text,
+      ts: Date.now(),
+      tabId: null,
+      isRestricted: false,
+      title: activeSnapshot.title,
+      url: activeSnapshot.url,
+      source: 'snapshot',
+      snapshotId: activeSnapshot.id
+    };
+    return cachedContext;
+  }
+
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  if (!activeTab || !activeTab.id) {
+    return {
+      text: '',
+      isRestricted: true,
+      tabId: null,
+      title: '',
+      url: '',
+      source: 'restricted',
+      snapshotId: null
+    };
+  }
+
+  const activeTabId = activeTab.id;
+  const isFresh = Date.now() - cachedContext.ts < TIMING.CONTEXT_CACHE_MS;
+
+  if (!force && cachedContext.text && isFresh && cachedContext.tabId === activeTabId) {
+    return cachedContext;
+  }
+
+  if (!activeTab.url || !VALIDATION.ALLOWED_PAGE_PROTOCOLS.test(activeTab.url)) {
+    return {
+      text: UI_MESSAGES.SYSTEM_PAGE_AI_DISABLED,
+      tabId: activeTabId,
+      isRestricted: true,
+      title: activeTab?.title || '',
+      url: activeTab?.url || '',
+      source: 'restricted',
+      snapshotId: null
+    };
+  }
+
+  try {
+    const rawData = await sendMessageWithFallback(activeTabId);
+
+    const pieces = [];
+    if (rawData.title) pieces.push(`Title: ${sanitizeText(rawData.title)}`);
+    if (rawData.url) pieces.push(`URL: ${rawData.url}`);
+
+    if (rawData.text) {
+      const clean = enforceContextLimits(rawData.text);
+      if (clean) pieces.push(clean);
+    }
+
+    cachedContext = {
+      text: pieces.join('\n\n'),
+      ts: Date.now(),
+      tabId: activeTabId,
+      isRestricted: false,
+      title: sanitizeText(rawData.title || activeTab.title || ''),
+      url: rawData.url || activeTab.url || '',
+      source: 'live',
+      snapshotId: null
+    };
+
+    return cachedContext;
+
+  } catch (e) {
+    console.warn('Context extraction failed:', e);
+    return {
+      text: UI_MESSAGES.RESTRICTED_PAGE,
+      tabId: activeTabId,
+      isRestricted: true,
+      title: activeTab?.title || '',
+      url: activeTab?.url || '',
+      source: 'restricted',
+      snapshotId: null
+    };
+  }
+}
+
+/**
+ * Send message to content script with automatic injection fallback
+ * @param {number} tabId - Tab ID to send message to
+ * @returns {Promise<object>} Context data from content script
+ */
+async function sendMessageWithFallback(tabId) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, { action: 'GET_CONTEXT' });
+  } catch (e) {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['content.js']
+    });
+    return await chrome.tabs.sendMessage(tabId, { action: 'GET_CONTEXT' });
+  }
+}
+
+/**
  * Build the final prompt with context, attachments, and system rules
  * Uses cached headers and efficient string building to reduce churn.
  * @param {string} userText - User's query
- * @param {string} context - Optional context to use instead of auto-fetched
- * @param {Array<{name: string, type?: string, data?: string}>} attachments - Attached files
+ * @param {string} contextOverride - Optional context to use instead of auto-fetched
+ * @param {Array<{name: string}>} attachments - Attached files
  * @returns {Promise<{prompt: string, tokenEstimate: number}>} Complete prompt and token count
  */
-export async function buildPrompt(userText, context = '', attachments = []) {
+export async function buildPromptWithContext(userText, contextOverride = '', attachments = []) {
   // Prompt intentionally stays minimal (no XML wrappers) for Nano model accuracy;
   // security rationale lives in SECURITY.md#prompt-injection-rationale-for-contextjs.
   const intent = classifyIntent(userText);
@@ -119,8 +246,8 @@ export async function buildPrompt(userText, context = '', attachments = []) {
   parts[partIndex++] = header.text;
 
   // Context section (budget-aware)
-  if (context && context.length > 0) {
-    const safeContext = enforceContextLimits(context);
+  if (contextOverride && contextOverride.length > 0) {
+    const safeContext = enforceContextLimits(contextOverride);
     if (safeContext) {
       const contextPart = `Context:\n${safeContext}`;
       const contextTokens = estimateTokens(contextPart);

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nano Prompt UI",
-  "version": "1.4.0",
+  "version": "1.3.0",
   "description": "Side Panel UI for Chrome's on-device Prompt API (Gemini Nano).",
   "permissions": [
     "sidePanel",
@@ -36,7 +36,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["pdf/pdf-worker.js", "pdf/lib/pdf.min.js", "pdf/lib/pdf.worker.min.js"],
+      "resources": ["pdf-worker.js", "lib/pdf.min.js", "lib/pdf.worker.min.js"],
       "matches": ["<all_urls>"]
     }
   ],

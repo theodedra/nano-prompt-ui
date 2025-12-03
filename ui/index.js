@@ -21,7 +21,6 @@ export {
   setHardwareStatus,
   updateDiagnostics,
   setDiagnosticsBusy,
-  updateAvailabilityDisplay,
   setContextText,
   getContextText,
   toggleMenu,
@@ -106,5 +105,4 @@ import { createMessageElement } from './log-renderer.js';
 setOpenSetupGuideModalCallback(openSetupGuideModal);
 setBuildContextSnapshotUICallback(buildContextSnapshotUI);
 setCreateMessageElementCallback(createMessageElement);
-
 

@@ -8,8 +8,7 @@ import * as UI from './ui/index.js';
 import * as ChatHandlers from './handlers/chat-handlers.js';
 import * as AttachmentHandlers from './handlers/attachment-handlers.js';
 import * as SettingsHandlers from './handlers/settings-handlers.js';
-import { performSessionWarmup, startDownloadPolling, stopDownloadPolling } from './core/model.js';
-import { terminatePdfWorker } from './pdf/pdf.js';
+import { performSessionWarmup } from './model.js';
 
 function bind(selector, event, handler) {
   const el = document.querySelector(selector);
@@ -18,7 +17,9 @@ function bind(selector, event, handler) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   UI.initUI();
-  const availabilityResult = await ChatHandlers.bootstrap();
+  await ChatHandlers.bootstrap();
+
+  const availabilityResult = await ChatHandlers.refreshAvailability({ forceCheck: true });
 
   // Handle download states: 'after-download' OR 'downloading'
   const needsDownload = availabilityResult?.status === 'after-download' ||
@@ -27,15 +28,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (needsDownload) {
     UI.setStatusText('Downloading model...');
 
-    // Start polling for status changes
-    const stopPolling = startDownloadPolling(async (newStatus) => {
-      console.log('Nano Prompt: Download status changed to:', newStatus);
-      
-      // Stop polling
-      stopPolling();
-      
-      // Update UI when model becomes ready
-      if (newStatus === 'readily' || newStatus === 'available') {
+    performSessionWarmup().then((result) => {
+      if (result.success || result.downloaded) {
         const statusEl = document.getElementById('model-status');
         if (statusEl) {
           statusEl.textContent = 'Ready';
@@ -43,39 +37,18 @@ document.addEventListener('DOMContentLoaded', async () => {
           statusEl.dataset.level = 'ok';
           statusEl.dataset.clickable = 'false';
         }
-        
-        // Refresh availability to update all UI elements
         setTimeout(() => {
           ChatHandlers.refreshAvailability({ forceCheck: true });
-        }, 500);
+        }, 1000);
+      } else {
+        ChatHandlers.refreshAvailability({ forceCheck: true });
       }
+    }).catch(() => {
+      ChatHandlers.refreshAvailability({ forceCheck: true });
     });
 
-    // Also try to trigger download if not already in progress
-    // If status is 'after-download', we need to create a session to trigger download
-    // If status is 'downloading', the download is already in progress, so we just poll
-    if (availabilityResult?.status === 'after-download') {
-      // Pass cached availability to avoid redundant check
-      performSessionWarmup({ cachedAvailability: availabilityResult.status }).then((result) => {
-        // If warmup succeeded, status should change and polling will handle UI update
-        if (result.success || result.downloaded) {
-          // Polling will handle the UI update when status changes
-          console.log('Nano Prompt: Download triggered successfully');
-        } else if (!result.skipped) {
-          // If it failed and wasn't skipped, refresh to check current status
-          ChatHandlers.refreshAvailability({ forceCheck: true });
-        }
-      }).catch((err) => {
-        console.warn('Nano Prompt: Warmup attempt failed, continuing to poll:', err);
-        // Continue polling even if warmup failed
-      });
-    }
-    // If status is 'downloading', we just poll - don't try to create another session
-
   } else {
-    // Model is ready - skip warmup entirely for speed
-    // The first prompt will be fast enough without warmup
-    // Background script may have already warmed it up anyway
+    performSessionWarmup().catch(() => {});
   }
 
   // --- EVENT BINDINGS ---
@@ -159,11 +132,5 @@ document.addEventListener('DOMContentLoaded', async () => {
         ChatHandlers.refreshAvailability({ forceCheck: true });
       }, 1000);
     }
-  });
-
-  // Cleanup: terminate PDF worker and stop polling on page unload
-  window.addEventListener('beforeunload', () => {
-    terminatePdfWorker();
-    stopDownloadPolling();
   });
 });

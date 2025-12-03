@@ -1,59 +1,51 @@
 import { getEls } from './core.js';
-import { formatDate, getSnapshotHost, clampLabel } from '../utils/utils.js';
+import { formatDate, getSnapshotHost, clampLabel } from '../utils.js';
 
 export function buildContextSnapshotUI() {
   const els = getEls();
   if (!els.contextModal) return;
   const modalCard = els.contextModal.querySelector('.modal-card');
-  if (!modalCard || !els.contextText) return;
+  const contextArea = document.getElementById('context-text');
+  if (!modalCard || !contextArea) return;
 
   const container = document.createElement('div');
   container.className = 'context-snapshots';
 
-  // Use DocumentFragment for batch child element creation
-  const fragment = document.createDocumentFragment();
-
   const source = document.createElement('div');
   source.id = 'context-source-label';
   source.className = 'context-source-label';
-  fragment.appendChild(source);
+  container.appendChild(source);
 
   const hint = document.createElement('p');
   hint.className = 'context-snapshot-hint';
   hint.textContent = 'Save page context to reuse it later without re-scraping.';
-  fragment.appendChild(hint);
+  container.appendChild(hint);
 
   const actions = document.createElement('div');
   actions.className = 'row context-snapshot-actions';
 
-  // Use DocumentFragment for batch button creation
-  const actionsFragment = document.createDocumentFragment();
-  
   const saveBtn = document.createElement('button');
   saveBtn.id = 'save-context-snapshot';
   saveBtn.type = 'button';
   saveBtn.className = 'filled';
   saveBtn.textContent = 'Save snapshot';
-  actionsFragment.appendChild(saveBtn);
+  actions.appendChild(saveBtn);
 
   const liveBtn = document.createElement('button');
   liveBtn.id = 'use-live-context';
   liveBtn.type = 'button';
   liveBtn.className = 'tonal';
   liveBtn.textContent = 'Use live tab';
-  actionsFragment.appendChild(liveBtn);
-  
-  actions.appendChild(actionsFragment);
-  fragment.appendChild(actions);
+  actions.appendChild(liveBtn);
+
+  container.appendChild(actions);
 
   const list = document.createElement('ul');
   list.id = 'context-snapshot-list';
   list.className = 'attachment-list context-snapshot-list';
-  fragment.appendChild(list);
+  container.appendChild(list);
 
-  // Append all children at once
-  container.appendChild(fragment);
-  modalCard.insertBefore(container, els.contextText);
+  modalCard.insertBefore(container, contextArea);
 
   // Store references in els
   els.contextSource = source;
@@ -98,9 +90,6 @@ export function renderContextSnapshots(
     row.dataset.id = snap.id;
     if (snap.id === activeId) row.classList.add('is-active');
 
-    // Use DocumentFragment for batch child element creation
-    const rowFragment = document.createDocumentFragment();
-
     const info = document.createElement('div');
     info.className = 'snapshot-info';
 
@@ -116,20 +105,15 @@ export function renderContextSnapshots(
     meta.textContent = metaBits.join(' • ');
     info.appendChild(meta);
 
-    rowFragment.appendChild(info);
-
     const actions = document.createElement('div');
     actions.className = 'snapshot-actions';
 
-    // Use DocumentFragment for batch button creation
-    const actionsFragment = document.createDocumentFragment();
-    
     const useBtn = document.createElement('button');
     useBtn.className = 'tonal use-snapshot';
     useBtn.dataset.id = snap.id;
     useBtn.textContent = snap.id === activeId ? 'In use' : 'Use';
     useBtn.disabled = snap.id === activeId;
-    actionsFragment.appendChild(useBtn);
+    actions.appendChild(useBtn);
 
     const delBtn = document.createElement('button');
     delBtn.className = 'icon delete-snapshot';
@@ -137,13 +121,10 @@ export function renderContextSnapshots(
     delBtn.textContent = '✕';
     delBtn.title = 'Delete snapshot';
     delBtn.setAttribute('aria-label', 'Delete snapshot');
-    actionsFragment.appendChild(delBtn);
-    
-    actions.appendChild(actionsFragment);
-    rowFragment.appendChild(actions);
-    
-    // Append all children at once
-    row.appendChild(rowFragment);
+    actions.appendChild(delBtn);
+
+    row.appendChild(info);
+    row.appendChild(actions);
     fragment.appendChild(row);
   });
 
@@ -151,5 +132,4 @@ export function renderContextSnapshots(
   const activeSnapshot = snapshots.find(s => s.id === activeId);
   setContextSourceLabel(activeSnapshot || null);
 }
-
 

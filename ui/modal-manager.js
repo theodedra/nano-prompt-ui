@@ -1,5 +1,5 @@
 import { getEls, focusInput } from './core.js';
-import { escapeHtml } from '../utils/utils.js';
+import { escapeHtml } from '../utils.js';
 
 export function trapFocus(e, container) {
   const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -27,7 +27,8 @@ export function openSettingsModal() {
   if (els.settingsModal) {
     els.settingsModal.removeAttribute('hidden');
     document.body?.classList.add('modal-open');
-    if (els.temperature) els.temperature.focus();
+    const firstInput = document.getElementById('temperature');
+    if (firstInput) firstInput.focus();
   }
 }
 
@@ -36,20 +37,22 @@ export function openContextModal() {
   if (!els.contextModal) return;
   els.contextModal.removeAttribute('hidden');
   document.body?.classList.add('modal-open');
-  if (els.contextText) els.contextText.focus();
+  const area = els.contextText || document.getElementById('context-text');
+  if (area) area.focus();
 }
 
 export function openSetupGuideModal() {
-  const els = getEls();
-  if (els.setupGuideModal) {
-    els.setupGuideModal.removeAttribute('hidden');
+  const modal = document.getElementById('setup-guide-modal');
+  if (modal) {
+    modal.removeAttribute('hidden');
     document.body?.classList.add('modal-open');
   }
 }
 
 export function closeModal() {
   const els = getEls();
-  [els.settingsModal, els.contextModal, els.setupGuideModal].forEach(modal => {
+  const setupModal = document.getElementById('setup-guide-modal');
+  [els.settingsModal, els.contextModal, setupModal].forEach(modal => {
     if (modal) modal.setAttribute('hidden', 'true');
   });
   document.body?.classList.remove('modal-open');
@@ -62,8 +65,8 @@ export function isModalOpen() {
 }
 
 export function setSetupGuideContent(html) {
-  const els = getEls();
-  if (els.setupContent) els.setupContent.innerHTML = html;
+  const content = document.getElementById('setup-content');
+  if (content) content.innerHTML = html;
 }
 
 function getAPIName(api) {
@@ -194,5 +197,4 @@ export function renderSetupGuide(status) {
 
   setSetupGuideContent(html);
 }
-
 

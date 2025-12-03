@@ -1,6 +1,6 @@
 // utils.js - General utility functions
 
-import { VALIDATION } from '../config/constants.js';
+import { VALIDATION } from './constants.js';
 
 /**
  * Query selector helper
@@ -209,50 +209,6 @@ export function clampLabel(text = '', max = 80) {
 }
 
 /**
- * Validate href URL using URL constructor and protocol whitelist
- * @param {string} href - URL to validate
- * @returns {boolean} True if URL is safe, false otherwise
- */
-function isValidHref(href) {
-  if (!href || typeof href !== 'string') {
-    return false;
-  }
-
-  const trimmed = href.trim();
-  if (!trimmed) {
-    return false;
-  }
-
-  // Check for protocol separator - if present, must validate protocol
-  const hasProtocol = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(trimmed);
-  
-  if (hasProtocol) {
-    try {
-      // Use URL constructor to properly parse and validate
-      // This prevents bypasses via encoding, whitespace, mixed case, etc.
-      const url = new URL(trimmed);
-      const protocol = url.protocol.toLowerCase();
-
-      // Whitelist only safe protocols (http, https, mailto, tel)
-      return VALIDATION.ALLOWED_LINK_PROTOCOLS.includes(protocol);
-    } catch {
-      // Invalid URL format or dangerous protocol - reject it
-      return false;
-    }
-  }
-
-  // No protocol means relative URL - allow safe relative paths
-  // Allow: /path, #anchor, ./path, ../path, path/to/page
-  // Reject anything that looks suspicious
-  if (/^[#/]/.test(trimmed) || /^\.\.?\/?/.test(trimmed) || /^[a-zA-Z0-9._-]/.test(trimmed)) {
-    return true;
-  }
-
-  // Reject anything else
-  return false;
-}
-
-/**
  * Sanitize HTML string using whitelist approach
  * @param {string} dirtyHtml - Unsanitized HTML
  * @returns {string} Sanitized HTML
@@ -286,7 +242,8 @@ function sanitizeHtmlString(dirtyHtml) {
 
       if (tagName === 'A' && VALIDATION.ALLOWED_LINK_ATTRIBUTES.includes(attrName)) {
         if (attrName === 'href') {
-          if (!isValidHref(attr.value)) {
+          const val = attr.value.trim().toLowerCase();
+          if (val.startsWith('javascript:') || val.startsWith('data:')) {
             node.removeAttribute('href');
           }
         }
@@ -298,4 +255,3 @@ function sanitizeHtmlString(dirtyHtml) {
   nodesToRemove.forEach(n => n.remove());
   return doc.body.innerHTML;
 }
-
