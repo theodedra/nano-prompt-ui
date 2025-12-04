@@ -77,7 +77,7 @@ export async function switchSession(sessionId) {
 }
 
 export async function createNewSession() {
-  const session = createSessionFrom();
+  const session = await createSessionFrom();
   await setCurrentSession(session.id);
   await flushSaveState(); // Immediate save for user action
   renderSessionsList();

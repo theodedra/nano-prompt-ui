@@ -1,5 +1,6 @@
 import { formatTime, markdownToHtml } from '../utils/utils.js';
 import { VirtualScroller } from '../utils/virtual-scroll.js';
+import { formatPdfTruncationNote } from './attachment-renderer.js';
 import {
   getEls,
   getChatCardEl,
@@ -79,9 +80,6 @@ export function buildSmartReplyRow(replies = []) {
   return container;
 }
 
-// Import formatPdfTruncationNote from attachment-renderer
-import { formatPdfTruncationNote } from './attachment-renderer.js';
-
 export function createMessageElement(m, idx) {
   const div = document.createElement('div');
   div.className = `msg ${m.role}`;
@@ -148,15 +146,35 @@ export function createMessageElement(m, idx) {
   const actions = createMessageActions(m, idx);
   div.appendChild(actions);
 
+  // ---------------------------------------------------------
+  // ⚡️ PERFORMANCE & UX FIX: Throttled Hover Logic
+  // ---------------------------------------------------------
+  
+  let lastMeasure = 0;
+
+  // We measure freshly, but only once every 100ms.
+  // This solves the stale cache issue (scrolling/resizing works now)
+  // while keeping CPU usage very low compared to raw mousemove.
   div.addEventListener('mousemove', (e) => {
+    const now = Date.now();
+    if (now - lastMeasure < 100) return; // Skip update if too soon
+    
+    lastMeasure = now;
     const rect = div.getBoundingClientRect();
-    const mouseY = e.clientY - rect.top;
+    
+    // Check if mouse is in bottom half
+    // e.clientY is viewport relative, rect.top is viewport relative
+    const relativeY = e.clientY - rect.top;
     const halfHeight = rect.height / 2;
 
-    if (mouseY > halfHeight) {
-      actions.classList.add('bottom');
+    if (relativeY > halfHeight) {
+      if (!actions.classList.contains('bottom')) {
+        actions.classList.add('bottom');
+      }
     } else {
-      actions.classList.remove('bottom');
+      if (actions.classList.contains('bottom')) {
+        actions.classList.remove('bottom');
+      }
     }
   });
 

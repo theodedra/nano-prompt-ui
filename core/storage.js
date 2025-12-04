@@ -322,10 +322,11 @@ function sanitizeMessageAttachments(sessionId, messageIndex, attachments = []) {
 
 /**
  * Normalize a session's messages by decoupling attachments from message bodies
+ * FIXED: Now async to ensure attachments are written before proceeding
  * @param {object} session - Session object
- * @returns {object} Normalized session
+ * @returns {Promise<object>} Normalized session
  */
-function normalizeSession(session) {
+async function normalizeSession(session) {
   if (!session || !Array.isArray(session.messages)) return session;
 
   let mutated = false;
@@ -342,11 +343,14 @@ function normalizeSession(session) {
 
   if (mutated) dirtySessions.add(session.id);
 
-  // Handle attachment write errors during normalization
+  // FIXED: Await write operations to prevent data loss on app close
   if (allAttachmentPromises.length > 0) {
-    Promise.all(allAttachmentPromises).catch(() => {
+    try {
+      await Promise.all(allAttachmentPromises);
+    } catch (e) {
+      console.warn('Failed to save some attachments during normalization', e);
       toast.warning('Some attachments may not have saved');
-    });
+    }
   }
 
   return session;
@@ -422,7 +426,7 @@ function ensureDefaultSession() {
 async function loadSession(sessionId) {
   try {
     const session = await dbOp(STORES.SESSIONS, 'readonly', store => store.get(sessionId));
-    return normalizeSession(session);
+    return await normalizeSession(session);
   } catch (e) {
     console.error('Failed to load session:', sessionId, e);
     return null;
@@ -490,16 +494,20 @@ export function searchSessions(query = '') {
 
 /**
  * Create a new session, optionally copying from existing session
+ * FIXED: Now async to ensure attachments are persisted safely
  * @param {string|null} baseSessionId - Session ID to copy from (optional)
- * @returns {{id: string, title: string, messages: Array}} New session
+ * @returns {Promise<{id: string, title: string, messages: Array}>} New session
  */
-export function createSessionFrom(baseSessionId = null) {
+export async function createSessionFrom(baseSessionId = null) {
   const base = baseSessionId ? appState.sessions[baseSessionId] : null;
   const session = createEmptySession(base ? `${base.title} copy` : 'New chat');
   if (base) {
     session.messages = base.messages.slice();
   }
-  normalizeSession(session);
+  
+  // Await normalization to ensure attachments are saved
+  await normalizeSession(session);
+  
   appState.sessions[session.id] = session;
   appState.sessionMeta[session.id] = {
     id: session.id,
@@ -942,14 +950,16 @@ export async function loadState() {
     }
 
     if (allSessions && allSessions.length) {
-      const normalized = allSessions.map(s => normalizeSession(s));
+      // FIXED: Process normalizations in parallel and AWAIT them to ensure data migration safety
+      const normalizedSessions = await Promise.all(allSessions.map(s => normalizeSession(s)));
+      
       // Determine if we should enable lazy loading
       // Enable for 50+ sessions to reduce memory usage
-      const shouldLazyLoad = normalized.length >= 50;
+      const shouldLazyLoad = normalizedSessions.length >= 50;
       appState.lazyLoadEnabled = shouldLazyLoad;
 
       const metaMap = {};
-      normalized.forEach(s => {
+      normalizedSessions.forEach(s => {
         metaMap[s.id] = {
           id: s.id,
           title: s.title,
@@ -962,14 +972,14 @@ export async function loadState() {
 
       if (shouldLazyLoad) {
         // LAZY MODE: Only load current session's full data
-        const currentSession = normalized.find(s => s.id === currentId);
+        const currentSession = normalizedSessions.find(s => s.id === currentId);
         if (currentSession) {
           appState.sessions[currentId] = currentSession;
         }
       } else {
         // EAGER MODE: Load all sessions (original behavior)
         const map = {};
-        normalized.forEach(s => map[s.id] = s);
+        normalizedSessions.forEach(s => map[s.id] = s);
         appState.sessions = map;
       }
     }

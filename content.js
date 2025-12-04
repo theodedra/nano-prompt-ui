@@ -15,24 +15,24 @@ const SCRAPING_CONSTANTS = {
     'article',
     '.feed-shared-update-v2'
   ],
-  EXCLUDED_TAGS: ['SCRIPT', 'STYLE', 'NOSCRIPT', 'NAV', 'FOOTER', 'BUTTON', 'SVG', 'PATH'],
+  // Added IMG, VIDEO, SVG to exclude list to save processing time
+  EXCLUDED_TAGS: ['SCRIPT', 'STYLE', 'NOSCRIPT', 'NAV', 'FOOTER', 'BUTTON', 'SVG', 'PATH', 'IMG', 'VIDEO'],
   NOISE_PHRASES: [
     'Jump to', 'Skip to', 'main content', 'accessibility',
     'Easy Apply', 'connections work here', 'Actively reviewing',
-    'results', 'Expired', 'ago', 'See more', 'show more',
-    'Keyboard shortcuts', 'opens in a new window', 'verficiation',
-    'Apply now', 'Save', 'Share'
+    'Keyboard shortcuts', 'opens in a new window', 'verification'
+    // REMOVED: 'ago', 'results', 'Save', 'Share' (Too aggressive, causing data loss)
   ],
- MIN_CONTENT_LENGTH: 50,
+  MIN_CONTENT_LENGTH: 50,
   FALLBACK_MAX_LENGTH: 5000,
-  MIN_TEXT_LENGTH: 2
+  MIN_TEXT_LENGTH: 20 // Increased slightly to skip empty whitespace nodes
 };
 
 // Keep in sync with LIMITS.MAX_CONTEXT_TOKENS * LIMITS.TOKEN_TO_CHAR_RATIO in constants.js (≈12k chars)
 const CONTEXT_MAX_CHARS = 12_000;
-const TREEWALKER_SAFETY_MARGIN = 2_000; // Allows slight overshoot before final clamp upstream
-const MAX_VISITED_TEXT_NODES = 8_000; // High cap to avoid worst-case pages without trimming usable context
-const SCRAPE_CACHE_TTL_MS = 30_000; // Cache same-page scrapes briefly to avoid repeated DOM walks
+const TREEWALKER_SAFETY_MARGIN = 2_000;
+const MAX_VISITED_TEXT_NODES = 8_000;
+const SCRAPE_CACHE_TTL_MS = 30_000;
 
 let lastScrapeCache = {
   url: '',
@@ -48,8 +48,6 @@ window.addEventListener('popstate', () => {
   lastScrapeCache = { url: '', ts: 0, payload: null };
 });
 
-// Check if chrome.runtime is available before adding listener
-// This prevents errors when extension is reloaded or disabled
 if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'GET_CONTEXT') {
@@ -58,26 +56,36 @@ if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage)
     }
   });
 } else {
-  console.warn('[NanoPrompt] Content script loaded but chrome.runtime is not available. This is normal after extension reload.');
-}
-
-function isVisible(el) {
-  if (!el) return false;
-  const style = window.getComputedStyle(el);
-  return style.display !== 'none' &&
-         style.visibility !== 'hidden' &&
-         style.opacity !== '0' &&
-         el.offsetWidth > 0 &&
-         el.offsetHeight > 0;
+  console.warn('[NanoPrompt] Content script loaded but chrome.runtime is not available.');
 }
 
 /**
- * Scrape page content intelligently
- * @returns {{title: string, url: string, text: string, meta?: object, isSelection?: boolean, isRestricted: boolean}}
+ * Modern visibility check using native Chrome API (Fast + Accurate)
  */
+function isVisible(el) {
+  if (!el) return false;
+  
+  // Use native checkVisibility if available (Chrome 105+)
+  if (el.checkVisibility) {
+    return el.checkVisibility({
+      checkOpacity: true,      // Handles opacity: 0
+      checkVisibilityCSS: true // Handles visibility: hidden
+    });
+  }
+
+  // Fallback for older environments
+  // FIXED: Stricter checks for display, visibility, and opacity using AND logic
+  const style = window.getComputedStyle(el);
+  return el.offsetWidth > 0 &&
+         el.offsetHeight > 0 &&
+         style.display !== 'none' &&
+         style.visibility !== 'hidden' &&
+         style.opacity !== '0';
+}
+
 function scrapePage() {
   try {
-    // Priority 1: User selection
+    // Priority 1: User selection (Unchanged)
     const selection = window.getSelection()?.toString();
     if (selection && selection.trim().length > 0) {
       const currentUrl = window.location.href.split('?')[0];
@@ -94,7 +102,7 @@ function scrapePage() {
     const currentPathname = window.location.pathname;
     const now = Date.now();
 
-    // Invalidate cache on SPA navigations (pathname change via History API) or hard URL changes
+    // Invalidate cache logic (Unchanged)
     if (lastPathname !== currentPathname) {
       lastScrapeCache = { url: '', ts: 0, payload: null };
       lastPathname = currentPathname;
@@ -110,6 +118,7 @@ function scrapePage() {
     let root = document.body;
     for (const sel of SCRAPING_CONSTANTS.MAIN_CONTENT_SELECTORS) {
       const el = document.querySelector(sel);
+      // OPTIMIZATION: Only check visibility on the root container, not every child loop
       if (el && isVisible(el)) {
         root = el;
         break;
@@ -121,17 +130,19 @@ function scrapePage() {
       NodeFilter.SHOW_TEXT,
       {
         acceptNode: (node) => {
-          if (!node.parentElement || !isVisible(node.parentElement)) {
-            return NodeFilter.FILTER_REJECT;
-          }
+          // OPTIMIZATION: Filter by cheap properties (parent, tag, length) first.
+          
+          const parent = node.parentElement;
+          if (!parent) return NodeFilter.FILTER_REJECT;
 
-          const tag = node.parentElement.tagName;
+          const tag = parent.tagName;
           if (SCRAPING_CONSTANTS.EXCLUDED_TAGS.includes(tag)) {
             return NodeFilter.FILTER_REJECT;
           }
 
-          const text = node.textContent.trim();
-          if (text.length < SCRAPING_CONSTANTS.MIN_TEXT_LENGTH) {
+          // FIXED: Check length here so we don't yield (and count) garbage nodes in the loop
+          // Using node.data is slightly faster than textContent for text nodes
+          if (node.data.length < SCRAPING_CONSTANTS.MIN_TEXT_LENGTH) {
             return NodeFilter.FILTER_REJECT;
           }
 
@@ -145,15 +156,29 @@ function scrapePage() {
     let collectedLength = 0;
     let visitedTextNodes = 0;
     const charCollectionLimit = CONTEXT_MAX_CHARS + TREEWALKER_SAFETY_MARGIN;
+    
+    // Safety valve: Time budget (e.g., 500ms max) to prevent freezing heavy SPAs
     const startTime = Date.now();
 
     while (currentNode = walker.nextNode()) {
-      // Safety valve: Stop scraping if it takes longer than 2 seconds
-      if (Date.now() - startTime > 2000) break;
+      if (Date.now() - startTime > 500) break; // Hard stop if scraping takes too long
+      
+      const txt = currentNode.textContent.trim();
+      
+      // Double check trim length (since acceptNode checked raw length)
+      if (txt.length < SCRAPING_CONSTANTS.MIN_TEXT_LENGTH) continue;
+
+      // Expensive Check: Visibility
+      // We only check this if the text passed filtering
+      if (!isVisible(currentNode.parentElement)) continue;
+
+      // FIXED: Only increment visited counter AFTER checking visibility.
+      // This prevents invisible nodes from eating the 8,000 node budget.
+      // We rely on the 500ms timer above to catch infinite loops in massive hidden DOMs.
       visitedTextNodes += 1;
       if (visitedTextNodes > MAX_VISITED_TEXT_NODES) break;
 
-      const txt = currentNode.textContent.trim();
+      // Noise Check
       const isNoise = SCRAPING_CONSTANTS.NOISE_PHRASES.some(phrase => txt.includes(phrase));
       if (!isNoise) {
         contentParts.push(txt);
@@ -167,7 +192,7 @@ function scrapePage() {
     let cleanText = contentParts.join('\n');
     cleanText = cleanText.replace(/\n{3,}/g, '\n\n');
 
-    // Fallback: use body text if nothing extracted
+    // Fallback logic (Unchanged)
     if (!cleanText || cleanText.length < SCRAPING_CONSTANTS.MIN_CONTENT_LENGTH) {
       cleanText = document.body.innerText.substring(0, SCRAPING_CONSTANTS.FALLBACK_MAX_LENGTH);
     }

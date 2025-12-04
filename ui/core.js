@@ -78,7 +78,15 @@ export function initUI() {
   if (window.ResizeObserver && els.log) {
     scrollObserver = new ResizeObserver(() => {
       if (els.log) {
-        els.log.scrollTop = els.log.scrollHeight;
+        // FIXED: Only auto-scroll if the user is already near the bottom.
+        // If they have scrolled up to read history, don't yank them down.
+        const threshold = 50; // pixels from bottom
+        const distanceToBottom = els.log.scrollHeight - els.log.scrollTop - els.log.clientHeight;
+        const isAtBottom = distanceToBottom < threshold;
+
+        if (isAtBottom) {
+          els.log.scrollTop = els.log.scrollHeight;
+        }
       }
     });
   }

@@ -21,6 +21,8 @@ Complete technical documentation for NanoPromptUI Chrome extension features and 
 13. [Speech Synthesis](#speech-synthesis)
 14. [Setup Guide](#setup-guide)
 15. [HTML Sanitization Trade-offs](#html-sanitization-trade-offs)
+16. [Performance Architecture](#performance-architecture)
+17. [Fallback Execution Strategy](#fallback-execution-strategy)
 
 ---
 
@@ -445,22 +447,35 @@ Source: https://github.com/explainers-by-googlers/prompt-api
 **File:** `attachment-handlers.js`
 
 ```javascript
-// Images are converted: File → Canvas → Blob (for storage)
+// Fast path: off-thread decoding via GPU using createImageBitmap
 async function fileToCanvas(file, maxWidth) {
-  // ... resize image to canvas
-}
+  const bitmap = await createImageBitmap(file);
+  let { width, height } = bitmap;
 
-async function canvasToBlob(canvas, mimeType) {
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob), mimeType, 0.95);
-  });
+  if (width > maxWidth) {
+    height = (height * maxWidth) / width;
+    width = maxWidth;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  
+  // Instant draw from bitmap (no main thread blocking)
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  
+  // Critical: Free GPU memory immediately
+  bitmap.close();
+  
+  return canvas;
 }
 
 // Store as Blob (IndexedDB cannot store canvas objects)
 Controller.addAttachment({
   name: file.name,
   type: file.type,
-  data: blob  // Blob, not canvas
+  data: blob
 });
 ```
 
@@ -1090,16 +1105,16 @@ Attachments are stored in a separate IndexedDB store to keep session records sma
 ### Error Handling
 
 ```javascript
-// Track write promises
-const attachmentPromises = [];
-
-// ... persist each attachment ...
-
-// Handle attachment write errors after session is marked dirty
-if (attachmentPromises.length > 0) {
-  Promise.all(attachmentPromises).catch(() => {
-    toast.warning('Some attachments may not have saved');
-  });
+// Session normalization is now fully ASYNC to prevent data loss on app close
+async function normalizeSession(session) {
+  // ... extract attachments ...
+  
+  if (attachmentPromises.length > 0) {
+    // Critical: Await persistence before returning session to UI
+    // Prevents "fire-and-forget" race conditions
+    await Promise.all(attachmentPromises);
+  }
+  return session;
 }
 ```
 
@@ -1146,6 +1161,34 @@ const html = msg.htmlCache || markdownToHtml(msg.text);
 
 ---
 
+## Performance Architecture
+
+### Lazy Visibility Evaluation (`content.js`)
+To prevent "Layout Thrashing" on heavy SPAs, page scraping uses a lazy evaluation strategy:
+1.  **Filter Cheaply First:** Reject nodes based on tag name and text length first.
+2.  **Check Visibility Last:** Only calculate `checkVisibility()` (expensive) if the node looks like valid content.
+3.  **Time Budget:** The scraper enforces a strict 500ms execution cap to prevent freezing the tab on massive DOMs.
+
+### Throttled UI Events (`log-renderer.js`)
+Chat interaction uses a "Measure Once, Check Many" strategy:
+1.  **MouseEnter:** Calculate `getBoundingClientRect` **once** and cache it.
+2.  **MouseMove:** Use throttled (100ms) math-only checks against cached coordinates.
+3.  **Result:** Zero layout reflows during mouse movement.
+
+---
+
+## Fallback Execution Strategy
+
+When the Side Panel cannot access the model directly (e.g., strict CORS on images or `window.ai` limitations), the extension injects code into the `MAIN` world of the active tab.
+
+### Privacy & Fingerprinting Protection
+To prevent websites from detecting the extension or hijacking sessions:
+1.  **Randomized Keys:** Storage on `window` uses a rotated UUID key (e.g., `window.__nano_a1b2c3...`) generated at startup.
+2.  **Ephemeral State:** Injected scripts strictly clean up their global variables immediately after execution.
+3.  **Isolation:** No static string identifiers (like `__nanoPageSessions`) are ever exposed to the page context.
+
+---
+
 ## References
 
 - [Chrome Prompt API Documentation](https://developer.chrome.com/docs/ai/prompt-api)
@@ -1155,4 +1198,4 @@ const html = msg.htmlCache || markdownToHtml(msg.text);
 
 ---
 
-*Last Updated: 2025-12-02*
+*Last Updated: 2025-12-04*

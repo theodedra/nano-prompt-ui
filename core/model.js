@@ -6,7 +6,7 @@
  */
 
 import { buildPromptWithContext } from './context.js';
-import { throttle } from '../utils/utils.js';
+import { throttle, nanoid } from '../utils/utils.js';
 import {
   MODEL_CONFIG,
   LIMITS,
@@ -25,6 +25,10 @@ const DIAGNOSTICS_KEY = 'nanoPrompt.diagnostics';
 const SMART_REPLY_LIMIT = 3;
 const SMART_REPLY_CONTEXT_CHARS = 600;
 const SMART_REPLY_MAX_LENGTH = 120;
+
+// FIXED: Generate a random key for page-context storage to prevent fingerprinting.
+// This key rotates every time the extension reloads.
+const PAGE_STORE_KEY = `__nano_${nanoid(12)}`;
 
 let diagnosticsCache = null;
 
@@ -240,8 +244,9 @@ async function clearPageModelSessions(sessionId = null) {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: 'MAIN',
-      func: (id) => {
-        const store = window.__nanoPageSessions || {};
+      func: (id, storeKey) => {
+        // FIXED: Use the randomized key passed from the extension
+        const store = window[storeKey] || {};
         const destroySession = (sess) => {
           try { sess.destroy(); } catch { /* ignore */ }
         };
@@ -254,9 +259,14 @@ async function clearPageModelSessions(sessionId = null) {
           for (const key of Object.keys(store)) delete store[key];
         }
 
-        window.__nanoPageSessions = store;
+        // Clean up the global if empty to reduce footprint
+        if (Object.keys(store).length === 0) {
+          delete window[storeKey];
+        } else {
+          window[storeKey] = store;
+        }
       },
-      args: [sessionId]
+      args: [sessionId, PAGE_STORE_KEY]
     });
   } catch (e) {
     console.warn('Page session cleanup failed', e);
@@ -440,37 +450,35 @@ async function fetchImageWithRetry(url) {
 
 /**
  * Convert blob to canvas (required for Prompt API image input).
+ * FIXED: Uses createImageBitmap for off-thread decoding (faster, non-blocking)
  */
 async function blobToCanvas(blob, maxWidth) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
+  try {
+    // Fast path: off-thread decoding
+    const bitmap = await createImageBitmap(blob);
+    let { width, height } = bitmap;
 
-    img.onload = () => {
-      let width = img.width;
-      let height = img.height;
+    if (width > maxWidth) {
+      height = (height * maxWidth) / width;
+      width = maxWidth;
+    }
 
-      if (width > maxWidth) {
-        height = (height * maxWidth) / width;
-        width = maxWidth;
-      }
-
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0, width, height);
-      URL.revokeObjectURL(img.src);
-
-      resolve(canvas);
-    };
-
-    img.onerror = () => {
-      URL.revokeObjectURL(img.src);
-      reject(new Error('Failed to load image from blob'));
-    };
-
-    img.src = URL.createObjectURL(blob);
-  });
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    
+    // Draw the bitmap directly to canvas
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    
+    // Cleanup bitmap memory
+    bitmap.close();
+    
+    return canvas;
+  } catch (e) {
+    console.error('Bitmap creation failed', e);
+    throw new Error('Failed to process image attachment');
+  }
 }
 
 /**
@@ -485,12 +493,12 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     world: 'MAIN',
-    func: async (p, sys, atts, uiSessionId) => {
+    func: async (p, sys, atts, uiSessionId, storeKey) => {
       try {
         const model = window.ai?.languageModel || self.ai?.languageModel;
         if (!model) return { error: 'AI not found in page' };
 
-        const storeKey = '__nanoPageSessions';
+        // FIXED: Use randomized key passed from extension to prevent fingerprinting
         const store = window[storeKey] || (window[storeKey] = {});
 
         if (!uiSessionId) return { error: 'Missing session id' };
@@ -516,17 +524,24 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
         const r = await sess.prompt(input);
         return { ok: true, data: r };
       } catch (e) {
-        const storeKey = '__nanoPageSessions';
         const store = window[storeKey] || {};
         if (uiSessionId && store[uiSessionId]) {
           try { store[uiSessionId].destroy(); } catch { /* ignore */ }
           delete store[uiSessionId];
         }
-        window[storeKey] = store;
+
+        // FIXED: Clean up the global variable if the store is empty
+        // This ensures consistency with clearPageModelSessions
+        if (Object.keys(store).length === 0) {
+          delete window[storeKey];
+        } else {
+          window[storeKey] = store;
+        }
+
         return { error: e.toString() };
       }
     },
-    args: [prompt, systemPrompt, attachments, sessionId]
+    args: [prompt, systemPrompt, attachments, sessionId, PAGE_STORE_KEY]
   });
 
   if (result?.error) {

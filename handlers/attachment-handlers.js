@@ -61,8 +61,11 @@ export async function handleFileInputChange(event) {
         toast.success(`PDF processed (${pdfMeta.pagesProcessed} pages)`);
       } else if (validation.fileType === 'image') {
         toast.info(`Processing image: ${file.name}...`);
+        
+        // FIXED: Use optimized bitmap logic instead of FileReader
         const canvas = await fileToCanvas(file, LIMITS.IMAGE_MAX_WIDTH);
         const blob = await canvasToBlob(canvas, file.type);
+        
         Controller.addAttachment({
           name: file.name,
           type: file.type,
@@ -90,42 +93,37 @@ export async function handleFileInputChange(event) {
 
 /**
  * Convert image file to canvas (required for Prompt API)
+ * FIXED: Uses createImageBitmap for low-memory, off-thread decoding.
  * @param {File} file - Image file
  * @param {number} maxWidth - Maximum width for resizing
  * @returns {Promise<HTMLCanvasElement>}
  */
 async function fileToCanvas(file, maxWidth) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
+  try {
+    const bitmap = await createImageBitmap(file);
+    let { width, height } = bitmap;
 
-    reader.onload = (e) => {
-      const img = new Image();
+    if (width > maxWidth) {
+      height = (height * maxWidth) / width;
+      width = maxWidth;
+    }
 
-      img.onload = () => {
-        let width = img.width;
-        let height = img.height;
-
-        if (width > maxWidth) {
-          height = (height * maxWidth) / width;
-          width = maxWidth;
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-
-        resolve(canvas);
-      };
-
-      img.onerror = () => reject(new Error('Failed to load image'));
-      img.src = e.target.result;
-    };
-
-    reader.onerror = () => reject(new Error('Failed to read file'));
-    reader.readAsDataURL(file);
-  });
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    
+    // Draw directly from bitmap (fast)
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    
+    // Explicitly close bitmap to free GPU memory immediately
+    bitmap.close();
+    
+    return canvas;
+  } catch (e) {
+    console.error("Bitmap creation failed:", e);
+    throw new Error("Failed to load image. It may be corrupted or format not supported.");
+  }
 }
 
 /**
