@@ -40,6 +40,44 @@ class LocalAI {
     this.sessions = new Map();
     this.controller = null;
     this.lastPrimedAt = 0;
+    this.currentRequestId = 0; // Unique ID for each request to detect superseded operations
+  }
+  
+  /**
+   * Start a new request, aborting any in-flight request.
+   * Returns a request context with staleness detection.
+   * @returns {{requestId: number, signal: AbortSignal, isStale: () => boolean}}
+   */
+  startRequest() {
+    // Abort any existing request
+    if (this.controller) {
+      try { this.controller.abort(); } catch { /* ignore */ }
+    }
+    
+    // Increment request ID and create new controller
+    this.currentRequestId++;
+    const requestId = this.currentRequestId;
+    this.controller = new AbortController();
+    
+    return {
+      requestId,
+      signal: this.controller.signal,
+      /**
+       * Check if this request has been superseded by a newer one.
+       * Use this before firing callbacks to avoid stale updates.
+       */
+      isStale: () => requestId !== this.currentRequestId
+    };
+  }
+  
+  /**
+   * Clear the current request (call when request completes normally)
+   * @param {number} requestId - The request ID to clear (only clears if still current)
+   */
+  clearRequest(requestId) {
+    if (this.currentRequestId === requestId) {
+      this.controller = null;
+    }
   }
 
   get engine() {
@@ -591,18 +629,13 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
 
 /**
  * Run AI prompt with streaming.
+ * Uses request ID pattern to prevent stale callbacks when requests are superseded.
  */
 export async function runPrompt({ sessionId, text, contextOverride, attachments, settings }, callbacks = {}) {
   const { onChunk, onComplete, onError, onAbort } = callbacks;
 
-  if (localAI.controller) {
-    try {
-      localAI.controller.abort();
-    } catch (e) { /* ignore */ }
-  }
-
-  const controller = new AbortController();
-  localAI.controller = controller;
+  // Start new request (aborts any in-flight request)
+  const request = localAI.startRequest();
   let lastAiText = '';
   let generationAborted = false;
 
@@ -643,6 +676,8 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
     }
 
     const throttledUpdate = throttle((chunk) => {
+      // Skip chunk updates if this request has been superseded
+      if (request.isStale()) return;
       if (onChunk) onChunk(chunk);
     }, STREAMING_THROTTLE_MS);
 
@@ -650,14 +685,18 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
       const streamedText = await localAI.promptStreaming(
         sessionId,
         promptInput,
-        controller.signal,
+        request.signal,
         (chunk) => { throttledUpdate(chunk); },
         sessionConfig
       );
 
       throttledUpdate.flush();
       lastAiText = streamedText;
-      if (onComplete) onComplete(streamedText);
+      
+      // Only fire completion callback if this request is still current
+      if (!request.isStale() && onComplete) {
+        onComplete(streamedText);
+      }
 
     } catch (err) {
       throttledUpdate.flush();
@@ -673,7 +712,11 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
       // by filtering and converting them to blobs (see lines 538-550)
       const fallback = await runPromptInPage(finalText, sessionId, settings.systemPrompt, attachments);
       lastAiText = fallback;
-      if (onComplete) onComplete(fallback);
+      
+      // Only fire completion callback if this request is still current
+      if (!request.isStale() && onComplete) {
+        onComplete(fallback);
+      }
     } finally {
       throttledUpdate.cancel();
     }
@@ -684,17 +727,22 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
 
     if (err?.name === 'AbortError') {
       generationAborted = true;
-      if (onAbort) onAbort();
+      // Only fire abort callback if this request is still current
+      if (!request.isStale() && onAbort) {
+        onAbort();
+      }
     } else {
-      if (onError) onError(err);
+      // Only fire error callback if this request is still current
+      if (!request.isStale() && onError) {
+        onError(err);
+      }
     }
   } finally {
-    if (localAI.controller === controller) {
-      localAI.controller = null;
-    }
+    // Clear controller only if this is still the current request
+    localAI.clearRequest(request.requestId);
   }
 
-  return { text: lastAiText, aborted: generationAborted };
+  return { text: lastAiText, aborted: generationAborted, superseded: request.isStale() };
 }
 
 /**

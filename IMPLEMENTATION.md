@@ -612,6 +612,7 @@ static shouldEnable(itemCount) {
 4. **DOM node cache** (`messageNodes` Map) reuses rendered elements
 5. **requestAnimationFrame** for smooth scroll handling (no setTimeout)
 6. **Range change detection** skips DOM updates when viewport unchanged
+7. **Stable message IDs** - Never uses array index; generates content-based keys to prevent stale cache hits after deletions
 
 ### Performance Optimizations
 
@@ -724,15 +725,41 @@ dirtySessions.forEach(id => {
 dirtySessions.clear();
 ```
 
-### Debounced Persistence
+### Debounced Persistence with Mutex
 
-Rapid changes are coalesced into a single IndexedDB transaction:
+Rapid changes are coalesced into a single IndexedDB transaction. A mutex prevents concurrent writes:
 
 ```javascript
 TIMING.SAVE_STATE_DEBOUNCE_MS: 500 // Debounce for IndexedDB writes
 
-// scheduleSaveState() batches all dirty sessions
-// flushSaveState() for critical operations (immediate save)
+let saveMutex = Promise.resolve(); // Serializes all save operations
+
+// scheduleSaveState() batches all dirty sessions (respects mutex)
+// flushSaveState() for critical operations (immediate save, awaits mutex)
+```
+
+### Session Deletion with Rollback
+
+Destructive operations use optimistic updates with rollback on failure:
+
+```javascript
+export async function deleteSession(sessionId) {
+  // Cache state for potential rollback
+  const cachedSession = appState.sessions[sessionId];
+  
+  // Optimistically update memory
+  delete appState.sessions[sessionId];
+  
+  try {
+    await dbOp(STORES.SESSIONS, 'readwrite', store => store.delete(sessionId));
+    return true;
+  } catch (e) {
+    // Rollback memory state on failure
+    appState.sessions[sessionId] = cachedSession;
+    toast.error('Failed to delete session');
+    return false;
+  }
+}
 ```
 
 ### Quota Handling
@@ -1051,18 +1078,25 @@ Note: Word boundaries (`\b`) prevent false positives (e.g., "tabletop" won't mat
 
 **File:** `core/context.js`
 
-Non-ASCII aware estimation accounts for different character-to-token ratios:
+Character-class weighted estimation for more accurate token counts:
 
 ```javascript
 export function estimateTokens(text) {
   if (!text) return 0;
   
-  // Count non-ASCII characters (CJK, etc.) as 1 token each
-  const nonAsciiCount = (text.match(/[^\x00-\x7F]/g) || []).length;
-  const asciiCount = text.length - nonAsciiCount;
+  const counts = {
+    words: (text.match(/\b[a-zA-Z]{1,12}\b/g) || []).length,      // 1 token each
+    longWords: (text.match(/\b[a-zA-Z]{13,}\b/g) || []).length,   // ~2.5 tokens each
+    numbers: (text.match(/\d+/g) || []).length,                    // 1 token per group
+    symbols: (text.match(/[^\w\s]/g) || []).length,                // 1 token each
+    cjk: (text.match(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g) || []).length, // 1 token each
+    whitespace: (text.match(/\s+/g) || []).length                  // merged (~1 per 4)
+  };
   
-  // ASCII: ~4 chars per token, non-ASCII: ~1 char per token
-  return Math.ceil(asciiCount / TOKEN_TO_CHAR_RATIO + nonAsciiCount);
+  let tokens = counts.words + (counts.longWords * 2.5) + counts.numbers 
+             + counts.symbols + counts.cjk + Math.ceil(counts.whitespace / 4);
+  
+  return Math.ceil(tokens * 1.1); // 10% safety margin
 }
 ```
 
@@ -1118,6 +1152,22 @@ async function normalizeSession(session) {
 }
 ```
 
+### Deferred Attachment Verification
+
+If attachment writes fail during message creation, the session is flagged for verification on next load:
+
+```javascript
+// On write failure, mark session for cleanup
+Promise.all(attachmentPromises).catch(async () => {
+  await markSessionNeedsAttachmentVerify(sessionId);
+});
+
+// On load, verify and clean up orphaned references
+if (sessionsNeedingAttachmentVerify.has(session.id)) {
+  await verifySessionAttachments(session); // Removes refs to missing blobs
+}
+```
+
 ### Batch Session Cleanup
 
 When `MAX_SESSIONS` is exceeded, old sessions are deleted in a single transaction:
@@ -1169,11 +1219,12 @@ To prevent "Layout Thrashing" on heavy SPAs, page scraping uses a lazy evaluatio
 2.  **Check Visibility Last:** Only calculate `checkVisibility()` (expensive) if the node looks like valid content.
 3.  **Time Budget:** The scraper enforces a strict 500ms execution cap to prevent freezing the tab on massive DOMs.
 
-### Throttled UI Events (`log-renderer.js`)
-Chat interaction uses a "Measure Once, Check Many" strategy:
-1.  **MouseEnter:** Calculate `getBoundingClientRect` **once** and cache it.
-2.  **MouseMove:** Use throttled (100ms) math-only checks against cached coordinates.
-3.  **Result:** Zero layout reflows during mouse movement.
+### Event Delegation for Hover (`ui/core.js`)
+Chat hover uses event delegation instead of per-message listeners:
+1.  **Single Listener:** One `mousemove` + `scroll` listener on the log container (not N listeners per message).
+2.  **Tracked State:** `currentHoveredMsg` tracks active message; class `hover-active` applied/removed on change.
+3.  **Scroll Support:** Buttons follow cursor when scrolling between messages without moving the mouse.
+4.  **Result:** O(1) listeners regardless of message count; correct hover state during scroll.
 
 ---
 
@@ -1198,4 +1249,4 @@ To prevent websites from detecting the extension or hijacking sessions:
 
 ---
 
-*Last Updated: 2025-12-04*
+*Last Updated: 2025-12-04 (v1.5.0)*

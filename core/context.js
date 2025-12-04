@@ -56,20 +56,48 @@ export function classifyIntent(text) {
 }
 
 /**
- * Rough estimation of tokens with non-ASCII awareness
- * ASCII: ~4 chars per token, non-ASCII (CJK, etc.): ~1 char per token
+ * Estimate token count with character-class awareness.
+ * More accurate than simple char/4 ratio by accounting for:
+ * - Common words (1 token each)
+ * - Long/rare words (split into multiple tokens)
+ * - Numbers (usually 1 token per group)
+ * - Punctuation/symbols (often 1 token each)
+ * - CJK characters (typically 1 token each)
+ * - Whitespace (often merged/ignored)
+ * 
  * @param {string} text - Text to estimate
  * @returns {number} Estimated token count
  */
 export function estimateTokens(text) {
   if (!text) return 0;
   
-  // Count non-ASCII characters (CJK, etc.) as 1 token each
-  const nonAsciiCount = (text.match(/[^\x00-\x7F]/g) || []).length;
-  const asciiCount = text.length - nonAsciiCount;
+  // Count different character types for weighted estimation
+  const counts = {
+    // Common words (1-12 chars) - typically 1 token each
+    words: (text.match(/\b[a-zA-Z]{1,12}\b/g) || []).length,
+    // Long/rare words (13+ chars) - usually split into 2-3 tokens
+    longWords: (text.match(/\b[a-zA-Z]{13,}\b/g) || []).length,
+    // Number groups - typically 1 token per group
+    numbers: (text.match(/\d+/g) || []).length,
+    // Punctuation and symbols - often 1 token each
+    symbols: (text.match(/[^\w\s]/g) || []).length,
+    // CJK characters - typically 1 token each
+    cjk: (text.match(/[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\uac00-\ud7af]/g) || []).length,
+    // Whitespace runs - often merged, ~1 token per 4 spaces
+    whitespace: (text.match(/\s+/g) || []).length
+  };
   
-  // ASCII: ~4 chars per token, non-ASCII: ~1 char per token
-  return Math.ceil(asciiCount / LIMITS.TOKEN_TO_CHAR_RATIO + nonAsciiCount);
+  // Weighted sum based on empirical tokenizer behavior
+  let tokens = 0;
+  tokens += counts.words;                        // Common words: 1 token each
+  tokens += counts.longWords * 2.5;              // Long words: ~2-3 tokens each
+  tokens += counts.numbers;                      // Numbers: 1 token per group
+  tokens += counts.symbols;                      // Symbols: 1 token each
+  tokens += counts.cjk;                          // CJK: 1 token each
+  tokens += Math.ceil(counts.whitespace / 4);    // Whitespace: merged
+  
+  // Add 10% safety margin to avoid underestimation
+  return Math.ceil(tokens * 1.1);
 }
 
 /**

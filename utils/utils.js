@@ -155,11 +155,8 @@ export function markdownToHtml(md) {
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
 
-  // 2. Lists
-  html = html.replace(/^(\s*[-*]\s+.*(?:\n\s*[-*]\s+.*)*)/gm, list => {
-    const items = list.trim().split(/\n/).map(line => line.replace(/^\s*[-*]\s+/, '')).filter(Boolean);
-    return `<ul>${items.map(item => `<li>${item}</li>`).join('')}</ul>`;
-  });
+  // 2. Lists - Line-by-line parser for ordered and unordered lists
+  html = parseMarkdownLists(html);
 
   // 3. Paragraphs
   html = html.split(/\n{2,}/).map(block => {
@@ -168,6 +165,62 @@ export function markdownToHtml(md) {
   }).join('');
 
   return sanitizeHtmlString(html);
+}
+
+/**
+ * Parse markdown lists (both ordered and unordered) using line-by-line parsing.
+ * Handles: - item, * item, 1. item, 2. item, etc.
+ * @param {string} html - HTML string with potential list markers
+ * @returns {string} HTML with proper <ul>/<ol> lists
+ */
+function parseMarkdownLists(html) {
+  const lines = html.split('\n');
+  const result = [];
+  let currentList = [];
+  let listType = null; // 'ul' or 'ol'
+
+  /**
+   * Close the current list and add to results
+   */
+  function closeCurrentList() {
+    if (currentList.length > 0 && listType) {
+      result.push(`<${listType}>${currentList.map(item => `<li>${item}</li>`).join('')}</${listType}>`);
+      currentList = [];
+      listType = null;
+    }
+  }
+
+  for (const line of lines) {
+    // Check for unordered list: - item or * item
+    const unorderedMatch = line.match(/^(\s*)([-*])\s+(.*)$/);
+    // Check for ordered list: 1. item, 2. item, etc.
+    const orderedMatch = line.match(/^(\s*)(\d+)\.\s+(.*)$/);
+
+    if (unorderedMatch) {
+      const content = unorderedMatch[3];
+      if (listType !== 'ul') {
+        closeCurrentList();
+        listType = 'ul';
+      }
+      currentList.push(content);
+    } else if (orderedMatch) {
+      const content = orderedMatch[3];
+      if (listType !== 'ol') {
+        closeCurrentList();
+        listType = 'ol';
+      }
+      currentList.push(content);
+    } else {
+      // Not a list item - close any open list and add the line
+      closeCurrentList();
+      result.push(line);
+    }
+  }
+
+  // Close any remaining open list
+  closeCurrentList();
+
+  return result.join('\n');
 }
 
 /**

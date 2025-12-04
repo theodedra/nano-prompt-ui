@@ -577,13 +577,18 @@ The `world: 'MAIN'` usage is:
 
 **Date:** 2025-12-04
 **Auditor:** Claude (Opus 4.5)
-**Scope:** Full codebase security analysis and remediation (v1.4.5)
+**Scope:** Full codebase security analysis and remediation (v1.5.0)
 
-**Fixes Applied (2025-12-04):**
+**Fixes Applied (v1.4.5):**
 - **Anti-Fingerprinting:** Implemented randomized global keys for page-context scripts to prevent detection.
 - **Strict Cleanup:** Enforced immediate deletion of injected global variables after use.
 - **DoS Mitigation:** Switched to off-thread `createImageBitmap` for image processing to prevent main-thread freezing/crashing on large files.
-- **Data Safety:** Fixed race condition in storage to ensure data integrity during shutdown.
+
+**Fixes Applied (v1.5.0):**
+- **Data Integrity:** Added save mutex to prevent concurrent IndexedDB transactions; session deletion now uses rollback on failure.
+- **Stable Identifiers:** Virtual scroller uses content-based message IDs (never array indices) to prevent cache corruption.
+- **Attachment Verification:** Failed attachment writes flagged; orphaned references cleaned on next load.
+- **Request Isolation:** AI prompts use unique request IDs to prevent stale callback execution.
 
 **Findings:**
 - No critical or high issues identified in this review

@@ -17,6 +17,13 @@ let inputCardEl = null;
 let scrollObserver = null;
 let virtualScroller = null;
 
+// Hover position tracking for message action buttons
+let lastMouseX = 0;
+let lastMouseY = 0;
+let lastHoverUpdate = 0;
+let currentHoveredMsg = null; // Track currently hovered message for class management
+const HOVER_THROTTLE_MS = 100;
+
 const ICON_MIC = ICONS.MIC;
 const ICON_STOP = ICONS.STOP;
 
@@ -94,6 +101,12 @@ export function initUI() {
   if (els.log && createMessageElementCallback) {
     virtualScroller = new VirtualScroller(els.log, createMessageElementCallback);
   }
+  
+  // Initialize delegated hover listeners for message action buttons
+  // This handles BOTH mouse movement AND scrolling for best UX
+  if (els.log) {
+    initMessageHoverDelegation(els.log);
+  }
 
   if (els.sessionSearch) {
     // Initialize session search term (handled by session-renderer)
@@ -102,6 +115,94 @@ export function initUI() {
   if (buildContextSnapshotUICallback) {
     buildContextSnapshotUICallback();
   }
+}
+
+/**
+ * Update action button position for the message under the cursor.
+ * Shows buttons at top or bottom depending on which half the cursor is in.
+ * Also manages the 'hover-active' class so buttons appear when scrolling
+ * moves the cursor from one message to another.
+ * @param {number} clientX - Mouse X coordinate (viewport relative)
+ * @param {number} clientY - Mouse Y coordinate (viewport relative)
+ */
+function updateHoveredMessageActions(clientX, clientY) {
+  const now = Date.now();
+  if (now - lastHoverUpdate < HOVER_THROTTLE_MS) return;
+  lastHoverUpdate = now;
+  
+  if (!els.log) return;
+  
+  // Find the message element under the cursor
+  const elementUnderCursor = document.elementFromPoint(clientX, clientY);
+  if (!elementUnderCursor) return;
+  
+  const msgElement = elementUnderCursor.closest('.msg');
+  
+  // Handle case where cursor is not over any message (e.g., between messages)
+  if (!msgElement || !els.log.contains(msgElement)) {
+    if (currentHoveredMsg) {
+      currentHoveredMsg.classList.remove('hover-active');
+      currentHoveredMsg = null;
+    }
+    return;
+  }
+  
+  // If we moved to a different message, update the hover-active class
+  if (msgElement !== currentHoveredMsg) {
+    // Remove class from old message
+    if (currentHoveredMsg) {
+      currentHoveredMsg.classList.remove('hover-active');
+    }
+    // Add class to new message
+    msgElement.classList.add('hover-active');
+    currentHoveredMsg = msgElement;
+  }
+  
+  const actions = msgElement.querySelector('.copy1');
+  if (!actions) return;
+  
+  // Calculate if cursor is in top or bottom half of the message
+  const rect = msgElement.getBoundingClientRect();
+  const relativeY = clientY - rect.top;
+  const halfHeight = rect.height / 2;
+  
+  // Toggle 'bottom' class based on cursor position
+  actions.classList.toggle('bottom', relativeY > halfHeight);
+}
+
+/**
+ * Initialize event delegation for message hover behavior.
+ * Uses a single listener on the log container for all messages.
+ * Also listens to scroll to update button position when content moves under cursor.
+ * @param {HTMLElement} logContainer - The log container element
+ */
+function initMessageHoverDelegation(logContainer) {
+  // Track mouse position and update buttons on move
+  logContainer.addEventListener('mousemove', (e) => {
+    lastMouseX = e.clientX;
+    lastMouseY = e.clientY;
+    updateHoveredMessageActions(lastMouseX, lastMouseY);
+  });
+  
+  // Update buttons on scroll using last known mouse position
+  // This fixes the issue where scrolling without moving the mouse
+  // wouldn't update the button position
+  logContainer.addEventListener('scroll', () => {
+    if (lastMouseX && lastMouseY) {
+      updateHoveredMessageActions(lastMouseX, lastMouseY);
+    }
+  }, { passive: true });
+  
+  // Clear position and hover state when mouse leaves the log
+  logContainer.addEventListener('mouseleave', () => {
+    lastMouseX = 0;
+    lastMouseY = 0;
+    // Remove hover-active class from any message
+    if (currentHoveredMsg) {
+      currentHoveredMsg.classList.remove('hover-active');
+      currentHoveredMsg = null;
+    }
+  });
 }
 
 // State getters

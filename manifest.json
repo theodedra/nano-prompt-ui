@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Nano Prompt UI",
-  "version": "1.4.5",
+  "version": "1.5.0",
   "description": "Side Panel UI for Chrome's on-device Prompt API (Gemini Nano).",
   "permissions": [
     "sidePanel",

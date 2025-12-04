@@ -1009,7 +1009,8 @@ textarea:disabled {
 }
 
 .msg:hover .copy1, 
-.msg:focus-within .copy1 { 
+.msg:focus-within .copy1,
+.msg.hover-active .copy1 { 
   opacity: 1; 
 } 
 

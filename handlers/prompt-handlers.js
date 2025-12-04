@@ -173,6 +173,60 @@ export async function generateTitleBackground(sessionId) {
 }
 
 /**
+ * Resolve the appropriate context for a user query.
+ * 
+ * Context Resolution Rules:
+ * 1. SHORT GENERIC QUERY: If query is short (<60 chars) with no specific intent,
+ *    skip context entirely (likely a general question like "hi" or "thanks").
+ * 
+ * 2. INTENT-BASED FETCH: If query references page/time/location but we have no
+ *    context yet, fetch it now (bootstrap scrape may not have finished).
+ * 
+ * 3. SYSTEM PAGE HANDLING: If current context is from a restricted page (chrome://),
+ *    try to refresh. If still restricted and query doesn't explicitly need page
+ *    context, clear it to avoid confusing the AI.
+ * 
+ * 4. DEFAULT: Use existing context as-is.
+ * 
+ * @param {string} queryText - User's query text
+ * @returns {Promise<string>} Resolved context (may be empty string)
+ */
+async function resolveContextForQuery(queryText) {
+  const intent = classifyIntent(queryText);
+  let context = Controller.getContextText();
+  
+  // Rule 1: Short generic queries don't need context
+  const isShortGenericQuery = 
+    queryText.length < LIMITS.SHORT_QUERY_THRESHOLD && 
+    intent === INTENT_TYPES.NONE;
+  
+  if (isShortGenericQuery) {
+    return '';
+  }
+  
+  // Rule 2: Intent requires context but we don't have any - fetch now
+  const needsContext = intent !== INTENT_TYPES.NONE;
+  if (needsContext && !context) {
+    Controller.setStatus('Reading page...');
+    context = await refreshContextDraft(false); // Check cache first
+  }
+  
+  // Rule 3: Handle system page context
+  if (context?.includes('[System Page]')) {
+    // Try to get fresh context (user may have switched tabs)
+    context = await refreshContextDraft(true);
+    
+    // If still on system page and query doesn't explicitly need page context, clear it
+    const isPageIntent = intent === INTENT_TYPES.PAGE;
+    if (context?.includes('[System Page]') && !isPageIntent) {
+      return '';
+    }
+  }
+  
+  return context || '';
+}
+
+/**
  * Handle Ask button click - send prompt to AI
  * @returns {Promise<void>}
  */
@@ -186,24 +240,7 @@ export async function handleAskClick(overrideText = null) {
   Controller.setInputValue('');
   Controller.clearAttachments();
 
-  let contextOverride = Controller.getContextText();
-  // SAFETY: If the background scrape from bootstrap hasn't finished yet,
-  // and the user is asking a question that needs context, fetch it now.
-  const intent = classifyIntent(text); // Ensure intent is defined before this
-  if (!contextOverride && intent !== INTENT_TYPES.NONE) {
-    Controller.setStatus('Reading page...'); // Visual feedback
-    // Use false to check cache first (in case background just finished)
-    contextOverride = await refreshContextDraft(false);
-  }
-
-  if (text.length < LIMITS.SHORT_QUERY_THRESHOLD && intent === INTENT_TYPES.NONE) {
-    contextOverride = '';
-  } else if (contextOverride?.includes('[System Page]')) {
-    contextOverride = await refreshContextDraft(true);
-    if (contextOverride?.includes('[System Page]') && intent !== INTENT_TYPES.PAGE) {
-      contextOverride = '';
-    }
-  }
+  const contextOverride = await resolveContextForQuery(text);
 
   try {
     await executePrompt(text, contextOverride, attachments);

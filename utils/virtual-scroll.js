@@ -1,6 +1,8 @@
 // virtual-scroll.js - Virtual scrolling implementation for chat log
 // Only renders visible messages + buffer for performance with large chat histories
 
+import { nanoid } from './utils.js';
+
 /**
  * Virtual scroll manager for chat log
  */
@@ -207,16 +209,36 @@ export class VirtualScroller {
   }
 
   /**
-   * Get a stable identifier for a message
-   * Falls back to index when no id exists
+   * Get a stable identifier for a message.
+   * NEVER uses array index as fallback (indices shift when messages are deleted).
+   * Generates a stable ID from timestamp + content, or a random ID as last resort.
    */
   getMessageId(message, index) {
-    if (!message) return `msg-${index}`;
-    const key = message.messageId || message.id || message.ts || `msg-${index}`;
-    if (!message.messageId) {
-      message.messageId = key;
+    if (!message) {
+      // This shouldn't happen, but if it does, generate unique ID (not index-based)
+      console.warn('VirtualScroller: null message at index', index);
+      return `orphan-${nanoid()}`;
     }
-    return key;
+    
+    // Use existing stable ID if available
+    if (message.messageId) return message.messageId;
+    
+    if (message.id) {
+      message.messageId = message.id;
+      return message.id;
+    }
+    
+    // Generate stable ID from timestamp + content hash
+    // ts alone isn't unique if two messages arrive in same millisecond
+    if (message.ts) {
+      const contentHash = (message.text || '').slice(0, 20).replace(/\W/g, '');
+      message.messageId = `${message.ts}-${message.role || 'msg'}-${contentHash || 'empty'}`;
+      return message.messageId;
+    }
+    
+    // Last resort: generate random ID and persist it on the message
+    message.messageId = `gen-${nanoid()}`;
+    return message.messageId;
   }
 
   /**

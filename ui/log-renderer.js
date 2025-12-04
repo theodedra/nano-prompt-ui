@@ -146,37 +146,9 @@ export function createMessageElement(m, idx) {
   const actions = createMessageActions(m, idx);
   div.appendChild(actions);
 
-  // ---------------------------------------------------------
-  // ⚡️ PERFORMANCE & UX FIX: Throttled Hover Logic
-  // ---------------------------------------------------------
-  
-  let lastMeasure = 0;
-
-  // We measure freshly, but only once every 100ms.
-  // This solves the stale cache issue (scrolling/resizing works now)
-  // while keeping CPU usage very low compared to raw mousemove.
-  div.addEventListener('mousemove', (e) => {
-    const now = Date.now();
-    if (now - lastMeasure < 100) return; // Skip update if too soon
-    
-    lastMeasure = now;
-    const rect = div.getBoundingClientRect();
-    
-    // Check if mouse is in bottom half
-    // e.clientY is viewport relative, rect.top is viewport relative
-    const relativeY = e.clientY - rect.top;
-    const halfHeight = rect.height / 2;
-
-    if (relativeY > halfHeight) {
-      if (!actions.classList.contains('bottom')) {
-        actions.classList.add('bottom');
-      }
-    } else {
-      if (actions.classList.contains('bottom')) {
-        actions.classList.remove('bottom');
-      }
-    }
-  });
+  // NOTE: Hover logic (top/bottom button positioning) is now handled via
+  // event delegation in core.js initMessageHoverDelegation() for better
+  // performance (1 listener vs N) and proper scroll handling.
 
   return div;
 }

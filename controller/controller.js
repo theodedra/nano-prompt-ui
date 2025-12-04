@@ -68,11 +68,20 @@ export function getCurrentSession() {
   return getCurrentSessionSync();
 }
 
+/**
+ * Refresh all session-related UI components.
+ * Use this instead of calling individual render functions.
+ * @param {{sessions?: boolean, log?: boolean}} options - Which parts to refresh
+ */
+export function refreshSessionUI({ sessions = true, log = true } = {}) {
+  if (sessions) renderSessionsList();
+  if (log) renderCurrentLog();
+}
+
 export async function switchSession(sessionId) {
   await setCurrentSession(sessionId);
   await flushSaveState(); // Immediate save for user action
-  renderSessionsList();
-  renderCurrentLog();
+  refreshSessionUI();
   UI.closeMenu('session');
 }
 
@@ -80,24 +89,27 @@ export async function createNewSession() {
   const session = await createSessionFrom();
   await setCurrentSession(session.id);
   await flushSaveState(); // Immediate save for user action
-  renderSessionsList();
-  renderCurrentLog();
+  refreshSessionUI();
   UI.closeMenu('session');
   return session;
 }
 
 export async function removeSession(sessionId) {
-  deleteSession(sessionId);
+  const deleted = await deleteSession(sessionId);
+  if (!deleted) {
+    // Deletion failed - storage.js already showed error toast and rolled back
+    refreshSessionUI();
+    return;
+  }
   await flushSaveState(); // Immediate save for destructive action
-  renderSessionsList();
-  renderCurrentLog();
+  refreshSessionUI();
   toast.success('Chat deleted');
 }
 
 export async function renameSessionById(sessionId, newTitle) {
   renameSession(sessionId, newTitle);
   await flushSaveState(); // Immediate save for user action
-  renderSessionsList();
+  refreshSessionUI({ log: false }); // Only refresh sessions list, not log
   toast.success('Chat renamed');
 }
 

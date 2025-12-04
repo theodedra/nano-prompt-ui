@@ -179,6 +179,80 @@ let metaDirty = false;
 const markMetaDirty = () => { metaDirty = true; };
 const MAX_CONTEXT_SNAPSHOTS = 15;
 
+// Track sessions that need attachment verification on next load
+// This handles the case where attachment writes fail but message metadata was saved
+const sessionsNeedingAttachmentVerify = new Set();
+
+/**
+ * Mark a session as needing attachment verification on next load.
+ * Called when attachment writes fail to ensure orphaned references get cleaned up.
+ * @param {string} sessionId - Session ID to mark
+ */
+async function markSessionNeedsAttachmentVerify(sessionId) {
+  sessionsNeedingAttachmentVerify.add(sessionId);
+  try {
+    const db = await dbPromise;
+    const tx = db.transaction(STORES.META, 'readwrite');
+    const store = tx.objectStore(STORES.META);
+    store.put({ id: 'sessionsNeedingAttachmentVerify', val: [...sessionsNeedingAttachmentVerify] });
+  } catch (e) {
+    console.warn('Failed to persist attachment verify flag', e);
+  }
+}
+
+/**
+ * Check if an attachment exists in IndexedDB
+ * @param {string} attachmentId - Attachment ID to check
+ * @returns {Promise<boolean>} Whether attachment exists
+ */
+async function attachmentExists(attachmentId) {
+  if (!STORES.ATTACHMENTS) return true; // No attachment store = assume exists
+  try {
+    const result = await dbOp(STORES.ATTACHMENTS, 'readonly', store => store.get(attachmentId));
+    return result != null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Verify and clean up attachment references for a session.
+ * Removes attachment metadata from messages if the actual attachment data doesn't exist.
+ * @param {object} session - Session to verify
+ * @returns {Promise<boolean>} Whether any cleanup was performed
+ */
+async function verifySessionAttachments(session) {
+  if (!session?.messages?.length || !STORES.ATTACHMENTS) return false;
+  
+  let cleanedUp = false;
+  
+  for (const message of session.messages) {
+    if (!message.attachments?.length) continue;
+    
+    const validAttachments = [];
+    for (const att of message.attachments) {
+      if (!att.id) {
+        validAttachments.push(att); // No ID = inline data, keep it
+        continue;
+      }
+      
+      const exists = await attachmentExists(att.id);
+      if (exists) {
+        validAttachments.push(att);
+      } else {
+        console.warn(`Cleaning up orphaned attachment reference: ${att.id} (${att.name})`);
+        cleanedUp = true;
+      }
+    }
+    
+    if (validAttachments.length !== message.attachments.length) {
+      message.attachments = validAttachments;
+    }
+  }
+  
+  return cleanedUp;
+}
+
 /**
  * IndexedDB connection promise
  */
@@ -526,55 +600,70 @@ export async function createSessionFrom(baseSessionId = null) {
   if (appState.sessionOrder.length > MAX_SESSIONS) {
     const sessionsToRemove = appState.sessionOrder.slice(MAX_SESSIONS);
     
-    // Batch IndexedDB deletes in single transaction
-    dbPromise.then(db => {
-      const storeNames = [STORES.SESSIONS];
-      if (STORES.ATTACHMENTS) storeNames.push(STORES.ATTACHMENTS);
-      
-      const tx = db.transaction(storeNames, 'readwrite');
-      const sessionStore = tx.objectStore(STORES.SESSIONS);
-      const attachmentStore = STORES.ATTACHMENTS ? tx.objectStore(STORES.ATTACHMENTS) : null;
-      
-      sessionsToRemove.forEach(oldId => {
-        sessionStore.delete(oldId);
-        
-        // Delete attachments via index cursor
-        if (attachmentStore) {
-          const idx = attachmentStore.index('sessionId');
-          idx.openCursor(IDBKeyRange.only(oldId)).onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (cursor) {
-              cursor.delete();
-              cursor.continue();
-            }
-          };
-        }
-      });
-      
-      tx.onerror = () => console.error('Failed to batch delete old sessions', tx.error);
-    }).catch(e => console.error('Failed to open DB for batch delete', e));
-    
-    // Clean memory synchronously
+    // Clean memory first (optimistic update)
     sessionsToRemove.forEach(oldId => {
       delete appState.sessions[oldId];
       delete appState.sessionMeta[oldId];
       dirtySessions.delete(oldId);
     });
-    
     appState.sessionOrder = appState.sessionOrder.slice(0, MAX_SESSIONS);
     markMetaDirty();
+    
+    // Await batch IndexedDB delete with proper error handling
+    try {
+      const db = await dbPromise;
+      const storeNames = [STORES.SESSIONS];
+      if (STORES.ATTACHMENTS) storeNames.push(STORES.ATTACHMENTS);
+      
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(storeNames, 'readwrite');
+        const sessionStore = tx.objectStore(STORES.SESSIONS);
+        const attachmentStore = STORES.ATTACHMENTS ? tx.objectStore(STORES.ATTACHMENTS) : null;
+        
+        sessionsToRemove.forEach(oldId => {
+          sessionStore.delete(oldId);
+          
+          // Delete attachments via index cursor
+          if (attachmentStore) {
+            const idx = attachmentStore.index('sessionId');
+            idx.openCursor(IDBKeyRange.only(oldId)).onsuccess = (e) => {
+              const cursor = e.target.result;
+              if (cursor) {
+                cursor.delete();
+                cursor.continue();
+              }
+            };
+          }
+        });
+        
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error);
+      });
+    } catch (e) {
+      // Log but don't fail session creation - old sessions staying is acceptable
+      console.warn('Failed to batch delete old sessions from IDB', e);
+    }
   }
 
   return session;
 }
 
 /**
- * Delete a session
+ * Delete a session with proper IndexedDB synchronization.
+ * Awaits database deletion and rolls back memory state on failure.
  * @param {string} sessionId - Session ID to delete
+ * @returns {Promise<boolean>} Whether deletion succeeded
  */
-export function deleteSession(sessionId) {
-  if (!appState.sessions[sessionId]) return;
+export async function deleteSession(sessionId) {
+  if (!appState.sessions[sessionId]) return false;
 
+  // Cache state for potential rollback
+  const cachedSession = appState.sessions[sessionId];
+  const cachedMeta = appState.sessionMeta[sessionId];
+  const orderIndex = appState.sessionOrder.indexOf(sessionId);
+  const wasCurrent = appState.currentSessionId === sessionId;
+
+  // Optimistically update memory state
   delete appState.sessions[sessionId];
   delete appState.sessionMeta[sessionId];
   dirtySessions.delete(sessionId);
@@ -582,15 +671,34 @@ export function deleteSession(sessionId) {
   appState.sessionOrder = appState.sessionOrder.filter(id => id !== sessionId);
   markMetaDirty();
 
-  if (appState.currentSessionId === sessionId) {
+  if (wasCurrent) {
     appState.currentSessionId = appState.sessionOrder[0] || null;
     markMetaDirty();
   }
   ensureDefaultSession();
 
-  dbOp(STORES.SESSIONS, 'readwrite', store => store.delete(sessionId))
-    .catch(e => console.error('Failed to delete session from IDB', e));
-  deleteAttachmentsForSession(sessionId);
+  try {
+    // Await actual database deletion
+    await dbOp(STORES.SESSIONS, 'readwrite', store => store.delete(sessionId));
+    await deleteAttachmentsForSession(sessionId);
+    return true;
+  } catch (e) {
+    console.error('Failed to delete session from IDB, rolling back', e);
+    
+    // Rollback memory state
+    appState.sessions[sessionId] = cachedSession;
+    appState.sessionMeta[sessionId] = cachedMeta;
+    if (orderIndex >= 0) {
+      appState.sessionOrder.splice(orderIndex, 0, sessionId);
+    }
+    if (wasCurrent) {
+      appState.currentSessionId = sessionId;
+    }
+    markMetaDirty();
+    
+    toast.error(USER_ERROR_MESSAGES.STORAGE_SAVE_FAILED);
+    return false;
+  }
 }
 
 /**
@@ -642,10 +750,11 @@ export function upsertMessage(sessionId, message, replaceIndex = null) {
   }
   dirtySessions.add(sessionId);
 
-  // Handle attachment write errors after session is marked dirty
+  // Handle attachment write errors - mark session for verification on next load
   if (attachmentPromises.length > 0) {
-    Promise.all(attachmentPromises).catch(() => {
+    Promise.all(attachmentPromises).catch(async () => {
       toast.warning('Some attachments may not have saved');
+      await markSessionNeedsAttachmentVerify(sessionId);
     });
   }
 }
@@ -683,10 +792,11 @@ export function updateMessage(sessionId, messageIndex, patch) {
   }
   dirtySessions.add(sessionId);
 
-  // Handle attachment write errors after session is marked dirty
+  // Handle attachment write errors - mark session for verification on next load
   if (attachmentPromises.length > 0) {
-    Promise.all(attachmentPromises).catch(() => {
+    Promise.all(attachmentPromises).catch(async () => {
       toast.warning('Some attachments may not have saved');
+      await markSessionNeedsAttachmentVerify(sessionId);
     });
   }
 }
@@ -758,39 +868,60 @@ export async function saveState() {
 
 /**
  * Debounced save state - coalesces rapid writes into a single IndexedDB transaction
- * Uses dirtySessions tracking to batch all pending changes
+ * Uses dirtySessions tracking to batch all pending changes.
+ * 
+ * MUTEX PATTERN: All saves are serialized through saveMutex to prevent concurrent
+ * IndexedDB transactions from interleaving and causing data corruption.
  */
 let saveTimeout = null;
-let savePromise = null;
+let saveMutex = Promise.resolve(); // Mutex for serializing all saves
 
 export function scheduleSaveState() {
   if (saveTimeout) return;
 
-  saveTimeout = setTimeout(async () => {
+  saveTimeout = setTimeout(() => {
     saveTimeout = null;
-    savePromise = saveState();
-    await savePromise;
-    savePromise = null;
+    // Chain onto mutex to ensure serialization with any in-flight saves
+    saveMutex = saveMutex
+      .then(async () => {
+        if (dirtySessions.size > 0 || metaDirty) {
+          await saveState();
+        }
+      })
+      .catch(e => console.error('Scheduled save failed', e));
   }, TIMING.SAVE_STATE_DEBOUNCE_MS);
 }
 
 /**
  * Flush any pending debounced save immediately
- * Call this before critical operations or page unload
+ * Call this before critical operations or page unload.
+ * 
+ * Uses mutex to ensure this save waits for any in-flight save to complete,
+ * then runs exclusively (no other save can start until this one finishes).
+ * 
  * @returns {Promise<void>}
  */
 export async function flushSaveState() {
+  // Clear any pending scheduled save - we'll save now instead
   if (saveTimeout) {
     clearTimeout(saveTimeout);
     saveTimeout = null;
   }
-  if (savePromise) {
-    await savePromise;
-  }
-  // Always save to ensure any dirty state is persisted
-  if (dirtySessions.size > 0 || metaDirty) {
-    await saveState();
-  }
+
+  // Chain onto mutex: wait for in-flight save, then run ours exclusively
+  const flushPromise = saveMutex.then(async () => {
+    if (dirtySessions.size > 0 || metaDirty) {
+      await saveState();
+    }
+  });
+  
+  // Update mutex so future saves wait for this one
+  saveMutex = flushPromise.catch(e => {
+    console.error('Flush save failed', e);
+  });
+  
+  // Await our specific save (not the error-swallowed mutex)
+  await flushPromise;
 }
 
 /**
@@ -933,11 +1064,12 @@ export async function loadState() {
     const metaStore = tx.objectStore(STORES.META);
     const sessionStore = tx.objectStore(STORES.SESSIONS);
 
-    const [order, currentId, snapshots, activeSnapshotId, allSessions] = await Promise.all([
+    const [order, currentId, snapshots, activeSnapshotId, sessionsToVerify, allSessions] = await Promise.all([
         getVal(metaStore, 'sessionOrder'),
         getVal(metaStore, 'currentSessionId'),
         getVal(metaStore, 'contextSnapshots'),
         getVal(metaStore, 'activeSnapshotId'),
+        getVal(metaStore, 'sessionsNeedingAttachmentVerify'),
         getAllVal(sessionStore)
     ]);
 
@@ -948,10 +1080,43 @@ export async function loadState() {
       const exists = (snapshots || []).some(s => s.id === activeSnapshotId);
       appState.activeSnapshotId = exists ? activeSnapshotId : null;
     }
+    
+    // Restore sessions needing verification from previous session
+    if (Array.isArray(sessionsToVerify)) {
+      sessionsToVerify.forEach(id => sessionsNeedingAttachmentVerify.add(id));
+    }
 
     if (allSessions && allSessions.length) {
       // FIXED: Process normalizations in parallel and AWAIT them to ensure data migration safety
       const normalizedSessions = await Promise.all(allSessions.map(s => normalizeSession(s)));
+      
+      // Verify attachments for sessions that had write failures
+      // This cleans up orphaned attachment references
+      const sessionsNeedingCleanup = new Set(sessionsNeedingAttachmentVerify);
+      if (sessionsNeedingCleanup.size > 0) {
+        let anyCleanedUp = false;
+        for (const session of normalizedSessions) {
+          if (sessionsNeedingCleanup.has(session.id)) {
+            const cleanedUp = await verifySessionAttachments(session);
+            if (cleanedUp) {
+              anyCleanedUp = true;
+              dirtySessions.add(session.id); // Mark for save
+            }
+            sessionsNeedingAttachmentVerify.delete(session.id);
+          }
+        }
+        
+        // Clear the verification flag now that we've processed them
+        if (anyCleanedUp || sessionsNeedingCleanup.size > 0) {
+          try {
+            const cleanupDb = await dbPromise;
+            const cleanupTx = cleanupDb.transaction(STORES.META, 'readwrite');
+            cleanupTx.objectStore(STORES.META).delete('sessionsNeedingAttachmentVerify');
+          } catch (e) {
+            console.warn('Failed to clear attachment verify flag', e);
+          }
+        }
+      }
       
       // Determine if we should enable lazy loading
       // Enable for 50+ sessions to reduce memory usage
