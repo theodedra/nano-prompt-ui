@@ -1,6 +1,6 @@
 # Security Analysis - NanoPromptUI
 
-**Last Updated:** 2025-12-02
+**Last Updated:** 2025-12-04
 **Summary:** Browser-side extension designed to keep all processing local and reduce common web-extension risks by blocking system pages, isolating content scripts, sanitizing HTML output, validating inputs/URLs, and avoiding remote network calls.
 
 ---
@@ -478,6 +478,19 @@ chrome.scripting.executeScript({
 - This is the **only way** to access the AI API when side panel fails
 - **Chrome's design decision**, not a workaround
 
+#### Fingerprinting Mitigation (Added v1.4.5):
+
+To mitigate the risk of websites fingerprinting the extension or hijacking sessions in the Main world:
+
+1.  **Randomized Ephemeral Keys**:
+    - Instead of using a static global variable (e.g., `window.__nanoPageSessions`), the extension now generates a **randomized UUID key** (e.g., `window.__nano_a1b2c3...`) at startup.
+    - This key is passed dynamically to the injected script.
+    - Websites cannot detect the extension by checking for a known global variable name.
+
+2.  **Strict Cleanup**:
+    - Injected scripts explicitly `delete` the global variable immediately after the prompt operation completes or fails.
+    - The global state exists only for the duration of the AI streaming response.
+
 #### Security Guarantees:
 
 ✅ **Functions are self-contained**
@@ -500,58 +513,11 @@ chrome.scripting.executeScript({
 - Content-type checked (must be image/*)
 - AI prompts are text-only
 
-#### Why This Exception is Safe:
-
-1. **Isolated Function Execution**
-   - Functions are passed as strings, executed fresh
-   - No closure access to page variables
-   - Cannot call page functions
-
-2. **Return Values Only**
-   - Image fetch returns data URL (no executable code)
-   - AI API returns text string (sanitized before display)
-   - No objects, no functions, no DOM access returned
-
-3. **Chrome's Security Model**
-   - Even in `MAIN` world, content scripts are isolated
-   - Cannot access `window` variables defined by page
-   - Cannot be called by page JavaScript
-   - One-way communication (extension → page, not page → extension)
-
-4. **Validated Use Cases**
-   - CORS workaround: Officially recommended by Chrome docs
-   - window.ai access: Required by API design, no alternative exists
-
-#### Alternative Approaches Don't Work:
-
-❌ **Using `world: 'ISOLATED'`**
-```javascript
-world: 'ISOLATED',
-func: async () => {
-  const ai = window.ai;  // undefined - not in isolated world
-  const img = await fetch(corsBlockedUrl);  // CORS error
-}
-```
-Result: Features completely broken
-
-❌ **Using background script**
-```javascript
-// Background script fetch
-const response = await fetch(imageUrl);  // CORS blocked
-```
-Result: Cannot access CORS-blocked resources
-
-❌ **Using extension permissions**
-```json
-"permissions": ["<all_urls>"]  // Would bypass CORS
-```
-Result: Dangerous overpermission, not needed
-
 #### Conclusion:
 
 The `world: 'MAIN'` usage is:
 - ✅ **Required** for features to work
-- ✅ **Safe** due to Chrome's isolation model
+- ✅ **Safe** due to Chrome's isolation model and new Anti-Fingerprinting measures
 - ✅ **Best practice** for these specific use cases
 - ✅ **Well-documented** with clear security rationale
 
@@ -576,6 +542,7 @@ The `world: 'MAIN'` usage is:
 - [x] Content scripts limited to http/https (no `<all_urls>`)
 - [x] Read-only AI model
 - [x] No persistence of AI instructions
+- [x] **Anti-Fingerprinting** (Randomized global keys + Strict cleanup)
 
 ---
 
@@ -608,14 +575,15 @@ The `world: 'MAIN'` usage is:
 
 ## 📝 Security Audit Summary
 
-**Date:** 2025-12-02
+**Date:** 2025-12-04
 **Auditor:** Claude (Opus 4.5)
-**Scope:** Full codebase security analysis and remediation
+**Scope:** Full codebase security analysis and remediation (v1.4.5)
 
-**Fixes Applied (2025-12-02):**
-- Blocked `data:` URLs in anchor sanitization (XSS mitigation)
-- Removed unused `alarms` permission (minimal privilege)
-- Limited content script matches to http/https only (reduced attack surface)
+**Fixes Applied (2025-12-04):**
+- **Anti-Fingerprinting:** Implemented randomized global keys for page-context scripts to prevent detection.
+- **Strict Cleanup:** Enforced immediate deletion of injected global variables after use.
+- **DoS Mitigation:** Switched to off-thread `createImageBitmap` for image processing to prevent main-thread freezing/crashing on large files.
+- **Data Safety:** Fixed race condition in storage to ensure data integrity during shutdown.
 
 **Findings:**
 - No critical or high issues identified in this review

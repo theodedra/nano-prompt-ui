@@ -453,9 +453,10 @@ async function fetchImageWithRetry(url) {
  * FIXED: Uses createImageBitmap for off-thread decoding (faster, non-blocking)
  */
 async function blobToCanvas(blob, maxWidth) {
+  let bitmap;
   try {
     // Fast path: off-thread decoding
-    const bitmap = await createImageBitmap(blob);
+    bitmap = await createImageBitmap(blob);
     let { width, height } = bitmap;
 
     if (width > maxWidth) {
@@ -471,13 +472,15 @@ async function blobToCanvas(blob, maxWidth) {
     // Draw the bitmap directly to canvas
     ctx.drawImage(bitmap, 0, 0, width, height);
     
-    // Cleanup bitmap memory
-    bitmap.close();
-    
     return canvas;
   } catch (e) {
     console.error('Bitmap creation failed', e);
     throw new Error('Failed to process image attachment');
+  } finally {
+    // Cleanup bitmap memory regardless of success or failure
+    if (bitmap) {
+      bitmap.close();
+    }
   }
 }
 
@@ -489,6 +492,25 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
   if (!tab || !tab.url.startsWith('http')) {
     throw new Error('Restricted protocol');
   }
+
+  // FIXED: Blobs CANNOT be serialized via JSON args in executeScript.
+  // We MUST convert to Base64 data URLs here to transport them across the boundary.
+  // Note: PDF attachments have plain text data (not Blobs) and pass through unchanged.
+  // They are filtered out in the inner function since PDF content is already in the prompt.
+  const serializedAttachments = await Promise.all(attachments.map(async (att) => {
+    if (att.data instanceof Blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve({
+          ...att,
+          data: reader.result // Base64 data URL string
+        });
+        reader.onerror = () => reject(new Error('Failed to serialize attachment'));
+        reader.readAsDataURL(att.data);
+      });
+    }
+    return att; // Non-Blob data (e.g., PDF text) - already serializable
+  }));
 
   const [{ result }] = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
@@ -514,14 +536,32 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
 
         let input = p;
         if (atts && atts.length > 0) {
-          const blobs = await Promise.all(atts.map(async (att) => {
-            const res = await fetch(att.data);
-            return await res.blob();
-          }));
-          input = [p, ...blobs];
+          // FIXED: Only process image attachments as blobs.
+          // PDF attachments have plain text data (not URLs) - their content
+          // is already embedded in the prompt text via buildPromptWithContext.
+          const imageAtts = atts.filter(att => att.type && att.type.startsWith('image/'));
+          if (imageAtts.length > 0) {
+            const blobs = await Promise.all(imageAtts.map(async (att) => {
+              // Convert Data URL (Base64) back to Blob inside the page
+              const res = await fetch(att.data);
+              return await res.blob();
+            }));
+            input = [p, ...blobs];
+          }
         }
 
         const r = await sess.prompt(input);
+
+        // FIXED: Clean up session after successful completion (as per SECURITY.md).
+        // The global state should exist only for the duration of the AI response.
+        try { sess.destroy(); } catch { /* ignore */ }
+        delete store[uiSessionId];
+
+        // Clean up the global variable if the store is empty
+        if (Object.keys(store).length === 0) {
+          delete window[storeKey];
+        }
+
         return { ok: true, data: r };
       } catch (e) {
         const store = window[storeKey] || {};
@@ -531,7 +571,6 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
         }
 
         // FIXED: Clean up the global variable if the store is empty
-        // This ensures consistency with clearPageModelSessions
         if (Object.keys(store).length === 0) {
           delete window[storeKey];
         } else {
@@ -541,7 +580,7 @@ async function runPromptInPage(prompt, sessionId, systemPrompt, attachments = []
         return { error: e.toString() };
       }
     },
-    args: [prompt, systemPrompt, attachments, sessionId, PAGE_STORE_KEY]
+    args: [prompt, systemPrompt, serializedAttachments, sessionId, PAGE_STORE_KEY]
   });
 
   if (result?.error) {
@@ -630,14 +669,11 @@ export async function runPrompt({ sessionId, text, contextOverride, attachments,
         throw new Error(USER_ERROR_MESSAGES.AI_SYSTEM_PAGE);
       }
 
-      if (imageAttachments.length === 0) {
-        const fallback = await runPromptInPage(finalText, sessionId, settings.systemPrompt, attachments);
-        lastAiText = fallback;
-        if (onComplete) onComplete(fallback);
-      } else {
-        console.error("Image prompt failed, cannot use fallback. Original error:", err);
-        throw new Error(`Image analysis failed: ${err?.message || 'Unknown error'}`);
-      }
+      // Fallback to page context - runPromptInPage handles image attachments
+      // by filtering and converting them to blobs (see lines 538-550)
+      const fallback = await runPromptInPage(finalText, sessionId, settings.systemPrompt, attachments);
+      lastAiText = fallback;
+      if (onComplete) onComplete(fallback);
     } finally {
       throttledUpdate.cancel();
     }
