@@ -200,6 +200,31 @@ try {
 
 ---
 
+### Layer 7: Sensitive Form Data Protection
+**File:** `content.js:129-134`
+
+```javascript
+function shouldSkipElement(el) {
+  const tag = el.tagName;
+  if (SCRAPING_CONSTANTS.EXCLUDED_TAGS.includes(tag)) return true;
+  // Explicitly skip password fields (defense-in-depth)
+  if (tag === 'INPUT' && el.type === 'password') return true;
+  if (isHighLinkDensity(el)) return true;
+  return false;
+}
+```
+
+**Protection:**
+- ✅ Password input fields explicitly excluded from content collection
+- ✅ Prevents accidental capture of password values
+- ✅ Defense-in-depth: Even though `textContent` is empty for input elements, password fields are explicitly skipped
+- ✅ Textareas and other input types remain accessible for legitimate use cases (email drafts, essays, etc.)
+
+**Why this matters:**
+The extension needs to read text content from pages (for summarizing articles, emails, essays). While input elements don't expose their values via `textContent`, password fields are explicitly excluded to ensure no sensitive data can be accidentally captured, even in edge cases or future code changes.
+
+---
+
 ## 🚫 Why Prompt Injection Impact Is Limited
 
 ### The Reality of Prompt Injection
@@ -524,6 +549,7 @@ Malicious websites could attempt to crash the extension by providing extremely l
 - [x] Content script isolation
 - [x] System page blocking
 - [x] URL validation for images
+- [x] Password fields excluded from content collection
 - [x] CSP configured
 - [x] Minimal permissions
 - [x] No eval() or Function()

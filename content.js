@@ -129,6 +129,8 @@ function isHighLinkDensity(el) {
 function shouldSkipElement(el) {
   const tag = el.tagName;
   if (SCRAPING_CONSTANTS.EXCLUDED_TAGS.includes(tag)) return true;
+  // Explicitly skip password fields (defense-in-depth)
+  if (tag === 'INPUT' && el.type === 'password') return true;
   if (isHighLinkDensity(el)) return true;
   return false;
 }
