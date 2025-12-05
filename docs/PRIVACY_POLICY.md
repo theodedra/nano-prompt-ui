@@ -46,7 +46,7 @@ This extension requires the following permissions to function:
 - **`contextMenus`**: Required to add right-click options (Summarize, Rewrite, Translate)
 - **`host_permissions`** (http/https/file): Required to read page content from websites you visit
 
-**Important**: The extension only accesses page content when you explicitly request it (e.g., clicking "Summarize tab" or using context menu actions). It does not automatically read or transmit page content.
+**Important**: The extension reads page content automatically when you open the side panel or switch tabs to keep the context up-to-date. However, **all content is processed and stored entirely on your device**. No page content is ever transmitted to external servers or services. The content is only used locally for AI interactions within your browser.
 
 ## Third-Party Services
 
@@ -55,6 +55,12 @@ This extension uses Chrome's built-in Prompt API which runs **entirely on-device
 
 ### Chrome Translation API (Optional)
 If enabled via Chrome flags, the extension may use Chrome's Translation API for translation features. This API also runs on-device and does not transmit data externally.
+
+### Chrome Language Detection API (Optional)
+If enabled via Chrome flags, the extension uses Chrome's Language Detection API to automatically detect the source language of text before translation. This API runs on-device and does not transmit data externally.
+
+### Mozilla PDF.js Library
+This extension includes a bundled copy of Mozilla's PDF.js library (version 2023) for PDF text extraction. The library runs entirely on-device in a Web Worker and processes PDF files locally. No PDF content is transmitted to external servers. The library is licensed under the Apache License 2.0.
 
 ## Data Sharing
 
@@ -71,9 +77,14 @@ Since all data is stored locally:
 ## Data Security
 
 - All data is stored locally using Chrome's secure storage APIs
+
 - No network transmission means no risk of data interception
+
 - The extension uses Chrome's Content Security Policy for additional security
+
 - Source code is open source and available for review
+
+For detailed information about security measures, and security architecture, see [docs/SECURITY.md](docs/SECURITY.md).
 
 ## Children's Privacy
 
