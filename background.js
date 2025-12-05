@@ -29,6 +29,74 @@ const UI_MESSAGES = {
 };
 
 let pendingAction = null;
+let creatingOffscreen = null;
+
+async function ensureOffscreenDocument() {
+  const url = chrome.runtime.getURL('offscreen/offscreen.html');
+  try {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: [url]
+    });
+    if (contexts && contexts.length > 0) return;
+  } catch {
+    // getContexts may not be available in some versions; fall through to create.
+  }
+
+  if (creatingOffscreen) {
+    await creatingOffscreen;
+    // After awaiting, verify document exists before returning
+    // This prevents race conditions where the mutex clears before document is registered
+    try {
+      const contexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT'],
+        documentUrls: [url]
+      });
+      if (contexts && contexts.length > 0) return;
+    } catch {
+      // getContexts may not be available; continue to create path
+    }
+  }
+
+  // Assign the promise immediately to prevent race conditions from concurrent calls
+  creatingOffscreen = (async () => {
+    try {
+      await chrome.offscreen.createDocument({
+        url: 'offscreen/offscreen.html',
+        reasons: ['BLOBS'],
+        justification: 'Keep Gemini Nano warm for low-latency inference.'
+      });
+      
+      // After successful creation, verify document exists before clearing mutex
+      // Use a small delay to allow Chrome to register the document
+      await new Promise(resolve => setTimeout(resolve, 100));
+      try {
+        const contexts = await chrome.runtime.getContexts({
+          contextTypes: ['OFFSCREEN_DOCUMENT'],
+          documentUrls: [url]
+        });
+        if (contexts && contexts.length > 0) {
+          // Document confirmed to exist, safe to clear mutex
+          return;
+        }
+      } catch {
+        // getContexts may not be available; document may still exist
+      }
+      // If verification fails, document may still exist (API unavailable)
+    } catch (error) {
+      // Log error with context for debugging
+      console.warn(LOG_PREFIX.WARN, 'Failed to create offscreen document:', error?.message || error);
+      // Re-throw so caller knows creation failed
+      throw error;
+    } finally {
+      // Clear mutex only after the entire operation completes (success or failure)
+      // and we've had a chance to verify the document exists
+      creatingOffscreen = null;
+    }
+  })();
+
+  await creatingOffscreen;
+}
 
 /**
  * Warm up the AI model for faster first use.
@@ -37,6 +105,21 @@ let pendingAction = null;
  */
 async function warmUpModel() {
   try {
+    try {
+      await ensureOffscreenDocument();
+      try {
+        await chrome.runtime.sendMessage({ action: 'OFFSCREEN_WARMUP', withProgress: false });
+        console.log(LOG_PREFIX.INFO, UI_MESSAGES.WARMUP_SUCCESS);
+        return;
+      } catch {
+        // fall back to legacy warmup below
+      }
+    } catch (offscreenError) {
+      // Offscreen document creation failed, fall back to legacy warmup
+      console.warn(LOG_PREFIX.WARN, 'Offscreen document creation failed, falling back to local warmup:', offscreenError?.message || offscreenError);
+      // Continue to legacy warmup below
+    }
+
     // Check if LanguageModel API is available (global constructor in Chrome extensions)
     if (typeof LanguageModel === 'undefined') return;
 
@@ -90,10 +173,10 @@ async function warmUpModel() {
       console.log(LOG_PREFIX.INFO, 'Triggering background model warmup...');
       try {
         const session = await LanguageModel.create({
+            ...MODEL_CONFIG,
             systemPrompt: 'Warmup',
             temperature: 1.0,
-            topK: 40,
-            expectedOutputs: MODEL_CONFIG.expectedOutputs
+            topK: 40
         });
         session.destroy();
 
@@ -122,7 +205,7 @@ async function warmUpModel() {
 const setupExtension = async () => {
   try {
     await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
-    await chrome.sidePanel.setOptions({ enabled: true, path: 'sidepanel.html' });
+    await chrome.sidePanel.setOptions({ enabled: true, path: 'sidepanel/index.html' });
 
     chrome.contextMenus.removeAll();
 
@@ -170,6 +253,52 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 });
 
 /**
+ * Inject history patcher script into page context using chrome.scripting.executeScript
+ * This bypasses CSP restrictions that block inline script injection
+ * @param {number} tabId - The tab ID to inject into
+ * @returns {Promise<void>}
+ */
+async function injectHistoryPatcher(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'MAIN', // Inject into page context, not isolated world
+      func: () => {
+        // Check if already patched
+        if (window.__nanoHistoryPatched) return;
+        window.__nanoHistoryPatched = true;
+
+        // Dispatch custom event that can be received by the isolated world content script
+        // Custom events on window can cross the isolation boundary
+        const notifyHistoryChange = () => {
+          window.dispatchEvent(new CustomEvent('nano-history-change', {
+            detail: { timestamp: Date.now() }
+          }));
+        };
+
+        const originalPushState = history.pushState;
+        const originalReplaceState = history.replaceState;
+
+        history.pushState = function(...args) {
+          const ret = originalPushState.apply(this, args);
+          notifyHistoryChange();
+          return ret;
+        };
+
+        history.replaceState = function(...args) {
+          const ret = originalReplaceState.apply(this, args);
+          notifyHistoryChange();
+          return ret;
+        };
+      }
+    });
+  } catch (error) {
+    // Silently fail for system pages or pages where injection is not allowed
+    // This is expected for chrome:// pages, extension pages, etc.
+  }
+}
+
+/**
  * Handle messages from other extension components
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -181,5 +310,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           chrome.runtime.sendMessage(pendingAction);
           pendingAction = null;
       }
+  } else if (message.action === 'INJECT_HISTORY_PATCHER') {
+    // Inject history patcher when content script requests it
+    if (sender?.tab?.id) {
+      injectHistoryPatcher(sender.tab.id).catch(() => {
+        // Silently fail - injection may not be allowed on some pages
+      });
+    }
+  } else if (message.action === 'OFFSCREEN_WARMUP') {
+    // Forward OFFSCREEN_WARMUP messages to the offscreen document
+    // Skip forwarding if the message is already from the offscreen document (avoid loop)
+    const isFromOffscreen = sender?.url?.includes('offscreen/offscreen.html');
+    if (isFromOffscreen) {
+      // Message is from offscreen document, don't forward (likely a response or internal message)
+      return false;
+    }
+    
+    // Forward to offscreen document and relay the response back to the original sender
+    chrome.runtime.sendMessage(message)
+      .then((response) => {
+        sendResponse(response);
+      })
+      .catch((error) => {
+        sendResponse({ 
+          status: 'error', 
+          warmupStatus: 'error', 
+          warmupError: error?.message || 'Failed to communicate with offscreen document' 
+        });
+      });
+    return true; // Indicate we will send a response asynchronously
+  }
+});
+
+// Inject history patcher on tab updates (for SPA navigation)
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === 'complete' && tab.url && /^https?:/.test(tab.url)) {
+    injectHistoryPatcher(tabId).catch(() => {
+      // Silently fail - injection may not be allowed on some pages
+    });
   }
 });

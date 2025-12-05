@@ -105,6 +105,16 @@ export default [
       "space-before-blocks": "warn",
       "space-infix-ops": "warn"
     }
+  },
+  {
+    // File-specific overrides for ui/core.js
+    // Allow intentional omission of stop button disable in restricted state
+    // (stop button must remain enabled when busy, even on system pages)
+    files: ["ui/core.js"],
+    rules: {
+      "no-warning-comments": "off",
+      "no-unused-expressions": "off"
+    }
   }
 ];
 

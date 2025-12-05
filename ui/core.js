@@ -6,6 +6,7 @@ import { VirtualScroller } from '../utils/virtual-scroll.js';
 let els = {};
 let lastStatus = UI_MESSAGES.CHECKING;
 let isSystemBusy = false;
+let isRestricted = false;
 let currentModelStatus = null;
 
 // Container elements for centralized state
@@ -250,6 +251,21 @@ export function applyTheme(theme) {
   }
 }
 
+// Centralized button state management
+function updateStopButtonState() {
+  // Stop button: enabled when busy (to allow stopping), disabled when not busy
+  // Note: Stop button state is independent of restricted state - users must be able
+  // to stop ongoing operations even on system pages
+  if (els.stop) els.stop.disabled = !isSystemBusy;
+}
+
+function updatePrimaryButtonsState() {
+  // Primary buttons (ask/sum): disabled when busy OR restricted
+  const disablePrimary = isSystemBusy || isRestricted;
+  if (els.askBtn) els.askBtn.disabled = disablePrimary;
+  if (els.sumBtn) els.sumBtn.disabled = disablePrimary;
+}
+
 // Busy state
 export function setBusy(isBusy) {
   isSystemBusy = isBusy;
@@ -259,10 +275,9 @@ export function setBusy(isBusy) {
   if (chatCardEl) chatCardEl.classList.toggle('is-streaming', isBusy);
   if (inputCardEl) inputCardEl.classList.toggle('is-busy', isBusy);
 
-  // Button states still need explicit toggling for accessibility
-  if (els.askBtn) els.askBtn.disabled = isBusy;
-  if (els.sumBtn) els.sumBtn.disabled = isBusy;
-  if (els.stop) els.stop.disabled = !isBusy;
+  // Update button states using centralized functions
+  updatePrimaryButtonsState();
+  updateStopButtonState();
 
   if (els.avail) {
     els.avail.textContent = isBusy ? UI_MESSAGES.THINKING : lastStatus;
@@ -276,18 +291,26 @@ export function setStatusText(text) {
   }
 }
 
-export function setRestrictedState(isRestricted) {
+export function setRestrictedState(isRestrictedState) {
+  isRestricted = isRestrictedState;
   const interactive = [
     els.input, els.askBtn, els.sumBtn, els.mic, els.attachBtn, els.templatesTrigger
   ];
 
   if (isRestricted) {
+    // Disable all interactive elements on system pages
     interactive.forEach(el => { if (el) el.disabled = true; });
     if (els.input) els.input.placeholder = UI_MESSAGES.INPUT_PLACEHOLDER_DISABLED;
+    // Update button states using centralized functions (ensures stop button is correct)
+    updatePrimaryButtonsState();
+    updateStopButtonState();
     setStatusText(UI_MESSAGES.SYSTEM_PAGE);
   } else {
-    interactive.forEach(el => { if (el) el.disabled = false; });
-    if (els.stop) els.stop.disabled = !isSystemBusy;
+    // Re-enable interactive elements based on busy state
+    interactive.forEach(el => { if (el) el.disabled = isSystemBusy; });
+    // Update button states using centralized functions
+    updatePrimaryButtonsState();
+    updateStopButtonState();
     if (els.input) els.input.placeholder = UI_MESSAGES.INPUT_PLACEHOLDER;
     setStatusText(lastStatus === UI_MESSAGES.SYSTEM_PAGE ? UI_MESSAGES.READY : lastStatus);
   }
@@ -325,6 +348,7 @@ function formatWarmupStatus(status) {
   if (status === 'awaiting-download') return 'waiting for download';
   if (status === 'error') return 'failed';
   if (status === 'unavailable') return 'unavailable';
+  if (status === 'idle-unloaded') return 'released (idle)';
   if (status === 'running') return 'running...';
   return '';
 }
@@ -486,6 +510,13 @@ export function setLanguageSelection(lang, label) {
   if (trigger) {
     trigger.textContent = label || lang;
     trigger.dataset.selectedLang = lang;
+  }
+}
+
+export function setLanguageNote(note) {
+  const noteEl = document.getElementById('language-guidance');
+  if (noteEl && typeof note === 'string') {
+    noteEl.textContent = note;
   }
 }
 

@@ -4,10 +4,10 @@
  * Wires up UI event bindings and bootstraps the application.
  */
 
-import * as UI from './ui/index.js';
-import * as ChatHandlers from './handlers/chat-handlers.js';
-import * as AttachmentHandlers from './handlers/attachment-handlers.js';
-import * as SettingsHandlers from './handlers/settings-handlers.js';
+import * as UI from '../ui/index.js';
+import * as ChatHandlers from '../handlers/chat-handlers.js';
+import * as AttachmentHandlers from '../handlers/attachment-handlers.js';
+import * as SettingsHandlers from '../handlers/settings-handlers.js';
 
 function bind(selector, event, handler) {
   const el = document.querySelector(selector);
@@ -65,6 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     { sel: '#close-settings', ev: 'click', fn: SettingsHandlers.handleCloseSettings },
     { sel: '#save-settings', ev: 'click', fn: SettingsHandlers.handleSaveSettings },
     { sel: '#settings-modal', ev: 'click', fn: ChatHandlers.handleModalClick },
+    { sel: '#settings-modal', ev: 'click', fn: SettingsHandlers.handleSettingsTabClick },
     { sel: '#refresh-diagnostics', ev: 'click', fn: SettingsHandlers.handleDiagnosticsRefresh },
     { sel: '#warmup-now', ev: 'click', fn: SettingsHandlers.handleWarmupClick },
 
@@ -103,6 +104,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       setTimeout(() => {
         ChatHandlers.refreshAvailability({ forceCheck: true });
       }, 1000);
+    } else if (message.action === 'OFFSCREEN_WARMUP_PROGRESS') {
+      const pct = typeof message.percent === 'number' ? Math.max(0, Math.min(100, Math.round(message.percent))) : null;
+      const status = pct !== null ? `Downloading model... ${pct}%` : 'Downloading model...';
+      UI.setStatusText(status);
+      const statusEl = document.getElementById('model-status');
+      if (statusEl) statusEl.textContent = status;
     }
   });
 

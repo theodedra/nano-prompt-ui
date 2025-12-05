@@ -33,6 +33,7 @@ export {
   restoreStopButtonState,
   focusInput,
   setLanguageSelection,
+  setLanguageNote,
   setThemeSelection,
   syncSettingsForm,
   getSettingsFormValues,

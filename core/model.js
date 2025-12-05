@@ -17,6 +17,7 @@ import {
   DEFAULT_SETTINGS,
   TITLE_GENERATION_PROMPT,
   LANGUAGE_NAMES,
+  PROMPT_API_OPTIMIZED_LANGUAGES,
   getSettingOrDefault
 } from '../config/constants.js';
 
@@ -196,8 +197,9 @@ class LocalAI {
     try {
       session = await this.engine.create({
         ...MODEL_CONFIG,
-        systemPrompt: ' '
+        systemPrompt: 'Warmup'
       });
+      await session.prompt('ping');
       this.lastPrimedAt = Date.now();
       return true;
     } finally {
@@ -316,18 +318,22 @@ async function clearPageModelSessions(sessionId = null) {
  */
 function getSessionConfig(settings) {
   const userLanguage = getSettingOrDefault(settings, 'language');
-  const supportedLanguages = ['en', 'es', 'ja'];
-  const language = supportedLanguages.includes(userLanguage) ? userLanguage : 'en';
+  // Validate language against Prompt API supported languages to prevent API failures.
+  // The Prompt API treats languages as a preference hint, but unsupported codes may
+  // cause errors or be silently ignored. Fall back to English for unsupported languages.
+  const languageHint = PROMPT_API_OPTIMIZED_LANGUAGES.includes(userLanguage)
+    ? userLanguage
+    : DEFAULT_SETTINGS.language;
 
   return {
     topK: settings.topK,
     temperature: settings.temperature,
     systemPrompt: settings.systemPrompt || DEFAULT_SETTINGS.systemPrompt,
     expectedInputs: [
-      { type: 'text', languages: [language] },
+      { type: 'text', languages: [languageHint] },
       { type: 'image' }
     ],
-    expectedOutputs: [{ type: 'text', format: 'plain-text', languages: [language] }]
+    expectedOutputs: [{ type: 'text', format: 'plain-text', languages: [languageHint] }]
   };
 }
 
@@ -384,40 +390,61 @@ export async function getDiagnostics(cached = {}) {
  */
 export async function warmUpModel() {
   const now = Date.now();
-  const availability = await localAI.getAvailability();
-  let warmupStatus = 'unavailable';
+  let warmupStatus = 'error';
   let warmupError = '';
+  let usedOffscreen = false;
 
-  if (!localAI.engine || availability === 'no') {
-    warmupError = 'Prompt API not available in this Chrome build.';
-  } else if (availability === 'after-download' || availability === 'downloading') {
-    try {
-      await localAI.ensureModelDownloaded();
-      await localAI.prime();
-      warmupStatus = 'success';
-    } catch (e) {
-      warmupStatus = 'awaiting-download';
-      warmupError = e?.message || 'Model is still downloading.';
-    }
-  } else {
-    try {
-      await localAI.prime();
-      warmupStatus = 'success';
-    } catch (e) {
-      warmupStatus = 'error';
-      warmupError = e?.message || 'Warmup failed';
-    }
+  async function warmUpViaOffscreen() {
+    return chrome.runtime.sendMessage({ action: 'OFFSCREEN_WARMUP', force: true, withProgress: true });
   }
 
-  const diag = await saveDiagnosticsState({
-    availability,
-    availabilityCheckedAt: now,
-    lastWarmupAt: now,
-    lastWarmupStatus: warmupStatus,
-    lastWarmupError: warmupError
+  try {
+    const res = await warmUpViaOffscreen();
+    warmupStatus = res?.warmupStatus || 'success';
+    warmupError = res?.warmupError || '';
+    usedOffscreen = true;
+  } catch (offscreenError) {
+    warmupError = offscreenError?.message || 'Warmup failed';
+    // Fallback: local priming path
+    try {
+      const availability = await localAI.getAvailability();
+      if (!localAI.engine || availability === 'no') {
+        warmupStatus = 'unavailable';
+        warmupError = 'Prompt API not available in this Chrome build.';
+      } else {
+        if (availability === 'after-download' || availability === 'downloading') {
+          await localAI.ensureModelDownloaded();
+        }
+        await localAI.prime();
+        warmupStatus = 'success';
+        warmupError = '';
+      }
+    } catch (fallbackError) {
+      warmupStatus = warmupStatus === 'unavailable' ? 'unavailable' : 'error';
+      warmupError = fallbackError?.message || 'Warmup failed';
+    }
+  } finally {
+    // Always save diagnostics state regardless of which warmup path was used
+    await saveDiagnosticsState({
+      lastWarmupAt: now,
+      lastWarmupStatus: warmupStatus,
+      lastWarmupError: warmupError
+    });
+  }
+
+  const availabilityResult = await checkAvailability({ forceCheck: true });
+  const diag = await getDiagnostics({
+    availability: availabilityResult.status,
+    availabilityCheckedAt: availabilityResult.checkedAt
   });
 
-  return { status: availability, checkedAt: now, diag, warmupStatus, warmupError };
+  return {
+    status: availabilityResult.status,
+    checkedAt: availabilityResult.checkedAt,
+    diag,
+    warmupStatus,
+    warmupError
+  };
 }
 
 /**

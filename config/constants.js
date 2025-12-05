@@ -77,7 +77,7 @@ export const DEFAULT_SETTINGS = {
   topK: 64, // Default diversity setting (1-128, 64 is balanced)
   systemPrompt: 'You are a helpful assistant. Provide thorough, detailed responses.',
   tone: 'balanced',
-  language: 'en', // Default language: English (en, es, ja supported)
+  language: 'en', // Default language: English (UI can expose additional options)
   theme: 'auto' // Theme preference: 'auto' (system), 'dark', or 'light'
 };
 
@@ -189,10 +189,23 @@ export const LANGUAGE_LABELS = {
   'hi': 'हिन्दी (Hindi)'
 };
 
+// Languages with best-documented Prompt API performance (hint-only, not a restriction)
+export const PROMPT_API_OPTIMIZED_LANGUAGES = ['en', 'es', 'ja'];
+
+// Human-readable names for display/tooling; keep in sync with LANGUAGE_LABELS keys
 export const LANGUAGE_NAMES = {
   'en': 'English',
   'es': 'Spanish',
-  'ja': 'Japanese'
+  'fr': 'French',
+  'de': 'German',
+  'it': 'Italian',
+  'pt': 'Portuguese',
+  'ru': 'Russian',
+  'zh': 'Chinese',
+  'ja': 'Japanese',
+  'ko': 'Korean',
+  'ar': 'Arabic',
+  'hi': 'Hindi'
 };
 
 export const THEME_LABELS = {

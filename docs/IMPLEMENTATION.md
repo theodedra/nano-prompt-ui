@@ -23,6 +23,8 @@ Complete technical documentation for NanoPromptUI Chrome extension features and 
 15. [HTML Sanitization Trade-offs](#html-sanitization-trade-offs)
 16. [Performance Architecture](#performance-architecture)
 17. [Fallback Execution Strategy](#fallback-execution-strategy)
+18. [Offscreen Warmup & Session Keeper](#offscreen-warmup--session-keeper)
+19. [System Page Lock & UI Disable Rules](#system-page-lock--ui-disable-rules)
 
 ---
 
@@ -1102,29 +1104,32 @@ export function estimateTokens(text) {
 
 ---
 
-## SPA Cache Invalidation
+## SPA Context Extraction & Cache Invalidation
 
 ### Overview
 
-Content scripts cache page scrapes for 30 seconds. Single Page Applications (SPAs) that change content without full navigation require cache invalidation.
+The context engine now uses a deep shadow walker with SPA quiescence detection to capture meaningful content from modern apps before the model prompt is built.
 
 **File:** `content.js`
 
-### Detection Strategy
+### Extraction Pipeline
 
-1. **Pathname tracking** - Invalidate when `window.location.pathname` changes
-2. **popstate listener** - Invalidate on browser back/forward navigation
-3. **URL change detection** - Invalidate when full URL changes
+1. **Quiescence wait** – A `MutationObserver` waits for ~200ms of no DOM mutations (max ~1.5s) so hydration/route changes settle before scraping.
+2. **Deep traversal** – Recursive walk that:
+   - Descends into open **shadow roots**
+   - Follows **slot assigned nodes**
+   - Traverses **same-origin iframes**
+   - Preserves **heading/block boundaries** for better summaries
+3. **Visibility and pruning** – Short-circuits invisible branches and skips high link-density/nav blocks to keep noise out.
+4. **Noise filtering** – Drops short text nodes, excluded tags, and common noise phrases; dedupes paragraphs and caps total paragraphs.
+5. **Selection priority** – If the user has a selection, it is returned immediately (no walk).
+6. **Budget guard** – Enforces a ~12k char cap with a small safety margin before returning the cleaned text.
 
-```javascript
-// Track pathname for SPA navigation detection (History API)
-let lastPathname = window.location.pathname;
+### Cache & SPA Detection
 
-// Invalidate cache on popstate (browser back/forward)
-window.addEventListener('popstate', () => {
-  lastScrapeCache = { url: '', ts: 0, payload: null };
-});
-```
+- **Cache TTL:** 30s per URL.
+- **Invalidation:** Resets on `popstate`, `pushState`/`replaceState` (history change), URL change, or pathname change.
+- **Async messaging:** `GET_CONTEXT` handler is fully async to accommodate the quiescence delay and deeper walk.
 
 ---
 
@@ -1213,11 +1218,11 @@ const html = msg.htmlCache || markdownToHtml(msg.text);
 
 ## Performance Architecture
 
-### Lazy Visibility Evaluation (`content.js`)
-To prevent "Layout Thrashing" on heavy SPAs, page scraping uses a lazy evaluation strategy:
-1.  **Filter Cheaply First:** Reject nodes based on tag name and text length first.
-2.  **Check Visibility Last:** Only calculate `checkVisibility()` (expensive) if the node looks like valid content.
-3.  **Time Budget:** The scraper enforces a strict 500ms execution cap to prevent freezing the tab on massive DOMs.
+### Context Scraping (`content.js`)
+- **Quiescence-first:** Wait for DOM stability before scraping to avoid half-hydrated content.
+- **Deep shadow walk:** Recurses through shadow roots, slots, and same-origin iframes; preserves headings/blocks.
+- **Noise-aware:** High link-density blocks and excluded tags are pruned early; dedupes paragraphs; caps total paragraphs and chars.
+- **Visibility-last:** Cheap filters run before expensive `checkVisibility` to reduce layout thrash.
 
 ### Event Delegation for Hover (`ui/core.js`)
 Chat hover uses event delegation instead of per-message listeners:
@@ -1240,6 +1245,24 @@ To prevent websites from detecting the extension or hijacking sessions:
 
 ---
 
+## Offscreen Warmup & Session Keeper
+
+- Offscreen host: `offscreen/offscreen.html` + `offscreen/offscreen.js`.
+- Lifecycle: `background.js` ensures the offscreen doc exists on install/startup and delegates warm-up there before legacy warmup. The keeper warms the model with a dummy prompt, reports progress (`OFFSCREEN_WARMUP_PROGRESS`), and keeps a base session alive; prompts can clone this base to avoid KV leakage.
+- Unified warmup: the Settings “Warm up” button and startup flow route through the offscreen keeper first, with a local priming fallback only if offscreen messaging fails.
+- Prime behavior: `localAI.prime()` now runs a dummy prompt to force delegate/shader init when it is used as a fallback.
+- Keep-alive/idle: the keeper periodically re-primes if evicted, releases the base session after extended idle/lock (via `chrome.idle`), and re-warms on activity to balance RAM use with latency.
+- Fallback order (core/model.js): Extension streaming → Offscreen prompt (with re-warm retry if destroyed) → Page-context prompt (only on http/https tabs with `window.ai`).
+
+---
+
+## System Page Lock & UI Disable Rules
+
+- System/privileged pages (`chrome://`, `edge://`) set a restricted state. Primary controls (Ask, Summarize, mic, attach) remain disabled even after a prompt completes.
+- Busy state respects restriction: Ask/Summarize stay disabled if either busy or restricted; Stop is only enabled while busy.
+- Status chip shows “System Page” and inputs swap to a disabled placeholder; menus remain closable but primary actions are blocked.
+
+---
 ## References
 
 - [Chrome Prompt API Documentation](https://developer.chrome.com/docs/ai/prompt-api)
@@ -1249,4 +1272,4 @@ To prevent websites from detecting the extension or hijacking sessions:
 
 ---
 
-*Last Updated: 2025-12-04 (v1.5.0)*
+*Last Updated: 2025-12-05 (v1.5.0)*

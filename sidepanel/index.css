@@ -299,7 +299,9 @@ body {
   padding: 24px; 
   border-radius: 16px; 
   border: none; 
-  width: 320px; 
+  width: 380px; 
+  max-width: 92vw;
+  max-height: 90vh;
   display: flex; 
   flex-direction: column; 
   gap: 16px;
@@ -312,6 +314,11 @@ body {
   display: flex; 
   justify-content: space-between; 
   align-items: center;
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 2;
+  padding-bottom: var(--space-2);
 }
 
 .modal-card h2 { 
@@ -325,6 +332,67 @@ body {
   width: 500px; 
   max-height: 80vh; 
   overflow-y: auto; 
+}
+
+.modal-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-right: 4px;
+}
+
+.settings-tabs {
+  display: flex;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+  padding: 4px 0 2px;
+}
+
+.tab-button {
+  flex: 1;
+  border: none;
+  background: var(--surface-2);
+  color: var(--on-bg);
+  border-radius: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--font-sm);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.tab-button:hover {
+  background: var(--surface-hover);
+}
+
+.tab-button.is-active {
+  border: 1px solid #b8b8b8; /* match Save button tone */
+  background: var(--surface-2);
+  color: var(--on-bg);
+}
+
+.settings-panels {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tab-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tab-panel:not(.is-active) {
+  display: none !important;
+}
+
+.settings-footer {
+  margin-top: 0;
 }
 
 /* ============================================================================
@@ -1386,6 +1454,13 @@ input[type="range"] {
   accent-color: var(--on-bg); 
 }
 
+.field-note {
+  margin: var(--space-2) 0 0;
+  font-size: var(--font-sm);
+  color: var(--on-bg-dim);
+  line-height: 1.4;
+}
+
 /* Info note - section card pattern */
 .info-note {
   background: var(--surface-2);
@@ -1735,3 +1810,4 @@ input[type="range"] {
   gap: var(--space-3);
   flex-shrink: 0;
 }
+

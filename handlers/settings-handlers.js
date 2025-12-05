@@ -6,11 +6,32 @@
 
 import * as Controller from '../controller/controller.js';
 import * as Model from '../core/model.js';
-import { getSettingOrDefault, LANGUAGE_LABELS, THEME_LABELS } from '../config/constants.js';
+import {
+  getSettingOrDefault,
+  LANGUAGE_LABELS,
+  THEME_LABELS,
+  PROMPT_API_OPTIMIZED_LANGUAGES
+} from '../config/constants.js';
 import { getSetupStatus } from '../core/setup-guide.js';
 import { toast } from '../utils/toast.js';
 import * as UI from '../ui/index.js';
 import { escapeHtml } from '../utils/utils.js';
+
+const SETTINGS_TABS = ['general', 'diagnostics'];
+
+function updateLanguageGuidance(lang) {
+  const isOptimized = PROMPT_API_OPTIMIZED_LANGUAGES.includes(lang);
+  const langLabel = LANGUAGE_LABELS[lang] || lang || 'Selected language';
+
+  if (isOptimized) {
+    UI.setLanguageNote('Optimized for English, Spanish, and Japanese. Gemini Nano will still attempt other languages.');
+    return;
+  }
+
+  UI.setLanguageNote(
+    `${langLabel} selected. Translation uses Chrome's Translation API when available. General chat works best in English, Spanish, or Japanese but will still attempt this language.`
+  );
+}
 
 export function handleOpenSettings() {
   UI.openSettingsModal();
@@ -27,8 +48,10 @@ export function handleOpenSettings() {
     theme: currentTheme,
     themeLabel: THEME_LABELS[currentTheme] || THEME_LABELS.auto
   });
+  updateLanguageGuidance(currentLang);
 
   renderDiagnosticsPanel();
+  setActiveSettingsTab('general');
 }
 
 async function renderDiagnosticsPanel() {
@@ -51,6 +74,7 @@ export function handleLanguageSelect(event) {
   const langText = target.textContent;
 
   UI.setLanguageSelection(lang, langText);
+  updateLanguageGuidance(lang);
   UI.closeMenu('language');
 }
 
@@ -166,6 +190,32 @@ export async function handleSaveSettings() {
   Controller.updateAvailabilityDisplay(result.status, result.checkedAt, result.diag);
 
   toast.success('Settings saved');
+}
+
+function setActiveSettingsTab(tab) {
+  SETTINGS_TABS.forEach((name) => {
+    const isActive = name === tab;
+    const tabButton = document.getElementById(`settings-tab-${name}`);
+    const panel = document.getElementById(`settings-panel-${name}`);
+    if (tabButton) {
+      tabButton.classList.toggle('is-active', isActive);
+      tabButton.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      tabButton.tabIndex = isActive ? 0 : -1;
+    }
+    if (panel) {
+      panel.classList.toggle('is-active', isActive);
+      panel.hidden = !isActive;
+    }
+  });
+}
+
+export function handleSettingsTabClick(event) {
+  const target = event.target.closest('[data-tab]');
+  if (!target) return;
+  event.preventDefault();
+  const tab = target.dataset.tab;
+  if (!tab || !SETTINGS_TABS.includes(tab)) return;
+  setActiveSettingsTab(tab);
 }
 
 export async function handleOpenSetupGuide() {

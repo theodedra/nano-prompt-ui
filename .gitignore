@@ -25,6 +25,9 @@ dist/
 build/
 *.zip
 
+# Resources
+resources/
+
 # Environment files
 .env
 .env.local

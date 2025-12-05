@@ -112,6 +112,11 @@ export function enforceContextLimits(text = '') {
   // Avoid double-tagging previously truncated text
   if (clean.includes(UI_MESSAGES.TRUNCATED.trim())) return clean;
 
+  const budgeted = sliceToTokenBudget(clean, LIMITS.MAX_CONTEXT_TOKENS);
+  // Only return early if sliceToTokenBudget found content that fits
+  // If it returns empty string (no paragraphs fit), fall through to smartTruncate
+  if (budgeted && budgeted.length > 0) return budgeted;
+
   return smartTruncate(clean, LIMITS.MAX_CONTEXT_TOKENS);
 }
 
@@ -136,6 +141,37 @@ function smartTruncate(text, maxTokens) {
   }
 
   return truncated + UI_MESSAGES.TRUNCATED;
+}
+
+/**
+ * Keep whole paragraphs until the token budget is met to avoid mid-sentence cuts.
+ * @param {string} text
+ * @param {number} maxTokens
+ * @returns {string}
+ */
+function sliceToTokenBudget(text, maxTokens) {
+  if (!text) return '';
+  const paragraphs = text.split(/\n{2,}/);
+  const kept = [];
+  let tokens = 0;
+  let stoppedEarly = false;
+
+  for (let i = 0; i < paragraphs.length; i++) {
+    const para = paragraphs[i].trim();
+    if (!para) continue;
+    const paraTokens = estimateTokens(para);
+    if (tokens + paraTokens > maxTokens) {
+      stoppedEarly = true;
+      break;
+    }
+    kept.push(para);
+    tokens += paraTokens;
+  }
+
+  if (!kept.length) return '';
+  const joined = kept.join('\n\n');
+  // Add truncation marker only if we stopped early (more paragraphs exist that couldn't fit)
+  return joined + (stoppedEarly ? UI_MESSAGES.TRUNCATED : '');
 }
 
 /**

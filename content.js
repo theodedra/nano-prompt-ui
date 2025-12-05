@@ -10,27 +10,31 @@ const SCRAPING_CONSTANTS = {
     '[role="main"]',
     '#main',
     '#content',
+    'article',
+    '[role="article"]',
     '.jobs-search-results-list',
     '.job-view-layout',
-    'article',
     '.feed-shared-update-v2'
   ],
-  // Added IMG, VIDEO, SVG to exclude list to save processing time
-  EXCLUDED_TAGS: ['SCRIPT', 'STYLE', 'NOSCRIPT', 'NAV', 'FOOTER', 'BUTTON', 'SVG', 'PATH', 'IMG', 'VIDEO'],
+  EXCLUDED_TAGS: ['SCRIPT', 'STYLE', 'NOSCRIPT', 'NAV', 'FOOTER', 'BUTTON', 'SVG', 'PATH', 'IMG', 'VIDEO', 'CANVAS'],
   NOISE_PHRASES: [
     'Jump to', 'Skip to', 'main content', 'accessibility',
     'Easy Apply', 'connections work here', 'Actively reviewing',
     'Keyboard shortcuts', 'opens in a new window', 'verification'
-    // REMOVED: 'ago', 'results', 'Save', 'Share' (Too aggressive, causing data loss)
   ],
   MIN_CONTENT_LENGTH: 50,
   FALLBACK_MAX_LENGTH: 5000,
-  MIN_TEXT_LENGTH: 20 // Increased slightly to skip empty whitespace nodes
+  MIN_TEXT_LENGTH: 18,
+  QUIESCENCE_DELAY_MS: 200,
+  QUIESCENCE_MAX_WAIT_MS: 1500,
+  LINK_DENSITY_THRESHOLD: 0.6,
+  LINK_DENSITY_MIN_TEXT: 50,
+  MAX_PARAGRAPHS: 350
 };
 
 // Keep in sync with LIMITS.MAX_CONTEXT_TOKENS * LIMITS.TOKEN_TO_CHAR_RATIO in constants.js (≈12k chars)
 const CONTEXT_MAX_CHARS = 12_000;
-const TREEWALKER_SAFETY_MARGIN = 2_000;
+const COLLECTION_SAFETY_MARGIN = 2_000;
 const MAX_VISITED_TEXT_NODES = 8_000;
 const SCRAPE_CACHE_TTL_MS = 30_000;
 
@@ -43,16 +47,38 @@ let lastScrapeCache = {
 // Track pathname for SPA navigation detection (History API)
 let lastPathname = window.location.pathname;
 
+// Request background script to inject history patcher into page context
+// Using chrome.scripting.executeScript bypasses CSP restrictions
+if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.sendMessage) {
+  chrome.runtime.sendMessage({ action: 'INJECT_HISTORY_PATCHER' }).catch(() => {
+    // Silently fail if background script is not ready yet
+  });
+}
+
 // Invalidate cache on popstate (browser back/forward)
 window.addEventListener('popstate', () => {
+  lastScrapeCache = { url: '', ts: 0, payload: null };
+});
+
+// Listen for history changes from the injected page-context script
+// Custom events on window can cross the isolation boundary between MAIN and ISOLATED worlds
+window.addEventListener('nano-history-change', () => {
   lastScrapeCache = { url: '', ts: 0, payload: null };
 });
 
 if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.onMessage) {
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     if (request.action === 'GET_CONTEXT') {
-      const context = scrapePage();
-      sendResponse(context);
+      handleGetContext().then(sendResponse).catch((err) => {
+        console.warn('GET_CONTEXT failed', err);
+        sendResponse({
+          title: 'Page Error',
+          url: window.location.href,
+          text: '[Error reading page content]',
+          isRestricted: true
+        });
+      });
+      return true; // Keep the messaging channel open for async response
     }
   });
 } else {
@@ -83,26 +109,180 @@ function isVisible(el) {
          style.opacity !== '0';
 }
 
-function scrapePage() {
+const BLOCK_TAGS = new Set(['DIV', 'P', 'SECTION', 'ARTICLE', 'MAIN', 'UL', 'OL', 'LI']);
+const HEADING_TAGS = new Set(['H1', 'H2', 'H3', 'H4']);
+
+function normalizeText(text) {
+  return (text || '').replace(/\s+/g, ' ').trim();
+}
+
+function isHighLinkDensity(el) {
+  if (!el || !el.querySelectorAll) return false;
+  const links = el.querySelectorAll('a');
+  if (!links.length) return false;
+  const linkTextLength = Array.from(links).reduce((sum, link) => sum + (link.textContent || '').length, 0);
+  const totalTextLength = (el.textContent || '').length;
+  if (!totalTextLength || totalTextLength < SCRAPING_CONSTANTS.LINK_DENSITY_MIN_TEXT) return false;
+  return (linkTextLength / totalTextLength) > SCRAPING_CONSTANTS.LINK_DENSITY_THRESHOLD;
+}
+
+function shouldSkipElement(el) {
+  const tag = el.tagName;
+  if (SCRAPING_CONSTANTS.EXCLUDED_TAGS.includes(tag)) return true;
+  if (isHighLinkDensity(el)) return true;
+  return false;
+}
+
+function collectTextFromNode(node, parts, state) {
+  if (!node || state.charCount > state.limit || state.visited >= MAX_VISITED_TEXT_NODES) return;
+  state.visited += 1;
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    const txt = normalizeText(node.data);
+    if (txt.length < SCRAPING_CONSTANTS.MIN_TEXT_LENGTH) return;
+    const parent = node.parentElement;
+    if (parent && shouldSkipElement(parent)) return;
+    if (parent && !isVisible(parent)) return;
+    parts.push(txt);
+    state.charCount += txt.length;
+    return;
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) return;
+
+  const el = node;
+  if (shouldSkipElement(el)) return;
+  if (!isVisible(el)) return;
+
+  const tag = el.tagName;
+  if (HEADING_TAGS.has(tag)) {
+    const heading = normalizeText(el.textContent);
+    if (heading) {
+      parts.push('\n' + heading + '\n');
+      state.charCount += heading.length + 2; // Count heading text + 2 newlines
+    }
+    return; // Avoid double-counting heading children
+  }
+
+  // Preserve block boundaries
+  if (BLOCK_TAGS.has(tag)) {
+    parts.push('\n');
+    state.charCount += 1; // Count the newline character
+  }
+
+  // Traverse shadow roots
+  if (el.shadowRoot) {
+    collectTextFromNode(el.shadowRoot, parts, state);
+  }
+
+  // Slots: follow assigned nodes if present
+  if (tag === 'SLOT' && typeof el.assignedNodes === 'function') {
+    const assigned = el.assignedNodes();
+    if (assigned && assigned.length) {
+      assigned.forEach((n) => collectTextFromNode(n, parts, state));
+      return;
+    }
+  }
+
+  // Iframes (same-origin)
+  if (tag === 'IFRAME') {
+    try {
+      const doc = el.contentDocument;
+      if (doc && doc.body) {
+        collectTextFromNode(doc.body, parts, state);
+      }
+    } catch (_) {
+      // Cross-origin, ignore
+    }
+    return;
+  }
+
+  // Child nodes
+  const children = el.childNodes;
+  for (let i = 0; i < children.length; i++) {
+    collectTextFromNode(children[i], parts, state);
+    if (state.charCount > state.limit) break;
+  }
+}
+
+function dedupeParagraphs(text) {
+  const seen = new Set();
+  const out = [];
+  // Split on paragraph boundaries (2+ newlines), not individual lines
+  const paras = text.split(/\n{2,}/);
+  for (let i = 0; i < paras.length; i++) {
+    const p = paras[i].trim();
+    if (!p) continue;
+    const key = p.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+    if (out.length >= SCRAPING_CONSTANTS.MAX_PARAGRAPHS) break;
+  }
+  return out.join('\n\n');
+}
+
+function waitForQuiescence() {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    let timer = null;
+    let hardTimeout = null;
+    let finished = false;
+
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (timer) clearTimeout(timer);
+      if (hardTimeout) clearTimeout(hardTimeout);
+      observer.disconnect();
+      resolve();
+    };
+
+    const observer = new MutationObserver(() => {
+      clearTimeout(timer);
+      timer = setTimeout(finish, SCRAPING_CONSTANTS.QUIESCENCE_DELAY_MS);
+    });
+
+    observer.observe(document.body || document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true
+    });
+
+    timer = setTimeout(finish, SCRAPING_CONSTANTS.QUIESCENCE_DELAY_MS);
+    hardTimeout = setTimeout(() => {
+      if (timer) clearTimeout(timer);
+      finish();
+    }, SCRAPING_CONSTANTS.QUIESCENCE_MAX_WAIT_MS + SCRAPING_CONSTANTS.QUIESCENCE_DELAY_MS);
+  });
+}
+
+async function handleGetContext() {
+  return await scrapePage();
+}
+
+async function scrapePage() {
   try {
-    // Priority 1: User selection (Unchanged)
     const selection = window.getSelection()?.toString();
     if (selection && selection.trim().length > 0) {
-      const currentUrl = window.location.href.split('?')[0];
+      const currentUrlSel = window.location.href.split('?')[0];
       return {
         title: document.title,
-        url: currentUrl,
+        url: currentUrlSel,
         text: selection.trim(),
         isSelection: true,
         isRestricted: false
       };
     }
 
+    // Wait for SPA quiescence to avoid scraping half-hydrated DOMs
+    await waitForQuiescence();
+
     const currentUrl = window.location.href.split('?')[0];
     const currentPathname = window.location.pathname;
     const now = Date.now();
 
-    // Invalidate cache logic (Unchanged)
     if (lastPathname !== currentPathname) {
       lastScrapeCache = { url: '', ts: 0, payload: null };
       lastPathname = currentPathname;
@@ -114,87 +294,26 @@ function scrapePage() {
       return { ...lastScrapeCache.payload };
     }
 
-    // Priority 2: Main content detection
-    let root = document.body;
+    let root = document.body || document.documentElement;
     for (const sel of SCRAPING_CONSTANTS.MAIN_CONTENT_SELECTORS) {
       const el = document.querySelector(sel);
-      // OPTIMIZATION: Only check visibility on the root container, not every child loop
       if (el && isVisible(el)) {
         root = el;
         break;
       }
     }
 
-    const walker = document.createTreeWalker(
-      root,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode: (node) => {
-          // OPTIMIZATION: Filter by cheap properties (parent, tag, length) first.
-          
-          const parent = node.parentElement;
-          if (!parent) return NodeFilter.FILTER_REJECT;
+    const parts = [];
+    const charCollectionLimit = CONTEXT_MAX_CHARS + COLLECTION_SAFETY_MARGIN;
+    const state = { visited: 0, charCount: 0, limit: charCollectionLimit };
+    collectTextFromNode(root, parts, state);
 
-          const tag = parent.tagName;
-          if (SCRAPING_CONSTANTS.EXCLUDED_TAGS.includes(tag)) {
-            return NodeFilter.FILTER_REJECT;
-          }
-
-          // FIXED: Check length here so we don't yield (and count) garbage nodes in the loop
-          // Using node.data is slightly faster than textContent for text nodes
-          if (node.data.length < SCRAPING_CONSTANTS.MIN_TEXT_LENGTH) {
-            return NodeFilter.FILTER_REJECT;
-          }
-
-          return NodeFilter.FILTER_ACCEPT;
-        }
-      }
-    );
-
-    const contentParts = [];
-    let currentNode;
-    let collectedLength = 0;
-    let visitedTextNodes = 0;
-    const charCollectionLimit = CONTEXT_MAX_CHARS + TREEWALKER_SAFETY_MARGIN;
-    
-    // Safety valve: Time budget (e.g., 500ms max) to prevent freezing heavy SPAs
-    const startTime = Date.now();
-
-    while (currentNode = walker.nextNode()) {
-      if (Date.now() - startTime > 500) break; // Hard stop if scraping takes too long
-      
-      const txt = currentNode.textContent.trim();
-      
-      // Double check trim length (since acceptNode checked raw length)
-      if (txt.length < SCRAPING_CONSTANTS.MIN_TEXT_LENGTH) continue;
-
-      // Expensive Check: Visibility
-      // We only check this if the text passed filtering
-      if (!isVisible(currentNode.parentElement)) continue;
-
-      // FIXED: Only increment visited counter AFTER checking visibility.
-      // This prevents invisible nodes from eating the 8,000 node budget.
-      // We rely on the 500ms timer above to catch infinite loops in massive hidden DOMs.
-      visitedTextNodes += 1;
-      if (visitedTextNodes > MAX_VISITED_TEXT_NODES) break;
-
-      // Noise Check
-      const isNoise = SCRAPING_CONSTANTS.NOISE_PHRASES.some(phrase => txt.includes(phrase));
-      if (!isNoise) {
-        contentParts.push(txt);
-        collectedLength += txt.length;
-        if (collectedLength > charCollectionLimit) {
-          break;
-        }
-      }
-    }
-
-    let cleanText = contentParts.join('\n');
+    let cleanText = parts.join('\n');
     cleanText = cleanText.replace(/\n{3,}/g, '\n\n');
+    cleanText = dedupeParagraphs(cleanText).slice(0, CONTEXT_MAX_CHARS);
 
-    // Fallback logic (Unchanged)
     if (!cleanText || cleanText.length < SCRAPING_CONSTANTS.MIN_CONTENT_LENGTH) {
-      cleanText = document.body.innerText.substring(0, SCRAPING_CONSTANTS.FALLBACK_MAX_LENGTH);
+      cleanText = (document.body?.innerText || '').substring(0, SCRAPING_CONSTANTS.FALLBACK_MAX_LENGTH);
     }
 
     const payload = {
