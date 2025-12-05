@@ -97,6 +97,7 @@ nano-prompt-ui/
 ├── docs/                      # Documentation
 │   ├── IMPLEMENTATION.md      # Technical implementation details
 │   ├── LICENSE.txt            # The Unlicense
+│   ├── PRIVACY_POLICY.md      # Privacy policy (Chrome Web Store requirement)
 │   └── SECURITY.md            # Security model and threat analysis
 │
 ├── handlers/                  # Modular event handlers
@@ -146,6 +147,7 @@ nano-prompt-ui/
 
 ## Documentation
 
+- **Privacy Policy:** [docs/PRIVACY_POLICY.md](docs/PRIVACY_POLICY.md)
 - **Security:** [docs/SECURITY.md](docs/SECURITY.md)
 - **Implementation details:** [docs/IMPLEMENTATION.md](docs/IMPLEMENTATION.md)
 - **License:** [docs/LICENSE.txt](docs/LICENSE.txt)
